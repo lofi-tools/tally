@@ -1,0 +1,28 @@
+# RUST
+debug/
+**/target/
+**/*.rs.bk
+tarpaulin-report.html
+
+# JS
+**/node_modules/
+**/dist/
+
+# GIT
+**/*.~undo-tree~
+
+# SYSTEM, EDITORS, NIX, LOCAL TOOLS
+.vscode/
+.DS_Store
+.direnv/
+**/result
+
+# CUSTOM
+**/.cache/
+**/local/
+
+# APPLICATION
+.env
+**/.env**
+
+
