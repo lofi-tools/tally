@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+if [ ! -n "${TMUX:-}" ]; then set -euxo pipefail; fi
+export wd=$(cd $(dirname $(dirname "$0")); pwd -P)
+export wdname=$(basename ${wd})
+cd "$wd"
+
+if which direnv ; then direnv status | grep "Found RC allowed true" || direnv allow; fi
+
+# make dirs
+if [ ! -d "$wd/.cache" ]; then mkdir -p "$wd/.cache"; fi
+
+
+# auto configure vs-code/rust-analyzer to work with nix 
+if [ "$(which code)" = "/usr/local/bin/code" ]; then 
+    SETTINGS_PATH="${wd}/.vscode/settings.json"; mkdir -p $(dirname "$SETTINGS_PATH");
+    ORIGINAL_SETTINGS=$(if [ -s "$SETTINGS_PATH" ]; then cat "$SETTINGS_PATH"; else echo "{}"; fi)
+    echo "$ORIGINAL_SETTINGS" \
+        | jq ".\"rust-analyzer.server.extraEnv\".\"CARGO\" |= \"$(which cargo)\"" \
+        | jq ".\"rust-analyzer.server.extraEnv\".\"RUSTC\" |= \"$(which rustc)\""  \
+        | jq ".\"rust-analyzer.server.extraEnv\".\"RUSTFMT\" |= \"$(which rustfmt)\""  \
+        >| "${wd}/.vscode/settings.json"
+fi
+
+
+
+run() {
+    cargo run
+}
+
+
+run
+
