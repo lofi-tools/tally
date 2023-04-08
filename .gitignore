@@ -22,7 +22,6 @@ tarpaulin-report.html
 **/local/
 
 # APPLICATION
-.env
 **/.env**
 
 

@@ -21,12 +21,17 @@ if [ "$(which code)" = "/usr/local/bin/code" ]; then
         >| "${wd}/.vscode/settings.json"
 fi
 
-
-
-run() {
-    cargo run
+loaddotenv() {
+    if [ -f "${wd}/.env" ]; then 
+        source "${wd}/.env"; 
+        case "$(uname -s)" in
+            Linux*)     echo "NOT SUPPORTED YET: sourcing .env on Linux" ;; # TODO
+            Darwin*)    export export `cat "${wd}/.env" | grep -v -e '^#' -e '^[[:space:]]*$' | cut -d= -f1` ;;
+        esac
+    fi
 }
+loaddotenv
 
 
-run
+
 
