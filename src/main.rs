@@ -5,6 +5,9 @@ use crate::models::Transaction;
 pub mod models;
 pub mod nordigen;
 
+pub mod config;
+pub use config::CONFIG;
+
 fn main() {
     let transactions = [
         Transaction::sale(9240.0, (2023, 01, 13)),

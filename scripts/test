@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 source "$(dirname "$0")/setup"
 
-cargo test --package accounting
+cargo test --package accounting -- --nocapture

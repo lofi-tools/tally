@@ -34,4 +34,11 @@ loaddotenv
 
 
 
-
+case "${1:-}" in 
+    "banks")
+        curl -X GET "https://ob.nordigen.com/api/v2/institutions/?country=gb" \
+            -H  "accept: application/json" \
+            -H  "Authorization: Bearer ${NORDIGEN_ACCESS_JWT}"
+        ;;
+    *);;
+esac
