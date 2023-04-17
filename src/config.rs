@@ -6,12 +6,15 @@ lazy_static::lazy_static! {
 pub struct Config {
     pub nordigen_api_secret_id: String,
     pub nordigen_api_secret_key: String,
+    // pub nordigen_starling_requisition_ref: String,
+    pub nordigen_starling_requisition_id: String,
 }
 impl Config {
     pub fn load() -> Self {
         Config {
             nordigen_api_secret_id: expect_env_var("NORDIGEN_API_SECRET_ID"),
             nordigen_api_secret_key: expect_env_var("NORDIGEN_API_SECRET_KEY"),
+            nordigen_starling_requisition_id: expect_env_var("NORDIGEN_STARLING_REQUISITION_ID"),
         }
     }
     fn set_env(self) -> Self {

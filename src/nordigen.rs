@@ -1,3 +1,5 @@
+use crate::utils::errors_debug::WrapErr;
+use crate::utils::rand_string;
 use crate::CONFIG;
 use anyhow::anyhow as err;
 use reqwest::{Client, RequestBuilder};
@@ -7,6 +9,12 @@ use serde_json::json;
 use std::env;
 use std::error::Error;
 use std::time::Duration;
+
+pub mod starling {
+    pub const ID_STARLING: &str = "STARLING_SRLGGB3L";
+    // {"id":"STARLING_SRLGGB3L","name":"Starling Bank","bic":"SRLGGB3L","transaction_total_days":"730","countries":["GB"],"logo":"https://cdn.nordigen.com/ais/STARLING_SRLGGB3L.png"}
+}
+use self::starling::ID_STARLING;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Account {
@@ -47,32 +55,38 @@ impl NordigenClient {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .timeout(Duration::new(5, 0));
-
-        match self.access_jwt {
+        match &self.access_jwt {
             Some(access_jwt) => {
                 Ok(req_builder.header("Authorization", format!("Bearer {access_jwt}")))
             }
             None => Ok(req_builder),
         }
     }
-    // fn post_auth(&self, url: &str) -> anyhow::Result<RequestBuilder> {
-    //     let access_jwt = self.access_jwt.ok_or(err!("Not logged in"))?;
-    //     Ok(self
-    //         .post(url)
-    //         .header("Authorization", format!("Bearer {access_jwt}")))
-    // }
-    // async fn fetch()
+    fn get(&self, url: &str) -> anyhow::Result<RequestBuilder> {
+        let req_builder = self
+            .http_client
+            .get(url)
+            .header("Accept", "application/json")
+            .timeout(Duration::new(5, 0));
+        match &self.access_jwt {
+            Some(access_jwt) => {
+                Ok(req_builder.header("Authorization", format!("Bearer {access_jwt}")))
+            }
+            None => Ok(req_builder),
+        }
+    }
 
-    async fn require_login(&mut self) -> anyhow::Result<()> {
+    async fn expect_login(&self) -> anyhow::Result<()> {
         if self.access_jwt.is_none() {
-            self.login().await?;
+            // self.login().await?;
+            return Err(err!("not logged in"));
         }
         Ok(())
     }
 
     pub async fn login(&mut self) -> anyhow::Result<()> {
         let response = self
-            .post("https://ob.nordigen.com/api/v2/token/new/")
+            .post("https://ob.nordigen.com/api/v2/token/new/")?
             .json(&json!({
                 "secret_id": CONFIG.nordigen_api_secret_id,
                 "secret_key": CONFIG.nordigen_api_secret_key,
@@ -92,22 +106,90 @@ impl NordigenClient {
 
         Ok(())
     }
-    // TODO create user agreement for more than 90 days transaction history
-    pub async fn create_agreement(&mut self) -> anyhow::Result<String> {
-        self.require_login().await?;
-        let response = self
-            .post_auth("https://ob.nordigen.com/api/v2/agreements/enduser/")?
+
+    pub async fn create_agreement(&self) -> anyhow::Result<CreateAgreementResp> {
+        self.expect_login().await?;
+        let agreement = self
+            .post("https://ob.nordigen.com/api/v2/agreements/enduser/")?
             .json(&CreateAgreementBody {
-                institution_id: "STARLING_SRLGGB3L".into(),
+                institution_id: ID_STARLING.into(),
                 max_historical_days: 180,
                 access_valid_for_days: 90,
-                access_scope: vec!["balances".into(), "details".into(), "transaction".into()],
+                access_scope: vec!["balances".into(), "details".into(), "transactions".into()],
             })
-            .send()
+            .fetch::<CreateAgreementResp>()
             .await?;
 
+        Ok(agreement)
+    }
+    pub async fn create_requisition(
+        &self,
+        agreement_id: &str,
+    ) -> anyhow::Result<CreateRequisitionResp> {
+        self.expect_login().await?;
+        let requisition = self
+            .post("https://ob.nordigen.com/api/v2/requisitions/")?
+            .json(&CreateRequisitionBody {
+                redirect: "http://localhost:2345".to_string(),
+                institution_id: ID_STARLING.to_string(),
+                reference: rand_string(8),
+                agreement: agreement_id.to_string(),
+                user_language: "EN".to_string(),
+            })
+            .fetch::<CreateRequisitionResp>()
+            .await?;
+
+        Ok(requisition)
+    }
+
+    pub async fn list_accounts(&self, requisition_id: &str) -> anyhow::Result<ListAccountsResp> {
+        self.expect_login().await?;
+
+        let accounts = self
+            .get(&format!(
+                "https://ob.nordigen.com/api/v2/requisitions/{requisition_id}/"
+            ))?
+            .fetch::<ListAccountsResp>()
+            .await?;
+
+        Ok(accounts)
+    }
+
+    pub async fn list_transactions(
+        &self,
+        account_id: &str,
+    ) -> anyhow::Result<ListTransactionsResp> {
         todo!()
     }
+
+    // async fn fetch_bank_transactions() -> Result<(), Box<dyn Error>> {
+    //     // Read the API key from the environment variable
+    //     let api_key = env::var("NORDIGEN_API_KEY")?;
+
+    //     // Set up the request
+    //     let account_id = "123456"; // Replace with your account ID
+    //     let url = format!(
+    //         "https://ob.nordigen.com/api/accounts/{}/transactions",
+    //         account_id
+    //     );
+    //     let client = reqwest::Client::new();
+    //     let response = client
+    //         .get(&url)
+    //         .header("Authorization", &format!("Bearer {}", api_key))
+    //         .send()
+    //         .await?;
+
+    //     // Parse the response
+    //     let response_text = response.text().await?;
+    //     let transactions_response: TransactionsResponse = serde_json::from_str(&response_text)?;
+
+    //     // Print the transactions
+    //     for transaction in transactions_response.transactions {
+    //         println!("{:?}", transaction);
+    //     }
+
+    //     Ok(())
+    // }
 }
 
 #[derive(Serialize, Debug)]
@@ -117,27 +199,116 @@ pub struct CreateAgreementBody {
     pub access_valid_for_days: u32,
     pub access_scope: Vec<String>,
 }
-
-pub mod starling {
-    // {"id":"STARLING_SRLGGB3L","name":"Starling Bank","bic":"SRLGGB3L","transaction_total_days":"730","countries":["GB"],"logo":"https://cdn.nordigen.com/ais/STARLING_SRLGGB3L.png"}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateAgreementResp {
+    pub id: String,
+    // pub created: NaiveDateTime,
+    pub institution_id: String,
+    // pub max_historical_days: u32,
+    // pub access_valid_for_days: u32,
+    // pub access_scope: Vec<String>,
+    // pub accepted: Option<String>,
 }
 
-// pub trait WithAuth {
-//     fn with_jwt_auth(self) -> Self;
-// }
+#[derive(Serialize, Debug)]
+pub struct CreateRequisitionBody {
+    pub redirect: String,
+    pub institution_id: String,
+    pub reference: String,
+    pub agreement: String,
+    pub user_language: String,
+}
 
-//     fn with_jwt_auth(self) -> Self {
-//         self.header(format!("Authorization: Bearer {}"))
-//     }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateRequisitionResp {
+    pub id: String,
+    pub redirect: String,
+    pub status: String,
+    pub agreements: Option<String>,
+    pub accounts: Vec<serde_json::Value>,
+    pub reference: String,
+    pub user_language: String,
+    pub link: String,
+}
+// #[derive(Debug, Serialize, Deserialize)]
+// pub struct CreateRequisitionRespStatus {
+//     pub short: String,
+//     pub long: String,
+//     pub description: String,
 // }
+#[derive(Deserialize, Debug)]
+pub struct ListAccountsResp {
+    pub id: String,
+    pub status: String,
+    pub agreements: Option<String>,
+    pub accounts: Vec<String>,
+    pub reference: String,
+}
+
+pub mod try_transaction_resp {
+    use super::*;
+
+    pub struct Root {
+        pub transactions: Transactions,
+    }
+
+    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Transactions {
+        pub booked: Vec<Booked>,
+        pub pending: Vec<Pending>,
+    }
+
+    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Booked {
+        pub transaction_id: String,
+        pub debtor_name: Option<String>,
+        pub debtor_account: Option<DebtorAccount>,
+        pub transaction_amount: TransactionAmount,
+        pub booking_date: String,
+        pub value_date: String,
+        pub remittance_information_unstructured: String,
+        pub bank_transaction_code: Option<String>,
+    }
+
+    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DebtorAccount {
+        pub iban: String,
+    }
+
+    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TransactionAmount {
+        pub currency: String,
+        pub amount: String,
+    }
+
+    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Pending {
+        pub transaction_amount: TransactionAmount2,
+        pub value_date: String,
+        pub remittance_information_unstructured: String,
+    }
+
+    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TransactionAmount2 {
+        pub currency: String,
+        pub amount: String,
+    }
+}
+
 #[async_trait::async_trait]
 pub trait RequestBuilderExt {
-    async fn fetch<D: DeserializeOwned>(self) -> D;
+    async fn fetch<D: DeserializeOwned>(self) -> anyhow::Result<D>;
 }
 #[async_trait::async_trait]
 impl RequestBuilderExt for RequestBuilder {
     async fn fetch<D: DeserializeOwned>(self) -> anyhow::Result<D> {
-        let req = req.build()?;
+        let req = self.build()?;
         let method = req.method().clone();
         let resp = reqwest::Client::new().execute(req).await?;
         let status = resp.status();
@@ -149,36 +320,10 @@ impl RequestBuilderExt for RequestBuilder {
             "{method} {url} \n expected response with status ok, got: status: {status}, resp: {resp_text:?}",
           ));
         }
+        let deserialized: D = serde_json::from_str(&resp_text)
+            .wrap_err(&format!("failed deserializing. resp_text: {resp_text}"))?;
+        Ok(serde_json::from_str(&resp_text)?)
     }
-}
-
-async fn fetch_bank_transactions() -> Result<(), Box<dyn Error>> {
-    // Read the API key from the environment variable
-    let api_key = env::var("NORDIGEN_API_KEY")?;
-
-    // Set up the request
-    let account_id = "123456"; // Replace with your account ID
-    let url = format!(
-        "https://ob.nordigen.com/api/accounts/{}/transactions",
-        account_id
-    );
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .header("Authorization", &format!("Bearer {}", api_key))
-        .send()
-        .await?;
-
-    // Parse the response
-    let response_text = response.text().await?;
-    let transactions_response: TransactionsResponse = serde_json::from_str(&response_text)?;
-
-    // Print the transactions
-    for transaction in transactions_response.transactions {
-        println!("{:?}", transaction);
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -186,12 +331,23 @@ pub mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_login_jwt_ok() -> anyhow::Result<()> {
+    async fn test_main() -> anyhow::Result<()> {
         let mut nclient = NordigenClient::new();
         nclient.login().await?;
         assert!(nclient.access_jwt.is_some());
 
-        // let jwt = obtain_jwt().await?;
+        if CONFIG.nordigen_starling_requisition_id.is_empty() {
+            let agreement = nclient.create_agreement().await?;
+            let requisition = nclient.create_requisition(&agreement.id).await?;
+            dbg!(&requisition);
+            return Ok(());
+        }
+
+        let accounts = nclient
+            .list_accounts(&CONFIG.nordigen_starling_requisition_id)
+            .await?;
+        dbg!(&accounts);
+
         Ok(())
     }
 }

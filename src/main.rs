@@ -1,12 +1,12 @@
 use crate::models::balance_sheet::SumBalances;
 use crate::models::profit_and_loss::ProfitAndLoss;
 use crate::models::Transaction;
-
-pub mod models;
-pub mod nordigen;
+pub use config::CONFIG;
 
 pub mod config;
-pub use config::CONFIG;
+pub mod models;
+pub mod nordigen;
+pub mod utils;
 
 fn main() {
     let transactions = [
