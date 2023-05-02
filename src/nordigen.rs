@@ -6,8 +6,6 @@ use reqwest::{Client, RequestBuilder};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::env;
-use std::error::Error;
 use std::time::Duration;
 
 pub mod starling {
@@ -40,7 +38,7 @@ pub struct NordigenClient {
     pub access_jwt: Option<String>,
 }
 impl NordigenClient {
-    const API_URL_BASE: &str = "https://ob.nordigen.com/api/v2";
+    // const API_URL_BASE: &str = "https://ob.nordigen.com/api/v2";
 
     pub fn new() -> Self {
         NordigenClient {
@@ -142,54 +140,37 @@ impl NordigenClient {
         Ok(requisition)
     }
 
-    pub async fn list_accounts(&self, requisition_id: &str) -> anyhow::Result<ListAccountsResp> {
+    pub async fn list_accounts(
+        &self,
+        requisition_id: &str,
+    ) -> anyhow::Result<(Vec<AccountId>, ListAccountsResp)> {
         self.expect_login().await?;
 
-        let accounts = self
+        let resp_list_accounts = self
             .get(&format!(
                 "https://ob.nordigen.com/api/v2/requisitions/{requisition_id}/"
             ))?
             .fetch::<ListAccountsResp>()
             .await?;
 
-        Ok(accounts)
+        Ok((resp_list_accounts.accounts.clone(), resp_list_accounts))
     }
 
     pub async fn list_transactions(
         &self,
         account_id: &str,
-    ) -> anyhow::Result<ListTransactionsResp> {
-        todo!()
+    ) -> anyhow::Result<Vec<BookedTransaction>> {
+        self.expect_login().await?;
+
+        let list_transactions = self
+            .get(&format!(
+                "https://ob.nordigen.com/api/v2/accounts/{account_id}/transactions/"
+            ))?
+            .fetch::<ListTransactionsResp>()
+            .await?;
+
+        Ok(list_transactions.transactions.booked)
     }
-
-    // async fn fetch_bank_transactions() -> Result<(), Box<dyn Error>> {
-    //     // Read the API key from the environment variable
-    //     let api_key = env::var("NORDIGEN_API_KEY")?;
-
-    //     // Set up the request
-    //     let account_id = "123456"; // Replace with your account ID
-    //     let url = format!(
-    //         "https://ob.nordigen.com/api/accounts/{}/transactions",
-    //         account_id
-    //     );
-    //     let client = reqwest::Client::new();
-    //     let response = client
-    //         .get(&url)
-    //         .header("Authorization", &format!("Bearer {}", api_key))
-    //         .send()
-    //         .await?;
-
-    //     // Parse the response
-    //     let response_text = response.text().await?;
-    //     let transactions_response: TransactionsResponse = serde_json::from_str(&response_text)?;
-
-    //     // Print the transactions
-    //     for transaction in transactions_response.transactions {
-    //         println!("{:?}", transaction);
-    //     }
-
-    //     Ok(())
-    // }
 }
 
 #[derive(Serialize, Debug)]
@@ -236,70 +217,60 @@ pub struct CreateRequisitionResp {
 //     pub long: String,
 //     pub description: String,
 // }
+
 #[derive(Deserialize, Debug)]
 pub struct ListAccountsResp {
     pub id: String,
     pub status: String,
     pub agreements: Option<String>,
-    pub accounts: Vec<String>,
+    pub accounts: Vec<AccountId>,
     pub reference: String,
 }
+pub type AccountId = String;
 
-pub mod try_transaction_resp {
-    use super::*;
-
-    pub struct Root {
-        pub transactions: Transactions,
-    }
-
-    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Transactions {
-        pub booked: Vec<Booked>,
-        pub pending: Vec<Pending>,
-    }
-
-    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Booked {
-        pub transaction_id: String,
-        pub debtor_name: Option<String>,
-        pub debtor_account: Option<DebtorAccount>,
-        pub transaction_amount: TransactionAmount,
-        pub booking_date: String,
-        pub value_date: String,
-        pub remittance_information_unstructured: String,
-        pub bank_transaction_code: Option<String>,
-    }
-
-    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct DebtorAccount {
-        pub iban: String,
-    }
-
-    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct TransactionAmount {
-        pub currency: String,
-        pub amount: String,
-    }
-
-    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Pending {
-        pub transaction_amount: TransactionAmount2,
-        pub value_date: String,
-        pub remittance_information_unstructured: String,
-    }
-
-    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct TransactionAmount2 {
-        pub currency: String,
-        pub amount: String,
-    }
+#[derive(Deserialize, Debug)]
+pub struct ListTransactionsResp {
+    pub transactions: Transactions,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct Transactions {
+    pub booked: Vec<BookedTransaction>,
+    // pub pending: Vec<PendingTransaction>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BookedTransaction {
+    pub transaction_id: String,
+    pub debtor_name: Option<String>,
+    pub debtor_account: Option<DebtorAccount>,
+    pub transaction_amount: TransactionAmount,
+    pub booking_date: String,
+    pub value_date: String,
+    pub remittance_information_unstructured: String,
+    pub bank_transaction_code: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DebtorAccount {
+    pub iban: String,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionAmount {
+    pub currency: String,
+    pub amount: String,
+}
+
+// #[derive(Serialize, Deserialize, Debug)]
+// pub struct PendingTransaction {
+//     pub transaction_amount: TransactionAmount,
+//     pub value_date: String,
+//     pub remittance_information_unstructured: String,
+// }
 
 #[async_trait::async_trait]
 pub trait RequestBuilderExt {
@@ -322,7 +293,7 @@ impl RequestBuilderExt for RequestBuilder {
         }
         let deserialized: D = serde_json::from_str(&resp_text)
             .wrap_err(&format!("failed deserializing. resp_text: {resp_text}"))?;
-        Ok(serde_json::from_str(&resp_text)?)
+        Ok(deserialized)
     }
 }
 
@@ -343,10 +314,13 @@ pub mod tests {
             return Ok(());
         }
 
-        let accounts = nclient
+        let (accounts, _) = nclient
             .list_accounts(&CONFIG.nordigen_starling_requisition_id)
             .await?;
-        dbg!(&accounts);
+        for account_id in accounts.iter() {
+            let transactions = nclient.list_transactions(account_id).await?;
+            dbg!(&transactions);
+        }
 
         Ok(())
     }

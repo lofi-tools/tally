@@ -25,6 +25,7 @@ pub struct Transaction {
     from: &'static Account,
     to: &'static Account,
     amount_gbp_cent: u32,
+    #[allow(dead_code)]
     date: NaiveDate,
 }
 impl Transaction {
