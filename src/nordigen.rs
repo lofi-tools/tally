@@ -1,8 +1,11 @@
+use crate::utils;
 use crate::utils::errors_debug::WrapErr;
 use crate::utils::rand_string;
 use crate::CONFIG;
 use anyhow::anyhow as err;
+use chrono::NaiveDate;
 use reqwest::{Client, RequestBuilder};
+use rust_decimal::Decimal;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -76,8 +79,13 @@ impl NordigenClient {
 
     async fn expect_login(&self) -> anyhow::Result<()> {
         if self.access_jwt.is_none() {
-            // self.login().await?;
             return Err(err!("not logged in"));
+        }
+        Ok(())
+    }
+    async fn ensure_login(&mut self) -> anyhow::Result<()> {
+        if self.access_jwt.is_none() {
+            self.login().await?;
         }
         Ok(())
     }
@@ -171,6 +179,34 @@ impl NordigenClient {
 
         Ok(list_transactions.transactions.booked)
     }
+
+    pub async fn list_starling_transactions(&mut self) -> anyhow::Result<Vec<BookedTransaction>> {
+        self.ensure_login().await?;
+
+        if CONFIG.nordigen_starling_requisition_id.is_empty() {
+            let agreement = self.create_agreement().await?;
+            let requisition = self.create_requisition(&agreement.id).await?;
+            dbg!(&requisition);
+
+            return Err(err!("Authorization needed. Follow requisition URL to authorize Nordigen accessing Starling."));
+        }
+
+        let (accounts, _) = self
+            .list_accounts(&CONFIG.nordigen_starling_requisition_id)
+            .await?;
+        let futures = accounts
+            .iter()
+            .map(|account_id| self.list_transactions(&account_id));
+        let all_transactions = futures::future::join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<Vec<_>>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<BookedTransaction>>();
+
+        Ok(all_transactions)
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -211,12 +247,6 @@ pub struct CreateRequisitionResp {
     pub user_language: String,
     pub link: String,
 }
-// #[derive(Debug, Serialize, Deserialize)]
-// pub struct CreateRequisitionRespStatus {
-//     pub short: String,
-//     pub long: String,
-//     pub description: String,
-// }
 
 #[derive(Deserialize, Debug)]
 pub struct ListAccountsResp {
@@ -246,8 +276,9 @@ pub struct BookedTransaction {
     pub debtor_name: Option<String>,
     pub debtor_account: Option<DebtorAccount>,
     pub transaction_amount: TransactionAmount,
-    pub booking_date: String,
-    pub value_date: String,
+    pub booking_date: NaiveDate,
+    pub value_date: NaiveDate,
+    #[serde(rename = "remittanceInformationUnstructured")]
     pub remittance_information_unstructured: String,
     pub bank_transaction_code: Option<String>,
 }
@@ -262,15 +293,9 @@ pub struct DebtorAccount {
 #[serde(rename_all = "camelCase")]
 pub struct TransactionAmount {
     pub currency: String,
-    pub amount: String,
+    #[serde(deserialize_with = "utils::deserialize_decimal")]
+    pub amount: Decimal,
 }
-
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct PendingTransaction {
-//     pub transaction_amount: TransactionAmount,
-//     pub value_date: String,
-//     pub remittance_information_unstructured: String,
-// }
 
 #[async_trait::async_trait]
 pub trait RequestBuilderExt {

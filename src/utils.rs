@@ -1,5 +1,8 @@
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Deserializer};
+use std::str::FromStr;
 
 pub mod errors_debug {
     use backtrace::{Backtrace, BacktraceFrame, BacktraceSymbol};
@@ -59,4 +62,12 @@ pub fn rand_string(size: usize) -> String {
         .take(size)
         .map(char::from)
         .collect()
+}
+
+pub fn deserialize_decimal<'de, D>(deserializer: D) -> Result<Decimal, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Decimal::from_str(&s).map_err(serde::de::Error::custom)
 }

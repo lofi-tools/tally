@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use std_accounts::*;
 
 pub mod std_accounts {
@@ -22,41 +23,73 @@ pub mod std_accounts {
 // TODO make this into trait implemented by SalesTransaction (also contains link/hash of associated invoice)
 #[derive(Debug, Clone)]
 pub struct Transaction {
-    from: &'static Account,
-    to: &'static Account,
-    amount_gbp_cent: u32,
+    pub from: &'static Account,
+    pub to: &'static Account,
+    pub amount_gbp: Decimal,
     #[allow(dead_code)]
-    date: NaiveDate,
+    pub date: NaiveDate,
 }
 impl Transaction {
-    pub fn sale(amount_gbp: f64, date: (i32, u32, u32)) -> Self {
+    pub fn sale(amount_gbp: Decimal, date: NaiveDate) -> Self {
         Transaction {
             from: &SALES, // money that is owed to self
             to: &BANK,    // money that is owed by self
-            amount_gbp_cent: to_cents(amount_gbp),
-            date: NaiveDate::ymd(date.0, date.1, date.2),
+            // amount_gbp_cent: f64_to_cents(amount_gbp),
+            amount_gbp,
+            // date: NaiveDate::ymd(date.0, date.1, date.2),
+            date,
         }
     }
-    pub fn withdraw_loan(amount_gbp: f64, date: (i32, u32, u32)) -> Self {
+    pub fn withdraw_loan(amount_gbp: Decimal, date: NaiveDate) -> Self {
         Transaction {
             from: &BANK,         // owed to self
             to: &DIRECTORS_LOAN, // owed by self
-            amount_gbp_cent: to_cents(amount_gbp),
-            date: NaiveDate::ymd(date.0, date.1, date.2),
+            // amount_gbp_cent: f64_to_cents(amount_gbp),
+            amount_gbp,
+            // date: NaiveDate::ymd(date.0, date.1, date.2),
+            date,
         }
     }
-    pub fn repay_loan(amount_gbp: f64, date: (i32, u32, u32)) -> Self {
+    pub fn repay_loan(amount_gbp: Decimal, date: NaiveDate) -> Self {
         Transaction {
             from: &DIRECTORS_LOAN,
             to: &BANK,
-            amount_gbp_cent: to_cents(amount_gbp),
-            date: NaiveDate::ymd(date.0, date.1, date.2),
+            // amount_gbp_cent: f64_to_cents(amount_gbp),
+            amount_gbp,
+            // date: NaiveDate::ymd(date.0, date.1, date.2),
+            date,
+        }
+    }
+    pub fn salary(amount_gbp: Decimal, date: NaiveDate) -> Self {
+        Transaction {
+            from: &BANK,
+            to: &WAGES_NET, // WAGES_GROSS is the total paid by employer (incl NIC + taxes), WAGES_NET is what is actually transferred to the employee
+            amount_gbp,
+            date,
+        }
+    }
+    pub fn dividend(amount_gbp: Decimal, date: NaiveDate) -> Self {
+        todo!()
+    }
+    pub fn employers_nic(amount_gbp: Decimal, date: NaiveDate) -> Self {
+        todo!()
+    }
+    pub fn employee_nic(amount_gbp: Decimal, date: NaiveDate) -> Self {
+        todo!()
+    }
+    pub fn to_paye(amount_gbp: Decimal, date: NaiveDate) -> Self {
+        Transaction {
+            from: &BANK,
+            to: &PAYE,
+            amount_gbp,
+            date,
         }
     }
 }
 
-pub fn to_cents(amount: f64) -> u32 {
-    (amount * 1000.0).trunc() as u32 / 10 // TODO test
+pub fn f64_to_cents(amount: f64) -> u32 {
+    let cents = (amount * 1000.0).trunc() as u32 / 10; // TODO test
+    cents
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -78,10 +111,11 @@ impl NaiveDateExt for NaiveDate {
 pub mod balance_sheet {
     use crate::models::std_accounts::*;
     use crate::models::{Account, Transaction};
+    use rust_decimal::Decimal;
     use std::collections::HashMap;
 
     #[derive(Debug)]
-    pub struct SumBalances(pub HashMap<&'static Account, i32>);
+    pub struct SumBalances(pub HashMap<&'static Account, Decimal>);
     impl SumBalances {
         pub fn from_transactions(transactions: &[Transaction]) -> Self {
             let mut sum = SumBalances(HashMap::new());
@@ -93,10 +127,10 @@ pub mod balance_sheet {
         pub fn add_transaction(&mut self, transaction: &Transaction) {
             // taking money is called CREDIT
             // TODO prevent overflow
-            *self.0.entry(transaction.from).or_default() -= transaction.amount_gbp_cent as i32;
+            *self.0.entry(transaction.from).or_default() -= transaction.amount_gbp;
             // adding money is called DEBIT
             // TODO prevent overflow
-            *self.0.entry(transaction.to).or_default() += transaction.amount_gbp_cent as i32;
+            *self.0.entry(transaction.to).or_default() += transaction.amount_gbp;
         }
         // pub fn get(&self, account: &'static Account) -> Balance {
         //     Balance {
@@ -107,7 +141,7 @@ pub mod balance_sheet {
         pub fn asset(&self, account: &'static Account) -> Balance {
             Balance {
                 account,
-                total_gbp_cents: self.0.get(account).copied().unwrap_or_default(),
+                total_gbp: self.0.get(account).copied().unwrap_or_default(),
             }
         }
         pub fn liability(&self, account: &'static Account) -> Balance {
@@ -115,7 +149,7 @@ pub mod balance_sheet {
             //  => the liability is negative (a positive liability means the company owes money)
             Balance {
                 account,
-                total_gbp_cents: -self.0.get(account).copied().unwrap_or_default(),
+                total_gbp: -self.0.get(account).copied().unwrap_or_default(),
             }
         }
 
@@ -131,7 +165,7 @@ pub mod balance_sheet {
     #[derive(Debug)]
     pub struct Balance {
         pub account: &'static Account,
-        pub total_gbp_cents: i32,
+        pub total_gbp: Decimal,
     }
 
     #[derive(Debug)]
@@ -144,22 +178,22 @@ pub mod balance_sheet {
         // pub equity: Vec<Balance>, // TODO calculate from rest instead
     }
     impl BalanceSheet {
-        pub fn total_fixed_assets(&self) -> i32 {
-            self.fixed_assets.iter().map(|b| b.total_gbp_cents).sum()
+        pub fn total_fixed_assets(&self) -> Decimal {
+            self.fixed_assets.iter().map(|b| b.total_gbp).sum()
         }
-        pub fn total_current_assets(&self) -> i32 {
-            self.current_assets.iter().map(|b| b.total_gbp_cents).sum()
+        pub fn total_current_assets(&self) -> Decimal {
+            self.current_assets.iter().map(|b| b.total_gbp).sum()
         }
-        pub fn total_current_liabilities(&self) -> i32 {
+        pub fn total_current_liabilities(&self) -> Decimal {
             self.current_liabilities
                 .iter()
-                .map(|b| b.total_gbp_cents)
-                .sum::<i32>()
+                .map(|b| b.total_gbp)
+                .sum::<Decimal>()
         }
-        pub fn total_all_assets(&self) -> i32 {
+        pub fn total_all_assets(&self) -> Decimal {
             self.total_current_assets() + self.total_fixed_assets()
         }
-        pub fn equity(&self) -> i32 {
+        pub fn equity(&self) -> Decimal {
             self.total_all_assets() - self.total_current_liabilities()
         }
     }
@@ -183,6 +217,7 @@ pub mod balance_sheet {
 pub mod profit_and_loss {
     use crate::models::std_accounts::*;
     use crate::models::{Account, Transaction};
+    use rust_decimal::Decimal;
     use std::collections::HashMap;
 
     #[derive(Default, Debug)]
@@ -192,10 +227,10 @@ pub mod profit_and_loss {
             self.0.entry(account).or_default().push(transaction.clone())
         }
         // TODO if needed take in account direction of movement In/Out
-        pub fn total_abs(&self) -> u32 {
+        pub fn total_abs(&self) -> Decimal {
             self.0
                 .iter()
-                .map(|(_, v)| v.iter().map(|t| t.amount_gbp_cent).sum::<u32>())
+                .map(|(_, v)| v.iter().map(|t| t.amount_gbp).sum::<Decimal>())
                 .sum()
         }
     }
@@ -234,22 +269,22 @@ pub mod profit_and_loss {
         }
 
         // TODO rm once total is not abs
-        pub fn total_income(&self) -> i32 {
-            self.income.total_abs() as i32
+        pub fn total_income(&self) -> Decimal {
+            self.income.total_abs()
         }
         // TODO rm once total is not abs
-        pub fn total_direct_expenses(&self) -> i32 {
-            self.direct_expenses.total_abs() as i32
+        pub fn total_direct_expenses(&self) -> Decimal {
+            self.direct_expenses.total_abs()
         }
-        pub fn gross_profit(&self) -> i32 {
+        pub fn gross_profit(&self) -> Decimal {
             self.total_income() - self.total_direct_expenses()
         }
 
-        pub fn net_profit(&self) -> i32 {
+        pub fn net_profit(&self) -> Decimal {
             self.gross_profit()
-                - self.overheads.total_abs() as i32
-                - self.financial_expenses.total_abs() as i32
-                - self.taxes.total_abs() as i32
+                - self.overheads.total_abs()
+                - self.financial_expenses.total_abs()
+                - self.taxes.total_abs()
         }
     }
     impl std::fmt::Display for ProfitAndLoss {
