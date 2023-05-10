@@ -85,6 +85,19 @@ impl Transaction {
             date,
         }
     }
+
+    pub fn absolute(self) -> Self {
+        if self.amount_gbp.is_sign_negative() {
+            Transaction {
+                from: self.to,
+                to: self.from,
+                amount_gbp: self.amount_gbp.abs(),
+                date: self.date,
+            }
+        } else {
+            self
+        }
+    }
 }
 
 pub fn f64_to_cents(amount: f64) -> u32 {

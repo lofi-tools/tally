@@ -3,7 +3,7 @@ use crate::models::profit_and_loss::ProfitAndLoss;
 use crate::models::Transaction;
 use anyhow::anyhow as err;
 pub use config::CONFIG;
-use models::std_accounts::*;
+use models::{std_accounts::*, Account};
 use nordigen::{BookedTransaction, NordigenClient};
 
 pub mod config;
@@ -53,32 +53,55 @@ impl Transaction {
     fn from_starling(starling_tx: &BookedTransaction) -> anyhow::Result<Transaction> {
         match starling_tx {
             tx if tx.debtor_name == Some("Nigel Frank Intern".to_string()) => Ok(
-                Transaction::sale(tx.transaction_amount.amount, tx.booking_date),
+                // Transaction::sale(tx.transaction_amount.amount, tx.booking_date),
+                Transaction::to_bank(starling_tx, &SALES),
             ),
             tx if tx.remittance_information_unstructured.contains("Salary") => Ok(
-                Transaction::salary(tx.transaction_amount.amount, tx.booking_date),
+                // Transaction::salary(tx.transaction_amount.amount, tx.booking_date),
+                Transaction::to_bank(starling_tx, &WAGES_NET),
             ),
             tx if tx
                 .remittance_information_unstructured
                 .contains("Director's loan") =>
             {
-                Ok(Transaction {
-                    from: &DIRECTORS_LOAN,
-                    to: &BANK,
-                    amount_gbp: tx.transaction_amount.amount,
-                    date: tx.booking_date,
-                })
+                Ok(
+                    Transaction::to_bank(starling_tx, &DIRECTORS_LOAN),
+                    //     Transaction {
+                    //     from: &DIRECTORS_LOAN,
+                    //     to: &BANK,
+                    //     amount_gbp: tx.transaction_amount.amount,
+                    //     date: tx.booking_date,
+                    // }
+                )
             }
             tx if tx
                 .remittance_information_unstructured
                 .contains("120PZ028811752312") =>
             {
-                Ok(Transaction::to_paye(
-                    tx.transaction_amount.amount,
-                    tx.booking_date,
-                ))
+                Ok(
+                    Transaction::to_bank(starling_tx, &PAYE),
+                    // Transaction {
+                    //     from: &PAYE,
+                    //     to: &BANK, // all nordigen transactions are to the bank: positive amounts for incoming, negative amounts for outgoing
+                    //     amount_gbp: tx.transaction_amount.amount,
+                    //     date: tx.booking_date,
+                    // },
+                    //     Transaction::to_paye(
+                    //     tx.transaction_amount.amount,
+                    //     tx.booking_date,
+                    // )
+                )
             }
             other_tx => return Err(err!("no match for tx: {other_tx:?}")),
+        }
+    }
+
+    fn to_bank(nordigen_tx: &BookedTransaction, from_account: &'static Account) -> Transaction {
+        Transaction {
+            from: from_account,
+            to: &BANK, // all nordigen transactions are to the bank: positive amounts for incoming, negative amounts for outgoing
+            amount_gbp: nordigen_tx.transaction_amount.amount,
+            date: nordigen_tx.booking_date,
         }
     }
 }
