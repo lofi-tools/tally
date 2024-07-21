@@ -64,33 +64,13 @@ impl Transaction {
                 .remittance_information_unstructured
                 .contains("Director's loan") =>
             {
-                Ok(
-                    Transaction::to_bank(starling_tx, &DIRECTORS_LOAN),
-                    //     Transaction {
-                    //     from: &DIRECTORS_LOAN,
-                    //     to: &BANK,
-                    //     amount_gbp: tx.transaction_amount.amount,
-                    //     date: tx.booking_date,
-                    // }
-                )
+                Ok(Transaction::to_bank(starling_tx, &DIRECTORS_LOAN))
             }
             tx if tx
                 .remittance_information_unstructured
                 .contains("120PZ028811752312") =>
             {
-                Ok(
-                    Transaction::to_bank(starling_tx, &PAYE),
-                    // Transaction {
-                    //     from: &PAYE,
-                    //     to: &BANK, // all nordigen transactions are to the bank: positive amounts for incoming, negative amounts for outgoing
-                    //     amount_gbp: tx.transaction_amount.amount,
-                    //     date: tx.booking_date,
-                    // },
-                    //     Transaction::to_paye(
-                    //     tx.transaction_amount.amount,
-                    //     tx.booking_date,
-                    // )
-                )
+                Ok(Transaction::to_bank(starling_tx, &PAYE))
             }
             other_tx => return Err(err!("no match for tx: {other_tx:?}")),
         }
