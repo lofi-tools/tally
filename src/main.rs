@@ -1,9 +1,12 @@
-use crate::models::balance_sheet::SumBalances;
 use crate::models::profit_and_loss::ProfitAndLoss;
 use crate::models::Transaction;
 use anyhow::anyhow as err;
 pub use config::CONFIG;
-use models::{std_accounts::*, Account};
+use models::{
+    sheet3::BalanceSheet3,
+    static_data::{BANK, DIRECTORS_LOAN, PAYE_PAID, SALES, WAGES_NET},
+    Account,
+};
 use nordigen::{BookedTransaction, NordigenClient};
 
 pub mod config;
@@ -11,26 +14,34 @@ pub mod models;
 pub mod nordigen;
 pub mod utils;
 
+// TODO calculate interest on director's loan -> add interest in transaction
+// TODO transaction::repay_loan_in_currency
+// TODO ensure director's loan account is zero
+
+// TODO struct ListTransactions -> get_balance_sheet_at(date): adds interest transactions at end of months
+// TODO struct ListTransactions:
+
+// TODO BalanceSheet contains Accounts, Accounts contain BalanceChanges
+// -> calculating the balance sheet ? means classifying BalanceChanges, then going over loan accounts again for interest
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let transactions = fetch_starling_transactions().await?;
+    let extra_transactions: Vec<Transaction> = vec![
+        // Transaction::sale(9240.0, (2023, 01, 13)),
+        // Transaction::sale(8820.0, (2023, 02, 14)),
+        // Transaction::withdraw_loan(1400.0, (2023, 02, 26)),
+    ];
 
-    // let transactions = [
-    // Transaction::sale(9240.0, (2023, 01, 13)),
-    // Transaction::sale(8820.0, (2023, 02, 14)),
-    // Transaction::withdraw_loan(1400.0, (2023, 02, 26)),
-    // ];
-
-    let totals = SumBalances::from_transactions(&transactions);
-    let balance_sheet = totals.balance_sheet();
+    // let totals = BalanceTotals::from_transactions(&transactions);
+    // let balance_sheet = totals.balance_sheet();
+    let balance_sheet = BalanceSheet3::from_transactions(&transactions);
     dbg!(balance_sheet);
 
     // TODO profit and loss
     let profit_and_loss = ProfitAndLoss::from_transactions(&transactions);
     print!("{profit_and_loss}");
 
-    // TODO validate transaction amounts
-    // TODO connect to bank account
     // TODO task for bank account transfers without corresponding accounting
     // TODO assert invoice file per transaction (store in dir in git)
 
@@ -70,7 +81,7 @@ impl Transaction {
                 .remittance_information_unstructured
                 .contains("120PZ028811752312") =>
             {
-                Ok(Transaction::to_bank(starling_tx, &PAYE))
+                Ok(Transaction::to_bank(starling_tx, &PAYE_PAID))
             }
             other_tx => return Err(err!("no match for tx: {other_tx:?}")),
         }
@@ -83,5 +94,6 @@ impl Transaction {
             amount_gbp: nordigen_tx.transaction_amount.amount,
             date: nordigen_tx.booking_date,
         }
+        .to_positive_direction() // this reverses the direction of the transaction so that amounts are positive
     }
 }

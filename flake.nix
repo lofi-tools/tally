@@ -18,7 +18,7 @@
             inherit system;
             overlays = [ (import rust-overlay) ];
           };
-          customRust = pkgs.rust-bin.stable."1.77.0".default.override {
+          customRust = pkgs.rust-bin.stable."1.80.0".default.override {
             extensions = [ "rust-src" "rust-analyzer" ];
             targets = [ ];
           };
@@ -36,13 +36,14 @@
 
           devInputs = with pkgs; [
             nixpkgs-fmt
+            cargo-nextest
             # cargo-watch
             # cargo-edit
           ];
 
           scripts = with pkgs; [
             (writeScriptBin "run" ''cargo run -- "$@" '')
-            (writeScriptBin "utest" ''cargo test --workspace -- $SINGLE_TEST --nocapture '')
+            (writeScriptBin "utest" ''cargo nextest run --workspace -E '!test(nordigen)' --nocapture -- $SINGLE_TEST '')
           ];
 
         in

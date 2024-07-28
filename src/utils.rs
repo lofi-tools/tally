@@ -1,8 +1,14 @@
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer};
-use std::str::FromStr;
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+    hash::Hash,
+    str::FromStr,
+};
 
 pub mod errors_debug {
     use backtrace::{Backtrace, BacktraceFrame, BacktraceSymbol};
@@ -71,3 +77,34 @@ where
     let s = String::deserialize(deserializer)?;
     Decimal::from_str(&s).map_err(serde::de::Error::custom)
 }
+
+pub trait MapExt<K, V> {
+    fn try_get(&self, key: &K) -> anyhow::Result<&V>;
+}
+impl<K: Hash + Eq + Debug, V> MapExt<K, V> for HashMap<K, V> {
+    fn try_get(&self, key: &K) -> anyhow::Result<&V> {
+        self.get(key)
+            .ok_or(anyhow::Error::msg(format!("key not found: {key:?}")))
+    }
+}
+
+pub trait DateExt {
+    fn ymd(year: i32, month: u32, day: u32) -> Self;
+}
+impl DateExt for NaiveDate {
+    fn ymd(year: i32, month: u32, day: u32) -> Self {
+        NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    }
+}
+impl DateExt for DateTime<Utc> {
+    fn ymd(year: i32, month: u32, day: u32) -> Self {
+        let datetime =
+            NaiveDate::ymd(year, month, day).and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+        DateTime::from_naive_utc_and_offset(datetime, Utc)
+    }
+}
+
+// pub fn f64_to_cents(amount: f64) -> u32 {
+//     let cents = (amount * 1000.0).trunc() as u32 / 10; // TODO test
+//     cents
+// }
