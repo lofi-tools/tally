@@ -4,6 +4,7 @@ use static_data::{AccountId, ALL_ACCOUNTS, BANK, DIRECTORS_LOAN, PAYE_PAID, SALE
 use std::collections::HashMap;
 pub mod balance_sheet_2;
 pub mod profit_and_loss;
+pub mod sheet3;
 pub mod static_data;
 
 // TODO make this into trait implemented by SalesTransaction (also contains link/hash of associated invoice)
@@ -117,6 +118,14 @@ impl From<(f64, DateTime<Utc>)> for DateAndAmount {
         }
     }
 }
+impl From<(u32, DateTime<Utc>)> for DateAndAmount {
+    fn from((amount, date): (u32, DateTime<Utc>)) -> Self {
+        DateAndAmount {
+            amount: Decimal::from_u32(amount).unwrap(),
+            date: date.date_naive(),
+        }
+    }
+}
 
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Account {
@@ -188,8 +197,6 @@ pub struct BalanceChange {
     pub date: NaiveDate,
     pub amount: Decimal,
 }
-
-pub mod sheet3;
 
 // pub mod loan {
 //     use super::{Asset, BalanceChange};

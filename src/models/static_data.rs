@@ -136,13 +136,13 @@ pub static BORROW: Account = Account {
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
 pub struct AccountId(&'static str);
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct AllAccounts {
     pub accounts: HashMap<AccountId, Account>,
 }
 impl AllAccounts {
     pub fn with_account(mut self, account: Account) -> Self {
-        self.accounts.insert(AccountId(account.asset.0), account);
+        self.accounts.insert(account.id, account);
         self
     }
     pub fn try_get(&self, id: &AccountId) -> anyhow::Result<&Account> {

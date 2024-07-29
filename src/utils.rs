@@ -1,4 +1,5 @@
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use num_traits::FromPrimitive;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use rust_decimal::Decimal;
@@ -108,3 +109,12 @@ impl DateExt for DateTime<Utc> {
 //     let cents = (amount * 1000.0).trunc() as u32 / 10; // TODO test
 //     cents
 // }
+
+pub trait NumExt {
+    fn is_close_to(&self, other: impl Into<Decimal>) -> bool;
+}
+impl NumExt for Decimal {
+    fn is_close_to(&self, other: impl Into<Decimal>) -> bool {
+        self - other.into() < Decimal::from_f64(0.005).unwrap()
+    }
+}

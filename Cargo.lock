@@ -13,6 +13,7 @@ dependencies = [
  "file-cache",
  "futures",
  "lazy_static",
+ "num-traits",
  "rand",
  "reqwest",
  "rust_decimal",

@@ -2,11 +2,9 @@ use crate::models::profit_and_loss::ProfitAndLoss;
 use crate::models::Transaction;
 use anyhow::anyhow as err;
 pub use config::CONFIG;
-use models::{
-    sheet3::BalanceSheet3,
-    static_data::{BANK, DIRECTORS_LOAN, PAYE_PAID, SALES, WAGES_NET},
-    Account,
-};
+use models::sheet3::BalanceSheet3;
+use models::static_data::{BANK, DIRECTORS_LOAN, PAYE_PAID, SALES, WAGES_NET};
+use models::Account;
 use nordigen::{BookedTransaction, NordigenClient};
 
 pub mod config;
@@ -35,12 +33,12 @@ async fn main() -> anyhow::Result<()> {
 
     // let totals = BalanceTotals::from_transactions(&transactions);
     // let balance_sheet = totals.balance_sheet();
-    let balance_sheet = BalanceSheet3::from_transactions(&transactions);
-    dbg!(balance_sheet);
+    let balance_sheet = BalanceSheet3::now_from_transactions(&transactions);
+    println!("{balance_sheet}");
 
     // TODO profit and loss
     let profit_and_loss = ProfitAndLoss::from_transactions(&transactions);
-    print!("{profit_and_loss}");
+    // print!("{profit_and_loss}");
 
     // TODO task for bank account transfers without corresponding accounting
     // TODO assert invoice file per transaction (store in dir in git)

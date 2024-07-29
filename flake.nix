@@ -41,6 +41,10 @@
             # cargo-edit
           ];
 
+          env = {
+            RUST_BACKTRACE = "1";
+          };
+
           scripts = with pkgs; [
             (writeScriptBin "run" ''cargo run -- "$@" '')
             (writeScriptBin "utest" ''cargo nextest run --workspace -E '!test(nordigen)' --nocapture -- $SINGLE_TEST '')
@@ -49,6 +53,7 @@
         in
         {
           devShells.default = with pkgs; mkShell {
+            inherit env;
             buildInputs = baseInputs ++ devInputs ++ scripts;
             shellHook = "
               ${my-utils.binaries.${system}.configure-vscode};
