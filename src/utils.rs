@@ -1,23 +1,105 @@
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use num_traits::FromPrimitive;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer};
-use std::{
-    collections::HashMap,
-    fmt::{Debug, Display},
-    hash::Hash,
-    str::FromStr,
-};
+use std::{collections::HashMap, fmt::Debug, hash::Hash, str::FromStr};
+
+pub mod api_client_utils {
+    use reqwest::{RequestBuilder, StatusCode};
+    use serde::de::DeserializeOwned;
+    use std::time::Duration;
+
+    pub trait ApiClient {
+        fn base_url(&self) -> &str;
+        fn http_client(&self) -> &reqwest::Client;
+
+        fn path(&self, url_path: &str) -> String {
+            if url_path.starts_with("http") {
+                return url_path.to_string();
+            }
+
+            let origin = self.base_url().trim().trim_end_matches('/');
+            let path = url_path.trim().trim_start_matches('/');
+            format!("{origin}/{path}")
+        }
+        fn default_params(&self, request_builder: RequestBuilder) -> RequestBuilder {
+            request_builder.timeout(Duration::new(5, 0))
+        }
+
+        fn get(&self, url_path: &str) -> RequestBuilder {
+            self.default_params(self.http_client().get(self.path(url_path)))
+        }
+        fn post(&self, url_path: &str) -> RequestBuilder {
+            self.default_params(self.http_client().post(self.path(url_path)))
+        }
+    }
+
+    #[async_trait::async_trait]
+    pub trait RequestBuilderExt {
+        async fn fetch_json<D: DeserializeOwned>(self) -> Result<D, FetchErr>;
+    }
+    #[async_trait::async_trait]
+    impl RequestBuilderExt for RequestBuilder {
+        async fn fetch_json<D: DeserializeOwned>(self) -> Result<D, FetchErr> {
+            let builder = self
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json");
+            let (client, req) = builder.build_split();
+            let req = req?;
+
+            let method = req.method().clone();
+            let resp = client.execute(req).await?;
+            let status = resp.status();
+            let url = resp.url().clone();
+            let resp_text = resp.text().await?;
+
+            if !status.is_success() {
+                return Err(FetchErr::ErrResp {
+                    method,
+                    url,
+                    status,
+                    body_str: resp_text,
+                });
+                //         return Err(anyhow::anyhow!(
+                //     "{method} {url} \n Expected response with status ok, got: status: {status}, resp: {resp_text:?}",
+                //   ));
+            }
+            let deserialized: D = serde_json::from_str(&resp_text)
+                // .wrap_err(&format!("Failed deserializing. resp_text: {resp_text}"))?;
+                .map_err(|e| FetchErr::DeserialErr {
+                    body_str: resp_text,
+                    source: e,
+                })?;
+            Ok(deserialized)
+        }
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum FetchErr {
+        #[error("Failed sending request: {0}")]
+        ReqwestErr(#[from] reqwest::Error),
+        #[error("{method} {url} \nReceived {status} error response: {body_str}")]
+        ErrResp {
+            method: reqwest::Method,
+            url: reqwest::Url,
+            status: StatusCode,
+            body_str: String,
+        },
+        #[error("Failed deserializing: body: {body_str}")]
+        DeserialErr {
+            body_str: String,
+            source: serde_json::Error,
+        },
+    }
+}
 
 pub mod errors_debug {
     use backtrace::{Backtrace, BacktraceFrame, BacktraceSymbol};
-    use std::process::Command;
+    use std::{process::Command, sync::LazyLock};
 
-    lazy_static::lazy_static! {
-      pub static ref WORKDIR: String = workdir();
-    }
+    pub static WORKDIR: LazyLock<String> = LazyLock::new(|| workdir());
 
     pub trait WrapErr {
         type Ok;
@@ -99,9 +181,23 @@ impl DateExt for NaiveDate {
 }
 impl DateExt for DateTime<Utc> {
     fn ymd(year: i32, month: u32, day: u32) -> Self {
-        let datetime =
-            NaiveDate::ymd(year, month, day).and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-        DateTime::from_naive_utc_and_offset(datetime, Utc)
+        DateTime::from_naive_date(NaiveDate::ymd(year, month, day))
+    }
+}
+
+pub trait DatetimeUtcExt {
+    fn from_naive_date(datetime: NaiveDate) -> Self;
+}
+impl DatetimeUtcExt for DateTime<Utc> {
+    fn from_naive_date(date: NaiveDate) -> Self {
+        DateTime::from_naive_utc_and_offset(
+            date.and_time(
+                NaiveTime::from_hms_opt(0, 0, 0)
+                    .ok_or(anyhow::Error::msg("Invalid hour, minute and/or second."))
+                    .unwrap(),
+            ),
+            Utc,
+        )
     }
 }
 

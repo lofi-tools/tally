@@ -1,16 +1,18 @@
 use super::*;
 use rust_decimal::{prelude::Zero, MathematicalOps};
 use std::collections::HashMap;
+use tx1::Transaction1;
+use tx2::Transaction2;
 
 #[derive(Debug, Clone)]
 pub struct AccountBalanceChanges {
-    pub account: &'static Account,
+    pub account_id: AccountId,
     pub balance_changes: Vec<BalanceChange>,
 }
 impl AccountBalanceChanges {
-    pub fn new(account: &'static Account) -> Self {
+    pub fn new(account_id: AccountId) -> Self {
         AccountBalanceChanges {
-            account,
+            account_id,
             balance_changes: Vec::new(),
         }
     }
@@ -18,13 +20,17 @@ impl AccountBalanceChanges {
         self.balance_changes.push(balance_change);
         self
     }
+
+    pub fn account(&self) -> anyhow::Result<&'static Account> {
+        self.account_id.account()
+    }
     pub fn balance_at(&self, date: NaiveDate) -> Decimal {
         let principal: Decimal = self.balance_changes.iter().map(|bc| bc.amount).sum();
         principal + self.interest_at(date).unwrap()
         // TODO set to zero if less than 0.5 cents
     }
     pub fn interest_at(&self, balance_date: NaiveDate) -> anyhow::Result<Decimal> {
-        let loan_apy = match self.account.loan_apy {
+        let loan_apy = match self.account()?.loan_apy {
             Some(apy) => apy,
             None => return Ok(Decimal::zero()),
         };
@@ -68,19 +74,22 @@ impl AccountBalanceChanges {
 
         Ok(total_interest)
     }
-    pub fn interest_at_2(&self, balance_date: NaiveDate) -> anyhow::Result<Decimal> {
-        let loan_apy = match self.account.loan_apy {
-            Some(apy) => apy,
-            None => return Ok(Decimal::zero()),
-        };
-        todo!()
-        // NEXT TIME re-do Transaction with Vec<TxOutput> , TxOutput has a currency and account and amount
-    }
+
+    // not needed, interest will be minimal anyway
+    // #[deprecated]
+    // pub fn interest_at_2(&self, balance_date: NaiveDate) -> anyhow::Result<Decimal> {
+    //     let loan_apy = match self.account()?.loan_apy {
+    //         Some(apy) => apy,
+    //         None => return Ok(Decimal::zero()),
+    //     };
+    //     todo!()
+    //     // NEXT TIME re-do Transaction with Vec<TxOutput> , TxOutput has a currency and account and amount
+    // }
 }
 
 #[derive(Debug)]
 pub struct BalanceSheet3 {
-    pub accounts: HashMap<&'static Account, AccountBalanceChanges>,
+    pub accounts: HashMap<AccountId, AccountBalanceChanges>,
     pub date: NaiveDate,
 }
 impl BalanceSheet3 {
@@ -97,23 +106,24 @@ impl BalanceSheet3 {
         self.date = date;
         self
     }
-    pub fn now_from_transactions(transactions: &[super::Transaction]) -> Self {
+    pub fn now_from_transactions2(transactions: &[Transaction2]) -> Self {
         let mut bs = BalanceSheet3::new(Utc::now().date_naive());
-        for tx in transactions.iter() {
-            bs.add_transaction(tx);
+        for tx2 in transactions.iter() {
+            bs.add_tx2(tx2);
         }
         bs
     }
-    pub fn account(&self, account: &'static Account) -> &AccountBalanceChanges {
-        self.accounts.get(account).unwrap()
+
+    pub fn for_account(&self, account_id: AccountId) -> &AccountBalanceChanges {
+        self.accounts.get(&account_id).unwrap()
     }
-    pub fn account_mut(&mut self, account: &'static Account) -> &mut AccountBalanceChanges {
+    pub fn account_mut(&mut self, account_id: AccountId) -> &mut AccountBalanceChanges {
         self.accounts
-            .entry(account)
-            .or_insert_with(|| AccountBalanceChanges::new(account))
+            .entry(account_id)
+            .or_insert_with(|| AccountBalanceChanges::new(account_id))
     }
-    pub fn add_transaction(&mut self, transaction: &super::Transaction) -> &mut Self {
-        self.account_mut(transaction.from).push(BalanceChange {
+    pub fn add_tx1(&mut self, transaction: &Transaction1) -> &mut Self {
+        self.account_mut(transaction.from.id).push(BalanceChange {
             date: transaction.date,
             amount: match transaction.from.account_type() {
                 AccountType::Asset => -transaction.amount_gbp,
@@ -123,7 +133,7 @@ impl BalanceSheet3 {
                 AccountType::Equity => transaction.amount_gbp,
             },
         });
-        self.account_mut(transaction.to).push(BalanceChange {
+        self.account_mut(transaction.to.id).push(BalanceChange {
             date: transaction.date,
             amount: match transaction.to.account_type() {
                 AccountType::Asset => transaction.amount_gbp,
@@ -133,17 +143,29 @@ impl BalanceSheet3 {
                 AccountType::Equity => transaction.amount_gbp,
             },
         });
-
+        self
+    }
+    pub fn add_tx2(&mut self, tx: &Transaction2) -> &mut Self {
+        for output in tx.outputs.iter() {
+            self.account_mut(output.account_id).push(BalanceChange {
+                date: tx.datetime.date_naive(),
+                amount: output.amount_diff,
+            });
+        }
         self
     }
 
     pub fn account_balance(&mut self, account: &'static Account) -> Decimal {
-        self.account(account).balance_at(self.date)
+        self.for_account(account.id).balance_at(self.date)
     }
     pub fn accounts_of_type(&self, account_type: AccountType) -> Vec<AccountBalanceChanges> {
         self.accounts
             .values()
-            .filter(|a| a.account.account_type() == account_type)
+            .filter(|a| {
+                a.account()
+                    .map(|acc| acc.account_type() == account_type)
+                    .unwrap_or(false)
+            })
             .cloned()
             .collect()
     }
@@ -159,10 +181,8 @@ impl BalanceSheet3 {
 }
 impl std::fmt::Display for BalanceSheet3 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // write!(f, "{}", self.accounts)
-
         for account in self.accounts_of_type(AccountType::Asset).iter() {
-            let account_name = account.account.name;
+            let account_name = account.account().map_err(|_| std::fmt::Error)?.name;
             let balance = account.balance_at(self.date);
             writeln!(f, "{}: {}", account_name, balance)?;
         }
@@ -175,21 +195,21 @@ mod tests {
     use super::*;
     use crate::utils::NumExt;
     use chrono::Months;
+    use static_data::CLIENTS;
 
     #[test]
-    #[ignore]
-    fn test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
+    fn tx1_test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
         let mut bs = BalanceSheet3::now();
 
-        bs.add_transaction(&Transaction::sale((1000, Utc::now())));
+        bs.add_tx1(&Transaction1::sale((1000, Utc::now())));
         assert_eq!(bs.account_balance(&BANK), 1000.into());
         assert_eq!(bs.account_balance(&SALES), 1000.into());
 
-        bs.add_transaction(&Transaction::lend_to_director(1000_f64));
+        bs.add_tx1(&Transaction1::lend_to_director(1000_f64));
         assert_eq!(bs.account_balance(&BANK), 0.into());
         assert_eq!(bs.account_balance(&DIRECTORS_LOAN), 1000.into());
 
-        bs.add_transaction(&Transaction::director_repays(1000_f64));
+        bs.add_tx1(&Transaction1::director_repays(1000_f64));
         assert_eq!(bs.account_balance(&BANK), 1000.into());
         assert_eq!(bs.account_balance(&DIRECTORS_LOAN), 0.into());
 
@@ -197,15 +217,55 @@ mod tests {
     }
 
     #[test]
-    fn test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
+    fn tx1_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
         let year_ago = Utc::now() - Months::new(12);
 
         let mut bs = BalanceSheet3::new(year_ago.date_naive());
-        bs.add_transaction(&Transaction::sale((1000, year_ago)));
+        bs.add_tx1(&Transaction1::sale((1000, year_ago)));
         assert_eq!(bs.account_balance(&BANK), 1000.into());
         assert_eq!(bs.account_balance(&SALES), 1000.into());
 
-        bs.add_transaction(&Transaction::lend_to_director((1000, year_ago)));
+        bs.add_tx1(&Transaction1::lend_to_director((1000, year_ago)));
+        assert_eq!(bs.account_balance(&BANK), 0.into());
+        assert_eq!(bs.account_balance(&DIRECTORS_LOAN), 1000.into());
+
+        bs = bs.with_date(Utc::now().date_naive());
+        assert_eq!(bs.account_balance(&BANK), 0.into());
+        // one year later, loan balance should be 1000 + 2% APY
+        assert!(bs.account_balance(&DIRECTORS_LOAN).is_close_to(1020));
+
+        Ok(())
+    }
+
+    #[test]
+    fn tx2_test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
+        let mut bs = BalanceSheet3::now();
+
+        bs.add_tx2(&Transaction2::sale((1000, Utc::now())));
+        assert_eq!(bs.account_balance(&BANK), 1000.into());
+        assert_eq!(bs.account_balance(&CLIENTS), (-1000).into());
+
+        bs.add_tx2(&Transaction2::director_borrows_gbp(1000_f64));
+        assert_eq!(bs.account_balance(&BANK), 0.into());
+        assert_eq!(bs.account_balance(&DIRECTORS_LOAN), 1000.into());
+
+        bs.add_tx2(&Transaction2::director_repays_bank_gbp(1000_f64));
+        assert_eq!(bs.account_balance(&BANK), 1000.into());
+        assert_eq!(bs.account_balance(&DIRECTORS_LOAN), 0.into());
+
+        Ok(())
+    }
+
+    #[test]
+    fn tx2_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
+        let year_ago = Utc::now() - Months::new(12);
+
+        let mut bs = BalanceSheet3::new(year_ago.date_naive());
+        bs.add_tx2(&Transaction2::sale((1000, year_ago)));
+        assert_eq!(bs.account_balance(&BANK), 1000.into());
+        assert_eq!(bs.account_balance(&CLIENTS), (-1000).into());
+
+        bs.add_tx2(&Transaction2::director_borrows_gbp((1000, year_ago)));
         assert_eq!(bs.account_balance(&BANK), 0.into());
         assert_eq!(bs.account_balance(&DIRECTORS_LOAN), 1000.into());
 

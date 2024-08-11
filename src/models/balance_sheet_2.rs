@@ -1,4 +1,5 @@
-use super::{Account, AccountType};
+use crate::models::tx1::Transaction1;
+use crate::models::{Account, AccountType};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
@@ -42,10 +43,10 @@ pub struct BalanceSheet2 {
     pub accounts: HashMap<&'static Account, AccountBalance>,
 }
 impl BalanceSheet2 {
-    pub fn from_transactions(transactions: &[super::Transaction]) -> Self {
+    pub fn from_transactions1(transactions: &[Transaction1]) -> Self {
         let mut bs = BalanceSheet2::default();
         for tx in transactions.iter() {
-            bs.add_transaction(tx);
+            bs.add_transaction1(tx);
         }
         bs
     }
@@ -54,7 +55,7 @@ impl BalanceSheet2 {
             .entry(account)
             .or_insert_with(|| AccountBalance::new(account))
     }
-    pub fn add_transaction(&mut self, transaction: &super::Transaction) -> &mut Self {
+    pub fn add_transaction1(&mut self, transaction: &Transaction1) -> &mut Self {
         self.account_mut(transaction.from)
             .remove_money_from(transaction.amount_gbp);
 
@@ -109,39 +110,39 @@ impl BalanceSheet2 {
             .sum()
     }
 }
-impl std::fmt::Display for BalanceSheet2 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO list assetBalances, liabilityBalances, equity
-        write!(
-            f,
-            "Assets: {}\nLiabilities: {}\nEquity: {}",
-            todo!(),
-            todo!(),
-            todo!()
-        )
-    }
-}
+// impl std::fmt::Display for BalanceSheet2 {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         // TODO list assetBalances, liabilityBalances, equity
+//         write!(
+//             f,
+//             "Assets: {}\nLiabilities: {}\nEquity: {}",
+//             todo!(),
+//             todo!(),
+//             todo!()
+//         )
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::static_data::{BANK, BORROW, DIRECTORS_LOAN, SALES};
-    use crate::models::Transaction;
+    use crate::models::tx1::Transaction1;
 
     #[test]
     fn test_balance_sheet_directors_loan() -> anyhow::Result<()> {
-        let mut bs = BalanceSheet2::from_transactions(&[]);
+        let mut bs = BalanceSheet2::from_transactions1(&[]);
         assert_eq!(bs.accounts.len(), 0);
 
-        bs.add_transaction(&Transaction::sale(1000_f64));
+        bs.add_transaction1(&Transaction1::sale(1000_f64));
         assert_eq!(bs.accounts[&*BANK].balance, 1000.into());
         assert_eq!(bs.accounts[&*SALES].balance, 1000.into());
 
-        bs.add_transaction(&Transaction::lend_to_director(1000_f64));
+        bs.add_transaction1(&Transaction1::lend_to_director(1000_f64));
         assert_eq!(bs.accounts[&*BANK].balance, 0.into());
         assert_eq!(bs.accounts[&*DIRECTORS_LOAN].balance, 1000.into());
 
-        bs.add_transaction(&Transaction::director_repays(1000_f64));
+        bs.add_transaction1(&Transaction1::director_repays(1000_f64));
         assert_eq!(bs.accounts[&*BANK].balance, 1000.into());
         assert_eq!(bs.accounts[&*DIRECTORS_LOAN].balance, 0.into());
 
@@ -150,7 +151,7 @@ mod tests {
     #[test]
     fn test_balance_sheet_company_borrows() -> anyhow::Result<()> {
         let mut bs = BalanceSheet2::default();
-        bs.add_transaction(&Transaction::company_borrows(1000_f64));
+        bs.add_transaction1(&Transaction1::company_borrows(1000_f64));
 
         assert_eq!(bs.accounts[&*BANK].balance, 1000.into());
         assert_eq!(bs.accounts[&BORROW].balance, 1000.into());

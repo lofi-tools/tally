@@ -1,12 +1,15 @@
-use super::static_data::ALL_ACCOUNTS;
-use crate::models::{Account, Transaction};
+use super::{
+    static_data::{PAYE_PAID, SALES, WAGES_NET},
+    tx1::Transaction1,
+};
+use crate::models::Account;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
 #[derive(Default, Debug)]
-pub struct AccountTransactions(pub HashMap<&'static Account, Vec<Transaction>>); // TODO use AccountMovement with variants In/Out
+pub struct AccountTransactions(pub HashMap<&'static Account, Vec<Transaction1>>); // TODO use AccountMovement with variants In/Out
 impl AccountTransactions {
-    pub fn insert(&mut self, account: &'static Account, transaction: &Transaction) {
+    pub fn insert(&mut self, account: &'static Account, transaction: &Transaction1) {
         self.0.entry(account).or_default().push(transaction.clone())
     }
     // TODO if needed take in account direction of movement In/Out
@@ -33,19 +36,19 @@ pub struct ProfitAndLoss {
 }
 
 impl ProfitAndLoss {
-    pub fn from_transactions(transactions: &[Transaction]) -> Self {
+    pub fn from_transactions1(transactions: &[Transaction1]) -> Self {
         let mut pl = ProfitAndLoss::default();
         for tx in transactions.iter() {
-            pl.add_transaction(tx);
+            pl.add_transaction1(tx);
         }
         pl
     }
-    pub fn add_transaction(&mut self, transaction: &Transaction) {
+    pub fn add_transaction1(&mut self, transaction: &Transaction1) {
         if transaction.is_sale() {
-            self.income.insert(&ALL_ACCOUNTS.sales(), transaction);
+            self.income.insert(&SALES, transaction);
         }
         if transaction.is_to_paye() {
-            self.taxes.insert(&ALL_ACCOUNTS.paye_paid(), transaction)
+            self.taxes.insert(&PAYE_PAID, transaction)
         }
 
         // TODO wages, NIC, corporation tax
@@ -85,14 +88,14 @@ impl std::fmt::Display for ProfitAndLoss {
     }
 }
 
-impl Transaction {
+impl Transaction1 {
     fn is_sale(&self) -> bool {
-        *self.from == *ALL_ACCOUNTS.sales()
+        self.from == *SALES
     }
     fn is_to_paye(&self) -> bool {
-        *self.to == *ALL_ACCOUNTS.paye_paid()
+        self.to == *PAYE_PAID
     }
     fn _is_wage_net(&self) -> bool {
-        *self.to == *ALL_ACCOUNTS.wages_net() // TODO figure out WHAT TO DO WITH GROSS WAGES account
+        self.to == *WAGES_NET // TODO figure out WHAT TO DO WITH GROSS WAGES account
     }
 }

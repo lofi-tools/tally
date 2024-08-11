@@ -1,11 +1,10 @@
-use std::env;
+use std::{env, sync::LazyLock};
 
-lazy_static::lazy_static! {
-    pub static ref CONFIG:Config = Config::load().set_env();
-}
+pub static CONFIG: LazyLock<Config> = LazyLock::new(|| Config::load().set_env());
 pub struct Config {
     pub nordigen_api_secret_id: String,
     pub nordigen_api_secret_key: String,
+    pub twelvedata_api_key: String,
     // pub nordigen_starling_requisition_ref: String,
     // pub nordigen_starling_requisition_id: String,
 }
@@ -14,16 +13,18 @@ impl Config {
         Config {
             nordigen_api_secret_id: expect_env_var("NORDIGEN_API_SECRET_ID"),
             nordigen_api_secret_key: expect_env_var("NORDIGEN_API_SECRET_KEY"),
+            twelvedata_api_key: expect_env_var("TWELVEDATA_API_KEY"),
             // nordigen_starling_requisition_id: expect_env_var("NORDIGEN_STARLING_REQUISITION_ID"),
         }
     }
     fn set_env(self) -> Self {
-        env::set_var(
-            "RUST_LOG",
-            env::var("RUST_LOG").unwrap_or_else(|_| "error,actix_web=info".into()),
-        );
-        env::set_var("RUST_BACKTRACE", "1");
-
+        unsafe {
+            env::set_var(
+                "RUST_LOG",
+                env::var("RUST_LOG").unwrap_or_else(|_| "error,actix_web=info".into()),
+            );
+            env::set_var("RUST_BACKTRACE", "1");
+        }
         self
     }
 }
