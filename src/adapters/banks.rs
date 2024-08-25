@@ -1,6 +1,3 @@
-use std::time::Duration;
-
-use crate::models::DateAndAmount;
 use crate::utils;
 use crate::utils::api_client_utils::{ApiClient, RequestBuilderExt};
 use crate::utils::rand_string;
@@ -8,38 +5,47 @@ use crate::CONFIG;
 use anyhow::anyhow as err;
 use chrono::{DateTime, NaiveDate, Utc};
 use file_cache::{FileBytes, FromFileOrNew};
-use reqwest::{Client, RequestBuilder};
+use reqwest::RequestBuilder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::time::Duration;
 
 pub mod map_starling {
     use crate::adapters::banks::nordigen_client::BookedTransaction;
-    use crate::models::static_data::{BANK, DIRECTORS_LOAN, PAYE_PAID, SALES, WAGES_NET};
+    use crate::models::static_data::{BANK, CLIENTS, DIRECTORS_LOAN, PAYE_PAID, SALES, WAGES_NET};
     use crate::models::tx1::Transaction1;
     use crate::models::tx2::Transaction2;
     use crate::models::{Account, DateAndAmount};
 
     impl Transaction2 {
         pub fn from_starling(starling_tx: &BookedTransaction) -> anyhow::Result<Transaction2> {
-            if starling_tx.debtor_name == Some("Nigel Frank Intern".to_string()) {
-                return Ok(Transaction2::sale(starling_tx));
+            if starling_tx.is_sale() {
+                return Ok(Transaction2::tx_to_bank_from(&CLIENTS, starling_tx));
             }
             if starling_tx.is_wage() {
-                return Ok(Transaction2::wage(starling_tx));
+                // return Ok(Transaction2::wage(starling_tx));
+                return Ok(Transaction2::tx_to_bank_from(&WAGES_NET, starling_tx));
             }
             if starling_tx.is_director_borrows() {
-                return Ok(Transaction2::director_borrows_gbp(starling_tx));
+                // return Ok(Transaction2::director_borrows_gbp(starling_tx));
+                return Ok(Transaction2::tx_to_bank_from(&DIRECTORS_LOAN, starling_tx));
             }
             if starling_tx.is_paye() {
-                return Ok(Transaction2::paye(starling_tx));
+                // return Ok(Transaction2::paye(starling_tx));
+                return Ok(Transaction2::tx_to_bank_from(&PAYE_PAID, starling_tx));
             }
             anyhow::bail!("no match for tx: {starling_tx:?}")
+        }
+        pub fn is_director_borrows(&self) -> bool {
+            self.outputs.iter().any(|output| {
+                output.account_id == DIRECTORS_LOAN.id && output.amount_diff.is_sign_positive()
+            })
         }
     }
 
     impl Transaction1 {
-        fn from_starling(starling_tx: &BookedTransaction) -> anyhow::Result<Transaction1> {
+        fn _from_starling(starling_tx: &BookedTransaction) -> anyhow::Result<Transaction1> {
             match starling_tx {
                 tx if tx.debtor_name == Some("Nigel Frank Intern".to_string()) => {
                     Ok(Transaction1::to_bank(starling_tx, &SALES))
@@ -70,7 +76,7 @@ pub mod map_starling {
             Transaction1 {
                 from: from_account,
                 to: &BANK, // all nordigen transactions are to the bank: positive amounts for incoming, negative amounts for outgoing
-                amount_gbp: nordigen_tx.transaction_amount.amount,
+                amount_gbp: nordigen_tx.amount.amount,
                 date: nordigen_tx.booking_date,
             }
             .to_positive_direction() // this reverses the direction of the transaction so that amounts are positive
@@ -81,11 +87,17 @@ pub mod map_starling {
         fn from(tx: &BookedTransaction) -> Self {
             DateAndAmount {
                 date: tx.value_date,
-                amount: tx.transaction_amount.amount,
+                amount: tx.amount.amount,
             }
         }
     }
     impl BookedTransaction {
+        pub fn is_sale(&self) -> bool {
+            if let Some(debtor_name) = &self.debtor_name {
+                return debtor_name == "Nigel Frank Intern" || debtor_name.contains("Gravitas");
+            }
+            return false;
+        }
         pub fn is_director_borrows(&self) -> bool {
             self.remittance_information_unstructured
                 .contains("Director's loan")
@@ -104,6 +116,7 @@ pub mod map_starling {
         use crate::adapters::banks::nordigen_client::NordigenClient;
 
         #[tokio::test]
+        #[ignore = "API is rate limited"]
         async fn test_main() -> anyhow::Result<()> {
             let mut nclient = NordigenClient::new();
             nclient.login().await?;
@@ -113,8 +126,7 @@ pub mod map_starling {
 
             let (accounts, _) = nclient.list_accounts(&requisition.id).await?;
             for account_id in accounts.iter() {
-                let transactions = nclient.list_transactions(account_id).await?;
-                dbg!(&transactions);
+                let _transactions = nclient.list_transactions(account_id).await?;
             }
 
             Ok(())
@@ -123,6 +135,8 @@ pub mod map_starling {
 }
 
 pub mod nordigen_client {
+    use crate::models::List;
+
     use super::*;
 
     pub const ID_STARLING: &str = "STARLING_SRLGGB3L";
@@ -201,7 +215,6 @@ pub mod nordigen_client {
                 })
                 .fetch_json::<Agreement>()
                 .await?;
-            dbg!(&agreement);
 
             Ok(agreement)
         }
@@ -273,7 +286,6 @@ pub mod nordigen_client {
                 .get("https://ob.nordigen.com/api/v2/requisitions/")
                 .fetch_json::<ListResp<RequisitionFull>>()
                 .await?;
-            dbg!(&requisitions);
 
             let active_requisitions = requisitions
                 .results
@@ -372,24 +384,39 @@ pub mod nordigen_client {
 
         pub async fn list_starling_transactions(
             &mut self,
-        ) -> anyhow::Result<Vec<BookedTransaction>> {
-            self.ensure_login().await?;
+        ) -> anyhow::Result<List<BookedTransaction>> {
+            impl FileBytes for List<BookedTransaction> {
+                fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
+                    Ok(serde_json::to_vec_pretty(self)?)
+                }
+                fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+                    Ok(serde_json::from_slice(&bytes)?)
+                }
+            }
 
-            let requisition = self.ensure_starling_requisition().await?;
+            async fn fetch(
+                nclient: &mut NordigenClient,
+            ) -> anyhow::Result<List<BookedTransaction>> {
+                nclient.ensure_login().await?;
 
-            let (accounts, _) = self.list_accounts(&requisition.id).await?;
-            let futures = accounts
-                .iter()
-                .map(|account_id| self.list_transactions(&account_id));
-            let all_transactions = futures::future::join_all(futures)
-                .await
-                .into_iter()
-                .collect::<Result<Vec<Vec<_>>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<BookedTransaction>>();
+                let requisition = nclient.ensure_starling_requisition().await?;
 
-            Ok(all_transactions)
+                let (accounts, _) = nclient.list_accounts(&requisition.id).await?;
+                let futures = accounts
+                    .iter()
+                    .map(|account_id| nclient.list_transactions(&account_id));
+                let all_transactions = futures::future::join_all(futures)
+                    .await
+                    .into_iter()
+                    .collect::<Result<Vec<Vec<_>>, _>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<BookedTransaction>>();
+
+                Ok(List::new(all_transactions))
+            }
+
+            List::from_file_or_save_new("nordigen_starling_transactions.json", fetch(self)).await
         }
     }
 
@@ -508,13 +535,14 @@ pub mod nordigen_client {
         // pub pending: Vec<PendingTransaction>,
     }
 
-    #[derive(Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     pub struct BookedTransaction {
         pub transaction_id: String,
         pub debtor_name: Option<String>,
         pub debtor_account: Option<DebtorAccount>,
-        pub transaction_amount: TransactionAmount,
+        #[serde(rename = "transactionAmount")]
+        pub amount: TransactionAmount,
         pub booking_date: NaiveDate,
         pub value_date: NaiveDate,
         #[serde(rename = "remittanceInformationUnstructured")]
@@ -522,13 +550,13 @@ pub mod nordigen_client {
         pub bank_transaction_code: Option<String>,
     }
 
-    #[derive(Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     pub struct DebtorAccount {
         pub iban: String,
     }
 
-    #[derive(Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     pub struct TransactionAmount {
         pub currency: String,

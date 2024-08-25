@@ -1,6 +1,6 @@
 use std::{env, sync::LazyLock};
 
-pub static CONFIG: LazyLock<Config> = LazyLock::new(|| Config::load().set_env());
+pub static CONFIG: LazyLock<Config> = LazyLock::new(|| Config::from_env().set_env());
 pub struct Config {
     pub nordigen_api_secret_id: String,
     pub nordigen_api_secret_key: String,
@@ -9,7 +9,7 @@ pub struct Config {
     // pub nordigen_starling_requisition_id: String,
 }
 impl Config {
-    pub fn load() -> Self {
+    pub fn from_env() -> Self {
         Config {
             nordigen_api_secret_id: expect_env_var("NORDIGEN_API_SECRET_ID"),
             nordigen_api_secret_key: expect_env_var("NORDIGEN_API_SECRET_KEY"),

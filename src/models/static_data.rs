@@ -1,6 +1,7 @@
 use super::{tx2::TxOutput, Account, AccountTag, AllAssets, Asset, AssetId};
 use rust_decimal::Decimal;
-use std::{collections::HashMap, sync::LazyLock};
+use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
 
 pub struct StaticDb {
     pub accounts: AccountsMap,
@@ -9,22 +10,22 @@ pub struct StaticDb {
 #[rustfmt::skip]
 pub static DB: LazyLock<StaticDb> = LazyLock::new(|| StaticDb {
     accounts: AccountsMap::default()
-        .with_account(Account { id: AccountId("BANK"), code: 1200, name: "Company bank account",details: "Starling bank",account_tag: AccountTag::Cash,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("BANK")), code: 1200, name: "Company bank account",details: "Starling bank",account_tag: AccountTag::Cash,asset: AssetId(GBP),loan_apy: None, })
         // Director's loan is an account receivable (debt owed by others to the company) -> it's an asset account
-        .with_account(Account { id: AccountId("DIRECTORS_LOAN"), code: 2301, name: "Director's loan account",details: "Director 1: Nicolas Marshall",account_tag: AccountTag::AccountsReceivable,asset: AssetId(GBP),loan_apy: Decimal::from_f64_retain(2.0), })
-        .with_account(Account { id: AccountId("SALES"), code: 4010, name: "Sales - Services",details: "",account_tag: AccountTag::Sales,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("DIRECTORS_LOAN")), code: 2301, name: "Director's loan account",details: "Director 1: Nicolas Marshall",account_tag: AccountTag::AccountsReceivable,asset: AssetId(GBP),loan_apy: Decimal::from_f64_retain(2.0), })
+        .with_account(Account { id: AccountId(Cow::Borrowed("SALES")), code: 4010, name: "Sales - Services",details: "",account_tag: AccountTag::Sales,asset: AssetId(GBP),loan_apy: None, })
         // CLIENTS replaces SALES, but amount is negative. total(SALES) is now derived from -total(CLIENTS)
-        .with_account(Account { id: AccountId("CLIENTS"), code: 4040, name: "Sales - Services",details: "",account_tag: AccountTag::AccountsReceivable,asset: AssetId(GBP),loan_apy: None, })
-        .with_account(Account { id: AccountId("NEXO_GBP"), code: 1201, name: "Company spot account - Nexo - GBP",details: "",account_tag: AccountTag::Cash,asset: AssetId(GBP),loan_apy: None, })
-        .with_account(Account { id: AccountId("NEXO_EUR"), code: 1202, name: "Company spot account - Nexo - EUR",details: "",account_tag: AccountTag::Cash,asset: AssetId(EUR),loan_apy: None, })
-        .with_account(Account { id: AccountId("WAGES_GROSS"), code: 7000, name: "Gross wages paid",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
-        .with_account(Account { id: AccountId("WAGES_NET"), code: 2220, name: "Net wages paid",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("CLIENTS")), code: 4040, name: "Sales - Services",details: "",account_tag: AccountTag::AccountsReceivable,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("NEXO_GBP")), code: 1201, name: "Company spot account - Nexo - GBP",details: "",account_tag: AccountTag::Cash,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("NEXO_EUR")), code: 1202, name: "Company spot account - Nexo - EUR",details: "",account_tag: AccountTag::Cash,asset: AssetId(EUR),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("WAGES_GROSS")), code: 7000, name: "Gross wages paid",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("WAGES_NET")), code: 2220, name: "Net wages paid",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
         // NOTE credit this account when paying PAYE taxes
-        .with_account(Account { id: AccountId("PAYE_PAID"), code: 2210, name: "P.A.Y.E. paid",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("PAYE_PAID")), code: 2210, name: "P.A.Y.E. paid",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
         // NOTE employer's NI debit is balanced with a PAYE credit
-        .with_account(Account { id: AccountId("EMPLOYERS_NI_PAID"), code: 7006, name: "Employer's N.I.",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
-        .with_account(Account { id: AccountId("CORP_TAX_PAID"), code: 5500, name: "Corporate tax paid",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
-        .with_account(Account { id: AccountId("RETAINED_EARNINGS"), code: 3300, name: "Retained earnings",details: "",account_tag: AccountTag::Equity,asset: AssetId(GBP),loan_apy: None, }),
+        .with_account(Account { id: AccountId(Cow::Borrowed("EMPLOYERS_NI_PAID")), code: 7006, name: "Employer's N.I.",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("CORP_TAX_PAID")), code: 5500, name: "Corporate tax paid",details: "",account_tag: AccountTag::Expenses,asset: AssetId(GBP),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("RETAINED_EARNINGS")), code: 3300, name: "Retained earnings",details: "",account_tag: AccountTag::Equity,asset: AssetId(GBP),loan_apy: None, }),
     assets: AllAssets::default()
         .with_asset(Asset { id: AssetId(GBP) })
         .with_asset(Asset { id: AssetId(EUR) }),
@@ -48,7 +49,7 @@ pub static PAYE_PAID: LazyLock<&'static Account> = LazyLock::new(|| DB.accounts.
 
 // Test-only accounts
 pub static BORROW: Account = Account {
-    id: AccountId("BORROW"),
+    id: AccountId(Cow::Borrowed("BORROW")),
     code: 1200,
     name: "",
     details: "",
@@ -57,24 +58,32 @@ pub static BORROW: Account = Account {
     loan_apy: None,
 };
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
-pub struct AccountId(&'static str);
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Debug, Clone)]
+pub struct AccountId(Cow<'static, str>);
 impl AccountId {
+    pub fn new(s: impl Into<Cow<'static, str>>) -> Self {
+        AccountId(s.into())
+    }
     pub fn account(&self) -> anyhow::Result<&'static Account> {
         DB.accounts.try_get(&self)
     }
 
-    pub fn increase(&self, amount_diff: Decimal) -> TxOutput {
-        TxOutput {
-            account_id: *self,
-            amount_diff,
-        }
-    }
-    pub fn decrease(&self, amount_diff: Decimal) -> TxOutput {
-        TxOutput {
-            account_id: *self,
-            amount_diff: -amount_diff,
-        }
+    // pub fn increase(&self, amount_diff: Decimal) -> TxOutput {
+    //     TxOutput {
+    //         account_id: self.clone(),
+    //         amount_diff,
+    //     }
+    // }
+    // pub fn decrease(&self, amount_diff: Decimal) -> TxOutput {
+    //     TxOutput {
+    //         account_id: self.clone(),
+    //         amount_diff: -amount_diff,
+    //     }
+    // }
+}
+impl std::fmt::Display for AccountId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -85,7 +94,7 @@ pub struct AccountsMap {
 impl AccountsMap {
     pub fn with_account(mut self, acc: impl Into<Account>) -> Self {
         let acc: Account = acc.into();
-        self.accounts.insert(acc.id, acc);
+        self.accounts.insert(acc.id.clone(), acc);
         self
     }
     pub fn try_get(&self, id: &AccountId) -> anyhow::Result<&Account> {
@@ -95,39 +104,46 @@ impl AccountsMap {
     }
 
     pub fn bank(&self) -> &Account {
-        self.try_get(&AccountId("BANK")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("BANK"))).unwrap()
     }
     pub fn directors_loan(&self) -> &Account {
-        self.try_get(&AccountId("DIRECTORS_LOAN")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("DIRECTORS_LOAN")))
+            .unwrap()
     }
     pub fn sales(&self) -> &Account {
-        self.try_get(&AccountId("SALES")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("SALES"))).unwrap()
     }
     pub fn clients(&self) -> &Account {
-        self.try_get(&AccountId("CLIENTS")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("CLIENTS"))).unwrap()
     }
     pub fn nexo_gbp(&self) -> &Account {
-        self.try_get(&AccountId("NEXO_GBP")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("NEXO_GBP"))).unwrap()
     }
     pub fn nexo_eur(&self) -> &Account {
-        self.try_get(&AccountId("NEXO_EUR")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("NEXO_EUR"))).unwrap()
     }
     pub fn wages_gross(&self) -> &Account {
-        self.try_get(&AccountId("WAGES_GROSS")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("WAGES_GROSS")))
+            .unwrap()
     }
     pub fn wages_net(&self) -> &Account {
-        self.try_get(&AccountId("WAGES_NET")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("WAGES_NET")))
+            .unwrap()
     }
     pub fn paye_paid(&self) -> &Account {
-        self.try_get(&AccountId("PAYE_PAID")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("PAYE_PAID")))
+            .unwrap()
     }
     pub fn employers_ni_paid(&self) -> &Account {
-        self.try_get(&AccountId("EMPLOYERS_NI_PAID")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("EMPLOYERS_NI_PAID")))
+            .unwrap()
     }
     pub fn corp_tax_paid(&self) -> &Account {
-        self.try_get(&AccountId("CORP_TAX_PAID")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("CORP_TAX_PAID")))
+            .unwrap()
     }
     pub fn retained_earnings(&self) -> &Account {
-        self.try_get(&AccountId("RETAINED_EARNINGS")).unwrap()
+        self.try_get(&AccountId(Cow::Borrowed("RETAINED_EARNINGS")))
+            .unwrap()
     }
 }

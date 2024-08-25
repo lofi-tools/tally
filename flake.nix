@@ -48,6 +48,7 @@
           scripts = with pkgs; [
             (writeScriptBin "run" ''cargo run -- "$@" '')
             (writeScriptBin "utest" ''cargo nextest run --workspace -E '!test(nordigen)' --nocapture -- $SINGLE_TEST '')
+            (writeScriptBin "backup-txs" ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'')
           ];
 
         in

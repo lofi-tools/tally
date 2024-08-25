@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Duration, NaiveDate, NaiveTime, Utc};
 use num_traits::FromPrimitive;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -173,20 +173,36 @@ impl<K: Hash + Eq + Debug, V> MapExt<K, V> for HashMap<K, V> {
 
 pub trait DateExt {
     fn ymd(year: i32, month: u32, day: u32) -> Self;
+    fn from_utc(utc: DateTime<Utc>) -> Self;
+    fn naive_date(&self) -> NaiveDate;
 }
 impl DateExt for NaiveDate {
     fn ymd(year: i32, month: u32, day: u32) -> Self {
         NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    }
+    fn from_utc(utc: DateTime<Utc>) -> Self {
+        utc.date_naive()
+    }
+    fn naive_date(&self) -> NaiveDate {
+        *self
     }
 }
 impl DateExt for DateTime<Utc> {
     fn ymd(year: i32, month: u32, day: u32) -> Self {
         DateTime::from_naive_date(NaiveDate::ymd(year, month, day))
     }
+    fn from_utc(utc: DateTime<Utc>) -> Self {
+        utc
+    }
+    fn naive_date(&self) -> NaiveDate {
+        self.date_naive()
+    }
 }
 
 pub trait DatetimeUtcExt {
     fn from_naive_date(datetime: NaiveDate) -> Self;
+    fn with_start_of_day(&self) -> Self;
+    fn with_end_of_day(&self) -> Self;
 }
 impl DatetimeUtcExt for DateTime<Utc> {
     fn from_naive_date(date: NaiveDate) -> Self {
@@ -198,6 +214,47 @@ impl DatetimeUtcExt for DateTime<Utc> {
             ),
             Utc,
         )
+    }
+    fn with_start_of_day(&self) -> Self {
+        self.with_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+            .unwrap()
+    }
+    fn with_end_of_day(&self) -> Self {
+        self.with_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
+            .unwrap()
+    }
+}
+
+pub struct DateRange(pub NaiveDate, pub NaiveDate);
+impl DateRange {
+    pub fn new(start: impl DateExt, end: impl DateExt) -> Self {
+        DateRange(start.naive_date(), end.naive_date())
+    }
+}
+impl<'a> IntoIterator for &'a DateRange {
+    type Item = NaiveDate;
+    type IntoIter = DateRangeIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        DateRangeIter {
+            range: &self,
+            curr: self.0,
+        }
+    }
+}
+pub struct DateRangeIter<'a> {
+    pub range: &'a DateRange,
+    pub curr: NaiveDate,
+}
+impl<'a> Iterator for DateRangeIter<'a> {
+    type Item = NaiveDate;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.curr <= self.range.1 {
+            let next = self.curr + Duration::days(1);
+            self.curr = next;
+            Some(next)
+        } else {
+            None
+        }
     }
 }
 
@@ -211,6 +268,6 @@ pub trait NumExt {
 }
 impl NumExt for Decimal {
     fn is_close_to(&self, other: impl Into<Decimal>) -> bool {
-        self - other.into() < Decimal::from_f64(0.005).unwrap()
+        Decimal::abs(&(self - other.into())) <= Decimal::from_f64(0.005).unwrap()
     }
 }

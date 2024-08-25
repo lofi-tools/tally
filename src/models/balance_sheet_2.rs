@@ -69,7 +69,7 @@ impl BalanceSheet2 {
         let total_assets = self.total_of(AccountType::Asset);
         let total_liabilities = self.total_of(AccountType::Liability);
 
-        let retained_earnings = total_assets - total_liabilities;
+        let _retained_earnings = total_assets - total_liabilities;
         // self.account_mut(&RETAINED_EARNINGS)
         //     .set_to(retained_earnings);
 
