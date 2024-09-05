@@ -14,7 +14,6 @@ use std::time::Duration;
 pub mod map_starling {
     use crate::adapters::banks::nordigen_client::BookedTransaction;
     use crate::models::static_data::{BANK, CLIENTS, DIRECTORS_LOAN, PAYE_PAID, SALES, WAGES_NET};
-    use crate::models::tx1::Transaction1;
     use crate::models::tx2::Transaction2;
     use crate::models::{Account, DateAndAmount};
 
@@ -41,45 +40,6 @@ pub mod map_starling {
             self.outputs.iter().any(|output| {
                 output.account_id == DIRECTORS_LOAN.id && output.amount_diff.is_sign_positive()
             })
-        }
-    }
-
-    impl Transaction1 {
-        fn _from_starling(starling_tx: &BookedTransaction) -> anyhow::Result<Transaction1> {
-            match starling_tx {
-                tx if tx.debtor_name == Some("Nigel Frank Intern".to_string()) => {
-                    Ok(Transaction1::to_bank(starling_tx, &SALES))
-                }
-                tx if tx.remittance_information_unstructured.contains("Salary") => {
-                    Ok(Transaction1::to_bank(starling_tx, &WAGES_NET))
-                }
-                tx if tx
-                    .remittance_information_unstructured
-                    .contains("Director's loan") =>
-                {
-                    Ok(Transaction1::to_bank(starling_tx, &DIRECTORS_LOAN))
-                }
-                tx if tx
-                    .remittance_information_unstructured
-                    .contains("120PZ028811752312") =>
-                {
-                    Ok(Transaction1::to_bank(starling_tx, &PAYE_PAID))
-                }
-                other_tx => return Err(anyhow::anyhow!("no match for tx: {other_tx:?}")),
-            }
-        }
-
-        fn to_bank(
-            nordigen_tx: &BookedTransaction,
-            from_account: &'static Account,
-        ) -> Transaction1 {
-            Transaction1 {
-                from: from_account,
-                to: &BANK, // all nordigen transactions are to the bank: positive amounts for incoming, negative amounts for outgoing
-                amount_gbp: nordigen_tx.amount.amount,
-                date: nordigen_tx.booking_date,
-            }
-            .to_positive_direction() // this reverses the direction of the transaction so that amounts are positive
         }
     }
 

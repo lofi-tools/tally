@@ -1,14 +1,13 @@
 use super::*;
 use crate::adapters::exchange_rates::models::DayPricePoint;
-use crate::adapters::exchange_rates::{AssetPair, Currency, RatesApi};
+use crate::adapters::exchange_rates::{AssetPair, CachedRatesApi, Currency, RatesApi, RATES_API};
 use crate::utils::{DateRange, DatetimeUtcExt, NumExt};
 use anyhow::anyhow;
-use chrono::Duration;
+use chrono::{Duration, TimeZone};
 use rust_decimal::{prelude::Zero, MathematicalOps};
-use static_data::NEXO_EUR;
+use static_data::{EUR, GBP, NEXO_EUR};
 use std::collections::HashMap;
 use std::ops::Add;
-use tx1::Transaction1;
 use tx2::Transaction2;
 
 // TODO recalculate interest on AccountBalanceChanges: go through transaction dates in order
@@ -165,27 +164,39 @@ impl std::fmt::Display for AccountBalance2 {
 pub struct BalanceSheet3 {
     pub accounts: HashMap<AccountId, AccountBalanceChanges>,
     pub date: NaiveDate,
+    pub rate_gbp_eur: DayPricePoint,
 }
 impl BalanceSheet3 {
-    pub fn now() -> Self {
-        BalanceSheet3::new(Utc::now().date_naive())
+    pub fn now(rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
+        BalanceSheet3::new(Utc::now().date_naive(), rates_api)
     }
-    pub fn new(date: NaiveDate) -> Self {
-        BalanceSheet3 {
+    pub fn new(date: NaiveDate, rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
+        fn const_rate_20240827() -> DayPricePoint {
+            const GBP_TO_EUR: f64 = 1.18321;
+            DayPricePoint {
+                datetime: Utc.with_ymd_and_hms(2024, 08, 27, 0, 0, 0).unwrap(),
+                rate_high: Decimal::from_f64(GBP_TO_EUR).unwrap(),
+                rate_low: Decimal::from_f64(GBP_TO_EUR).unwrap(),
+            }
+        };
+        Ok(BalanceSheet3 {
             accounts: HashMap::new(),
             date,
-        }
+            rate_gbp_eur: rates_api.rate_at_date(date)?.max(const_rate_20240827()),
+            // .max(rates_api.rate_at_date(NaiveDate::from_ymd_opt(2024, 08, 27).unwrap())?),
+            // TODO include notes (include gbp/eur rate at time)
+        })
     }
     pub fn with_date(mut self, date: NaiveDate) -> Self {
         self.date = date;
         self
     }
-    pub fn now_from_transactions2(transactions: &[Transaction2]) -> Self {
-        let mut bs = BalanceSheet3::new(Utc::now().date_naive());
+    pub fn now_from_transactions2(transactions: &[Transaction2]) -> anyhow::Result<Self> {
+        let mut bs = BalanceSheet3::new(Utc::now().date_naive(), &RATES_API)?;
         for tx2 in transactions.iter() {
             bs.add_tx2(tx2);
         }
-        bs
+        Ok(bs)
     }
 
     pub fn for_account(&self, account_id: &AccountId) -> &AccountBalanceChanges {
@@ -229,7 +240,7 @@ impl BalanceSheet3 {
         }
         self
     }
-    pub fn add_many_tx2(&mut self, transactions: &[Transaction2]) -> &mut Self {
+    pub fn with_transactions(mut self, transactions: &[Transaction2]) -> Self {
         for tx in transactions.iter() {
             self.add_tx2(tx);
         }
@@ -256,30 +267,101 @@ impl BalanceSheet3 {
             .cloned()
             .collect()
     }
-    pub fn total_of(&self, account_type: AccountType) -> anyhow::Result<Decimal> {
-        let mut sum = Decimal::ZERO;
-        for account in &self.accounts_of_type(account_type) {
-            let balance = account.balance_at(DateTime::from_naive_date(self.date))?;
-            sum += balance.amount;
-        }
-        // self.accounts_of_type(account_type)
-        //     .iter()
-        //     .try_fold(Decimal::zero(), |sum, a| Ok(sum + a.balance_at(self.date)?))
-        todo!()
+    // pub fn total_of(&self, account_type: AccountType) -> anyhow::Result<Decimal> {
+    //     let mut sum = Decimal::ZERO;
+    //     for account in &self.accounts_of_type(account_type) {
+    //         // TODO balance GBP !
+    //         let balance = account.balance_at(DateTime::from_naive_date(self.date))?;
+    //         sum += balance.amount;
+    //     }
+    //     todo!()
+    // }
+
+    fn account_balance_gbp(
+        &self,
+        account_id: AccountId,
+        // account_balance_changes: &AccountBalanceChanges,
+    ) -> anyhow::Result<Decimal> {
+        let account = account_id.account()?;
+        let balance = self.for_account(&account_id).balance_at(self.datetime())?;
+        // let account = account_balance_changes
+        //     .account()
+        //     .map_err(|_| std::fmt::Error)?;
+        // let balance = account_balance_changes
+        //     .balance_at(self.datetime())
+        //     .map_err(|_| std::fmt::Error)?;
+        let balance_gbp = match &account.asset_id {
+            a if a == &AssetId(GBP) => balance.amount,
+            a if a == &AssetId(EUR) => balance.amount / self.rate_gbp_eur.rate_high,
+            _ => return Err(anyhow!("Unexpected asset id: {:?}", account.asset_id)),
+        };
+        let bal_gbp_rounded = match account.account_type() {
+            AccountType::Asset => balance_gbp.trunc_with_scale(2),
+            AccountType::Liability => balance_gbp.ceil(),
+            _ => {
+                return Err(anyhow!(
+                    "Unexpected account type: {:?}",
+                    account.account_type()
+                ))
+            }
+        };
+        Ok(bal_gbp_rounded)
     }
-    pub fn retained_earnings(&self) -> anyhow::Result<Decimal> {
-        Ok(self.total_of(AccountType::Asset)? - self.total_of(AccountType::Liability)?)
+    pub fn total_gbp_of(&self, account_type: AccountType) -> anyhow::Result<Decimal> {
+        let mut sum = Decimal::ZERO;
+        for balance_changes in &self.accounts_of_type(account_type) {
+            let account = balance_changes.account()?;
+            sum += self.account_balance_gbp(account.id.clone())?;
+        }
+        Ok(sum)
+    }
+    pub fn net_worth(&self) -> anyhow::Result<Decimal> {
+        Ok(self.total_gbp_of(AccountType::Asset)? - self.total_gbp_of(AccountType::Liability)?)
+    }
+    fn fmt_account(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        account_balance_changes: &AccountBalanceChanges,
+    ) -> std::fmt::Result {
+        let account = account_balance_changes
+            .account()
+            .map_err(|_| std::fmt::Error)?;
+        let balance = account_balance_changes
+            .balance_at(self.datetime())
+            .map_err(|_| std::fmt::Error)?;
+        write!(
+            f,
+            "{}: {} {}",
+            account.name, balance.amount, account.asset_id
+        )?;
+        if account.asset_id != AssetId(GBP) {
+            write!(
+                f,
+                " ({} GBP)",
+                self.account_balance_gbp(account.id.clone())
+                    .map_err(|_| std::fmt::Error)?
+            )?;
+        }
+        write!(f, "\n")?;
+        Ok(())
     }
 }
 impl std::fmt::Display for BalanceSheet3 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for account in self.accounts_of_type(AccountType::Asset).iter() {
-            let account_name = account.account().map_err(|_| std::fmt::Error)?.name;
-            let balance = account
-                .balance_at(self.datetime())
-                .map_err(|_| std::fmt::Error)?;
-            writeln!(f, "{}: {}", account_name, balance.amount)?;
+        writeln!(f, "BALANCE SHEET AT DATE: {}", self.date)?;
+        writeln!(f, "ASSETS:")?;
+        for account in &self.accounts_of_type(AccountType::Asset) {
+            self.fmt_account(f, account)?;
         }
+        writeln!(f, "LIABILITIES:")?;
+        for account in &self.accounts_of_type(AccountType::Liability) {
+            self.fmt_account(f, account)?;
+        }
+        writeln!(
+            f,
+            "NET WORTH: {}",
+            self.net_worth().map_err(|_| std::fmt::Error)?
+        )?;
         Ok(())
     }
 }
@@ -289,51 +371,11 @@ mod tests {
     use super::*;
     use crate::utils::NumExt;
     use chrono::Months;
-    use static_data::CLIENTS;
-
-    // #[test]
-    // fn tx1_test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
-    //     let mut bs = BalanceSheet3::now();
-
-    //     bs.add_tx1(&Transaction1::sale((1000, Utc::now())));
-    //     assert_eq!(bs.account_balance(&BANK)?, 1000.into());
-    //     assert_eq!(bs.account_balance(&SALES)?, 1000.into());
-
-    //     bs.add_tx1(&Transaction1::lend_to_director(1000_f64));
-    //     assert_eq!(bs.account_balance(&BANK)?, 0.into());
-    //     assert_eq!(bs.account_balance(&DIRECTORS_LOAN)?, 1000.into());
-
-    //     bs.add_tx1(&Transaction1::director_repays(1000_f64));
-    //     assert_eq!(bs.account_balance(&BANK)?, 1000.into());
-    //     assert_eq!(bs.account_balance(&DIRECTORS_LOAN)?, 0.into());
-
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn tx1_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
-    //     let year_ago = Utc::now() - Months::new(12);
-
-    //     let mut bs = BalanceSheet3::new(year_ago.date_naive());
-    //     bs.add_tx1(&Transaction1::sale((1000, year_ago)));
-    //     assert_eq!(bs.account_balance(&BANK), 1000.into());
-    //     assert_eq!(bs.account_balance(&SALES), 1000.into());
-
-    //     bs.add_tx1(&Transaction1::lend_to_director((1000, year_ago)));
-    //     assert_eq!(bs.account_balance(&BANK), 0.into());
-    //     assert_eq!(bs.account_balance(&DIRECTORS_LOAN), 1000.into());
-
-    //     bs = bs.with_date(Utc::now().date_naive());
-    //     assert_eq!(bs.account_balance(&BANK), 0.into());
-    //     // one year later, loan balance should be 1000 + 2% APY
-    //     assert!(bs.account_balance(&DIRECTORS_LOAN).is_close_to(1020));
-
-    //     Ok(())
-    // }
+    use static_data::{BANK, CLIENTS, DIRECTORS_LOAN};
 
     #[test]
     fn tx2_test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
-        let mut bs = BalanceSheet3::now();
+        let mut bs = BalanceSheet3::now(&RATES_API)?;
 
         bs.add_tx2(&Transaction2::sale((1000, Utc::now())));
         assert_eq!(bs.account_balance(&BANK)?, 1000);
@@ -354,7 +396,7 @@ mod tests {
     fn tx2_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
         let year_ago = Utc::now() - Months::new(12);
 
-        let mut bs = BalanceSheet3::new(year_ago.date_naive());
+        let mut bs = BalanceSheet3::new(year_ago.date_naive(), &RATES_API)?;
         bs.add_tx2(&Transaction2::sale((1000, year_ago)));
         assert_eq!(bs.account_balance(&BANK)?, 1000);
         assert_eq!(bs.account_balance(&CLIENTS)?, (-1000));

@@ -1,101 +1,216 @@
 use super::{
-    static_data::{PAYE_PAID, SALES, WAGES_NET},
-    tx1::Transaction1,
+    static_data::{CLIENTS, EXPENSES_TO_REPAY, WAGES_NET},
+    tx2::TxOutput,
 };
-use crate::models::Account;
+use crate::{adapters::exchange_rates::TimeRange, Expense, Expenses, ListTxs};
+use chrono::NaiveDate;
+use num_traits::FromPrimitive;
 use rust_decimal::Decimal;
-use std::collections::HashMap;
 
-#[derive(Default, Debug)]
-pub struct AccountTransactions(pub HashMap<&'static Account, Vec<Transaction1>>); // TODO use AccountMovement with variants In/Out
-impl AccountTransactions {
-    pub fn insert(&mut self, account: &'static Account, transaction: &Transaction1) {
-        self.0.entry(account).or_default().push(transaction.clone())
-    }
-    // TODO if needed take in account direction of movement In/Out
-    pub fn total_abs(&self) -> Decimal {
-        self.0
-            .iter()
-            .map(|(_, v)| v.iter().map(|t| t.amount_gbp).sum::<Decimal>())
-            .sum()
-    }
-}
-
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct ProfitAndLoss {
-    // gross
-    pub income: AccountTransactions,
-    pub direct_expenses: AccountTransactions,
-    // pub gross_profit_and_loss: i32,
+    pub time_range: TimeRange,
 
+    // gross earnings
+    pub sales: Outputs,
+    pub loan_interest: Outputs,
+    pub capital_gain_loss: Outputs, // TODO add NEXO_EUR outputs
+    // gross expenses
+    pub wages: Outputs,
+    pub other_expenses: Expenses,
+    //
     // net
-    pub overheads: AccountTransactions,
-    pub financial_expenses: AccountTransactions,
-    pub taxes: AccountTransactions,
-    pub net_profit_and_loss: i32,
 }
-
 impl ProfitAndLoss {
-    pub fn from_transactions1(transactions: &[Transaction1]) -> Self {
-        let mut pl = ProfitAndLoss::default();
-        for tx in transactions.iter() {
-            pl.add_transaction1(tx);
-        }
-        pl
-    }
-    pub fn add_transaction1(&mut self, transaction: &Transaction1) {
-        if transaction.is_sale() {
-            self.income.insert(&SALES, transaction);
-        }
-        if transaction.is_to_paye() {
-            self.taxes.insert(&PAYE_PAID, transaction)
-        }
-
-        // TODO wages, NIC, corporation tax
+    pub fn new(dates: TimeRange, txs: &ListTxs) -> anyhow::Result<Self> {
+        let txs = txs.between_dates(dates.start.date_naive(), dates.end.date_naive());
+        Ok(ProfitAndLoss {
+            time_range: dates,
+            sales: txs.sale_outputs(),
+            loan_interest: Outputs(Vec::new()),     // TODO
+            capital_gain_loss: Outputs(Vec::new()), // TODO add NEXO_EUR outputs
+            wages: txs.wage_outputs(),
+            other_expenses: Expenses::static_expenses_to_repay()?,
+        })
     }
 
-    // TODO rm once total is not abs
-    pub fn total_income(&self) -> Decimal {
-        self.income.total_abs()
+    pub fn calc_sales(&self) -> Decimal {
+        -self.sales.total() // minus because we sum CLIENTS account which is negative for
     }
-    // TODO rm once total is not abs
-    pub fn total_direct_expenses(&self) -> Decimal {
-        self.direct_expenses.total_abs()
+    pub fn calc_loan_interest_earned(&self) -> Decimal {
+        Decimal::ZERO // TODO
     }
-    pub fn gross_profit(&self) -> Decimal {
-        self.total_income() - self.total_direct_expenses()
+    pub fn calc_capital_gain_loss(&self) -> Decimal {
+        Decimal::ZERO // TODO
+    }
+    pub fn total_earnings(&self) -> Decimal {
+        self.calc_sales() + self.calc_loan_interest_earned() + self.calc_capital_gain_loss()
+    }
+    pub fn calc_wages(&self) -> Decimal {
+        self.wages.total()
+    }
+    pub fn calc_other_expenses(&self) -> Decimal {
+        Decimal::ZERO // TODO
+    }
+    pub fn total_expenses(&self) -> Decimal {
+        self.calc_wages() + self.calc_other_expenses()
     }
 
-    pub fn net_profit(&self) -> Decimal {
-        self.gross_profit()
-            - self.overheads.total_abs()
-            - self.financial_expenses.total_abs()
-            - self.taxes.total_abs()
+    pub fn overall_profit(&self) -> Decimal {
+        self.total_earnings() - self.total_expenses()
     }
+    pub fn corp_tax(&self) -> Decimal {
+        // self.overall_profit() * Decimal::from_f64(0.2).unwrap()
+        let OVERALL_PROFIT_OVERRIDE = Decimal::from(68946);
+
+        let num_days_old_calc = (NaiveDate::from_ymd_opt(2023, 03, 31).unwrap()
+            - self.time_range.start.date_naive())
+        .num_days();
+        let num_days_new_calc = (self.time_range.end.date_naive()
+            - NaiveDate::from_ymd_opt(2023, 04, 01).unwrap())
+        .num_days();
+
+        let proportion_old_calc =
+            Decimal::from(num_days_old_calc) / Decimal::from(num_days_old_calc + num_days_new_calc);
+        let proportion_new_calc =
+            Decimal::from(num_days_new_calc) / Decimal::from(num_days_old_calc + num_days_new_calc);
+
+        let tax_old_rate = (Decimal::from_f64(0.2).unwrap()
+            * OVERALL_PROFIT_OVERRIDE
+            * Decimal::from(proportion_old_calc))
+        .trunc();
+
+        fn tax_new_rate(profit: Decimal) -> Decimal {
+            let on_first_50k =
+                (Decimal::from(50_000).min(profit) * Decimal::from_f64(0.19).unwrap()).trunc();
+            let on_rest = match (profit - Decimal::from(50_000)) {
+                x if x.is_sign_positive() => x * Decimal::from_f64(0.265).unwrap(),
+                _ => Decimal::ZERO,
+            }
+            .trunc();
+
+            (on_first_50k + on_rest).trunc()
+        }
+        let tax_new_rate =
+            tax_new_rate(OVERALL_PROFIT_OVERRIDE * Decimal::from(proportion_new_calc));
+
+        // let corp_tax = Decimal::from(50_000) * Decimal::from_f64(0.19).unwrap()
+        //     + (OVERALL_PROFIT_OVERRIDE - Decimal::from(50_000)) * Decimal::from_f64(0.265).unwrap();
+        tax_old_rate.trunc() + tax_new_rate.trunc()
+    }
+
+    fn fmt_other_expenses(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut expenses_by_desc = std::collections::HashMap::new();
+        for expense in &self.other_expenses.0 {
+            let curr_total = expenses_by_desc
+                .entry(expense.desc.clone())
+                .or_insert(Decimal::ZERO);
+            *curr_total += expense.tx.outputs[0].amount_diff;
+        }
+        dbg!(&expenses_by_desc);
+
+        for (desc, amount) in &expenses_by_desc {
+            writeln!(f, "{}: {}", desc, amount)?;
+        }
+        Ok(())
+    }
+    // TODO calculate interest made on director's loan (total repaid - total borrowed)
+    // TODO calculate capital gain/loss from accounts in other currencies (go through transaction, add up GBP amount, calculate GBP amount now, diff)
 }
 impl std::fmt::Display for ProfitAndLoss {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Income: \t\t\t{:?}\n", self.income)?;
-        write!(f, "Expenses: \t\t\t{:?}\n", self.direct_expenses)?;
-        write!(f, "Gross profit / loss: \t\t{}\n", self.gross_profit())?;
-        write!(f, "\n")?;
-
-        write!(f, "Overheads: \t\t\t{:?}\n", self.overheads)?;
-        write!(f, "Financial expenses: \t\t{:?}\n", self.financial_expenses)?;
-        write!(f, "Taxes: \t\t\t\t{:?}\n", self.taxes)?;
-        write!(f, "Net profit / loss: \t\t{}\n\n", self.net_profit())?;
+        writeln!(
+            f,
+            "PROFIT AND LOSS between {} and {}",
+            self.time_range.start, self.time_range.end
+        )?;
+        writeln!(f, "EARNINGS: {}", self.total_earnings())?;
+        writeln!(f, "Sales: {}", self.calc_sales())?;
+        writeln!(f, "Loan interest: {}", self.calc_loan_interest_earned())?;
+        writeln!(f, "Capital gain/loss: {}", self.calc_capital_gain_loss())?;
+        writeln!(f, "EXPENSES: {}", self.total_expenses())?;
+        writeln!(f, "Wages: {}", self.wages.total())?;
+        writeln!(f, "Other expenses: {}", self.calc_other_expenses())?;
+        writeln!(f, "Expense details:")?;
+        self.fmt_other_expenses(f)?;
+        writeln!(f, "")?;
+        writeln!(
+            f,
+            "TOTAL_EARNINGS: {}, TOTAL_EXPENSES: {}, PROFIT (loss if <0): {}, CORP_TAX: {},",
+            self.total_earnings(),
+            self.total_expenses(),
+            self.overall_profit(),
+            self.corp_tax()
+        )?;
         Ok(())
     }
 }
 
-impl Transaction1 {
-    fn is_sale(&self) -> bool {
-        self.from == *SALES
+#[derive(Debug)]
+pub struct Outputs(pub Vec<TxOutput>);
+impl Outputs {
+    pub fn between_times(&self, times: TimeRange) -> Outputs {
+        Outputs(
+            self.0
+                .iter()
+                .filter(|txo| txo.datetime >= times.start && txo.datetime <= times.end)
+                .cloned()
+                .collect(),
+        )
     }
-    fn is_to_paye(&self) -> bool {
-        self.to == *PAYE_PAID
+    pub fn total(&self) -> Decimal {
+        self.0.iter().map(|txo| txo.amount_diff).sum::<Decimal>()
     }
-    fn _is_wage_net(&self) -> bool {
-        self.to == *WAGES_NET // TODO figure out WHAT TO DO WITH GROSS WAGES account
+
+    pub fn sales(&self) -> Outputs {
+        let filtered = self
+            .0
+            .iter()
+            .filter(|o| o.account().ok() == Some(*CLIENTS))
+            .cloned()
+            .collect();
+        Outputs(filtered)
+    }
+    pub fn wages(&self) -> Outputs {
+        let filtered = self
+            .0
+            .iter()
+            .filter(|o| o.account().ok() == Some(*WAGES_NET))
+            .cloned()
+            .collect();
+        Outputs(filtered)
+    }
+    fn expenses_to_repay(&self) -> Outputs {
+        Outputs(
+            self.0
+                .iter()
+                .filter(|o| o.is_expense_to_repay())
+                .cloned()
+                .collect(),
+        )
     }
 }
+
+impl ListTxs {
+    pub fn outputs(&self) -> Outputs {
+        Outputs(
+            self.txs
+                .iter()
+                .map(|tx| tx.outputs.clone())
+                .flatten()
+                .collect::<Vec<TxOutput>>(),
+        )
+    }
+    pub fn sale_outputs(&self) -> Outputs {
+        self.outputs().sales()
+    }
+    pub fn wage_outputs(&self) -> Outputs {
+        let wage_outputs = self.outputs().wages();
+        wage_outputs
+    }
+    // pub fn outputs_expenses_to_repay(&self) -> Outputs {
+    //     self.outputs().expenses_to_repay()
+    // }
+}
+
+// pub struct AccountingPeriod(pub TimeRange);

@@ -1,13 +1,18 @@
 use self::models::RateHistory;
 use crate::{utils::api_client_utils::FetchErr, CONFIG};
+use anyhow::anyhow;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use file_cache::{FileBytes, GitRepoCacheDir, StaticCacheDir};
 use models::DayPricePoint;
 use num_traits::FromPrimitive;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use tokio::sync::RwLock;
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, RwLock},
+};
+
+pub static RATES_API: LazyLock<CachedRatesApi> = LazyLock::new(|| CachedRatesApi::new().unwrap());
 
 pub trait RatesApi {
     fn rate_hist(
@@ -33,6 +38,13 @@ impl CachedRatesApi {
             },
         })
     }
+    pub fn rate_at_date(&self, date: NaiveDate) -> anyhow::Result<DayPricePoint> {
+        let cached_rates_rg = self.rates_gbp_eur.read().unwrap();
+        let cached_rates = cached_rates_rg
+            .as_ref()
+            .ok_or(anyhow!("can't read cached_rates"))?;
+        cached_rates.rate_at(date).cloned()
+    }
 }
 impl RatesApi for CachedRatesApi {
     async fn rate_hist(
@@ -47,7 +59,7 @@ impl RatesApi for CachedRatesApi {
         }
 
         // if in cache, return from cache
-        if let Some(cached_rates) = self.rates_gbp_eur.read().await.as_ref() {
+        if let Some(cached_rates) = self.rates_gbp_eur.read().unwrap().as_ref() {
             if cached_rates.time_range().contains_range(want_time_range) {
                 return Ok(cached_rates.subset(want_time_range));
             }
@@ -60,7 +72,7 @@ impl RatesApi for CachedRatesApi {
                 return self
                     .rates_gbp_eur
                     .read()
-                    .await
+                    .unwrap()
                     .clone()
                     .ok_or(ExchangeRateErr::Other(anyhow::anyhow!("No cached rates")))
             }
@@ -72,7 +84,7 @@ impl RatesApi for CachedRatesApi {
             .rate_hist(&complement_time_range, currencies)
             .await?;
 
-        let mut cached_rates = self.rates_gbp_eur.write().await;
+        let mut cached_rates = self.rates_gbp_eur.write().unwrap();
         // this updates in-mem cache
         let updated_rates = match cached_rates.as_mut() {
             Some(cached_rates) => cached_rates.mut_merge(&new_rates),
@@ -94,7 +106,7 @@ impl CachedRatesApi {
         &self,
         want_time_range: &TimeRange,
     ) -> Option<TimeRange> {
-        let cached_rates = self.rates_gbp_eur.read().await;
+        let cached_rates = self.rates_gbp_eur.read().unwrap();
 
         let cached_rates = match cached_rates.as_ref() {
             Some(cached_rates) => cached_rates,
@@ -420,6 +432,15 @@ pub mod models {
         pub datetime: DateTime<Utc>,
         pub rate_high: Decimal,
         pub rate_low: Decimal,
+    }
+    impl DayPricePoint {
+        pub fn max(self, other: Self) -> Self {
+            if other.rate_high > self.rate_high {
+                other
+            } else {
+                self
+            }
+        }
     }
 }
 
