@@ -10,7 +10,7 @@ pub use config::CONFIG;
 use file_cache::{FileBytes, FromFileOrNew};
 use models::static_data::{DIRECTORS_LOAN, EXPENSES_TO_REPAY, NEXO_EUR};
 use models::tx2::{Transaction2, TxOutput};
-use models::DateAndAmount;
+use models::{AssetId, DateAndAmount};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -48,17 +48,15 @@ async fn main() -> anyhow::Result<()> {
         DateTime::from_naive_date(NaiveDate::from_ymd_opt(2023, 11, 30).unwrap()),
     );
 
-    // let period_end = NaiveDate::from_ymd_opt(2023, 11, 30).unwrap();
     let balance_sheet = BalanceSheet3::new(accounting_period.end.date_naive(), &state.rates_api)?
         .with_transactions(&transactions);
     println!("{balance_sheet}");
 
-    // TODO profit and loss
     let profit_and_loss = ProfitAndLoss::new(accounting_period, &transactions)?;
     print!("{profit_and_loss}");
 
     // TODO task for bank account transfers without corresponding accounting
-    // TODO assert invoice file per transaction (store in dir in git)
+    // TODO assert invoice file per transaction (store in cache_dir/db)
 
     Ok(())
 }
@@ -151,7 +149,6 @@ impl ListTxs {
             let three_months_later = borrow.datetime + Duration::days(90);
             let possible_repay_dates = DateRange::new(payment_day, three_months_later);
 
-            // TODO Optimize: call only once for all borrows
             let rates = rates_api
                 .rate_hist(
                     &TimeRange::new(payment_day, three_months_later),
@@ -214,16 +211,6 @@ impl ListTxs {
     pub fn add_expenses(&mut self, expenses: Expenses) -> &mut Self {
         self.push_many(&expenses.transactions())
     }
-
-    // fn expense_outputs(&self) -> Vec<Expense> {
-    //     self.outputs()
-    //         .self
-    //         .txs
-    //         .iter()
-    //         .filter(|tx| tx.is_expense_to_repay())
-    //         .cloned()
-    //         .collect()
-    // }
 }
 impl std::ops::Deref for ListTxs {
     type Target = Vec<Transaction2>;
@@ -246,7 +233,7 @@ pub struct Expense {
     pub tx: Transaction2,
 }
 impl Expense {
-    pub fn simply(dam: impl Into<DateAndAmount>) -> Self {
+    pub fn professional_insurance(dam: impl Into<DateAndAmount>) -> Self {
         let DateAndAmount { date, amount } = dam.into();
         Expense {
             desc: "Professional insurance".to_string(),
@@ -268,13 +255,7 @@ impl Expense {
             .into_iter()
             .map(|dam| Expense::energy(dam))
             .collect::<Vec<_>>();
-        // dbg!(
-        //     &expenses_energy_bills,
-        //     expenses_energy_bills
-        //         .iter()
-        //         .map(|e| e.tx.outputs[0].amount_diff)
-        //         .sum::<Decimal>()
-        // );
+
         Ok(Expenses(expenses_energy_bills))
     }
     pub fn energy_bills_between(time_range: &TimeRange) -> anyhow::Result<Expenses> {
@@ -306,18 +287,33 @@ impl Expense {
 pub struct Expenses(pub Vec<Expense>);
 impl Expenses {
     pub fn static_expenses_to_repay() -> anyhow::Result<Self> {
-        let mut expenses = vec![
-            Expense::simply((135.31, (2024, 06, 21))), // simply business 135.31 on 2024 Jun 21
-            Expense::simply((197.28, (2022, 12, 18))), // simply business 197.28 on 2022 Dec 18x
-        ];
+        #[derive(Serialize, Deserialize, Debug)]
+        pub struct StoredExpense {
+            pub date: NaiveDate,
+            pub amount: Decimal,
+            pub asset_id: AssetId,
+            pub description: String,
+        }
+
+        let file_str = std::fs::read_to_string(PathBuf::from("./.cache/expenses.json"))?;
+        let loaded_expenses: Vec<StoredExpense> = serde_json::from_str(&file_str)?;
+        let mut expenses = loaded_expenses
+            .into_iter()
+            .map(|e| Expense {
+                desc: e.description,
+                tx: Transaction2 {
+                    outputs: vec![TxOutput {
+                        account_id: EXPENSES_TO_REPAY.id.clone(),
+                        amount_diff: e.amount,
+                        datetime: DateTime::from_naive_date(e.date),
+                    }],
+                    datetime: DateTime::from_naive_date(e.date),
+                },
+            })
+            .collect::<Vec<_>>();
+
         expenses.extend(Expense::all_energy_bills()?.0);
-        dbg!(
-            &expenses,
-            expenses
-                .iter()
-                .map(|e| e.tx.outputs[0].amount_diff)
-                .sum::<Decimal>()
-        );
+
         Ok(Expenses(expenses))
     }
     pub fn get_expenses_to_repay(&self) -> Expenses {
@@ -347,7 +343,7 @@ pub mod test_expenses {
     use super::*;
 
     #[test]
-    fn test_octopus() -> anyhow::Result<()> {
+    fn test_energy_bills() -> anyhow::Result<()> {
         let all_energy_bills = Expense::all_energy_bills()?;
         Ok(())
     }

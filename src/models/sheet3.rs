@@ -291,8 +291,8 @@ impl BalanceSheet3 {
         //     .balance_at(self.datetime())
         //     .map_err(|_| std::fmt::Error)?;
         let balance_gbp = match &account.asset_id {
-            a if a == &AssetId(GBP) => balance.amount,
-            a if a == &AssetId(EUR) => balance.amount / self.rate_gbp_eur.rate_high,
+            a if a == &GBP => balance.amount,
+            a if a == &EUR => balance.amount / self.rate_gbp_eur.rate_high,
             _ => return Err(anyhow!("Unexpected asset id: {:?}", account.asset_id)),
         };
         let bal_gbp_rounded = match account.account_type() {
@@ -334,7 +334,7 @@ impl BalanceSheet3 {
             "{}: {} {}",
             account.name, balance.amount, account.asset_id
         )?;
-        if account.asset_id != AssetId(GBP) {
+        if account.asset_id != GBP {
             write!(
                 f,
                 " ({} GBP)",

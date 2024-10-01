@@ -3,7 +3,7 @@ use file_cache::FileBytes;
 use rust_decimal::{prelude::FromPrimitive, Decimal};
 use serde::{Deserialize, Serialize};
 use static_data::AccountId;
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 use tx2::{Transaction2, TxOutput};
 pub mod profit_and_loss;
 pub mod sheet3;
@@ -365,8 +365,8 @@ pub enum AccountType {
 //     pub amount: Decimal,
 // }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
-pub struct AssetId(pub &'static str);
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Debug, Clone)]
+pub struct AssetId(pub Cow<'static, str>);
 impl std::fmt::Display for AssetId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -690,7 +690,7 @@ pub mod _old {
                 bs.add_transaction1(&Transaction1::company_borrows(1000_f64));
 
                 assert_eq!(bs.accounts[&*BANK].balance, 1000.into());
-                assert_eq!(bs.accounts[&BORROW].balance, 1000.into());
+                assert_eq!(bs.accounts[&*BORROW].balance, 1000.into());
                 // assert_eq!(bs.accounts.try_get(&&RETAINED_EARNINGS)?.balance, 0.into()); // TODO use function to get earnings, not an account
                 Ok(())
             }
