@@ -2,7 +2,7 @@ use self::models::RateHistory;
 use crate::{utils::api_client_utils::FetchErr, CONFIG};
 use anyhow::anyhow;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use file_cache::{FileBytes, GitRepoCacheDir, StaticCacheDir};
+use file_cache::{CacheInRepo, CacheLocation, FileBytes};
 use models::DayPricePoint;
 use num_traits::FromPrimitive;
 use rust_decimal::Decimal;
@@ -30,7 +30,7 @@ impl CachedRatesApi {
         Ok(CachedRatesApi {
             api_client: twelvedata::TwelvedataClient::new(),
             rates_gbp_eur: {
-                let cache_file = GitRepoCacheDir::mk_file_path("rates_gbp_eur")?;
+                let cache_file = CacheInRepo::file_path("rates_gbp_eur")?;
                 match RateHistory::from_file(&cache_file) {
                     Ok(hist) => RwLock::new(Some(hist)),
                     Err(_) => RwLock::new(None),
@@ -92,8 +92,7 @@ impl RatesApi for CachedRatesApi {
         };
 
         // update file cache
-        let cache_file =
-            GitRepoCacheDir::mk_file_path("rates_gbp_eur").map_err(ExchangeRateErr::Other)?;
+        let cache_file = CacheInRepo::file_path("rates_gbp_eur").map_err(ExchangeRateErr::Other)?;
         updated_rates
             .to_file(&cache_file)
             .map_err(ExchangeRateErr::Other)?;
@@ -332,6 +331,7 @@ pub mod models {
     use serde::Serialize;
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
+    // TODO use impl Cacheable (from rust-utils)
     pub struct RateHistory {
         pub from_currency: Currency,
         pub to_currency: Currency,

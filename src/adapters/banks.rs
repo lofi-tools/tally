@@ -95,13 +95,17 @@ pub mod map_starling {
 }
 
 pub mod nordigen_client {
-    use crate::models::List;
+    use file_cache::{CacheInRepo, Cacheable};
 
     use super::*;
+    use crate::models::List;
+    use std::{path::PathBuf, sync::LazyLock};
 
     pub const ID_STARLING: &str = "STARLING_SRLGGB3L";
     pub const MAX_TRANSACTION_TOTAL_DAYS: u32 = 730;
     const STARLING_REQUISITION_CACHE_FILE_NAME: &str = "nordigen_starling_requisition";
+    // static STARLING_REQUISISTION_FILE_PATH: LazyLock<PathBuf> =
+    //     LazyLock::new(|| PathBuf::from(STARLING_REQUISITION_CACHE_FILE_NAME));
 
     #[derive(Default, Debug)]
     pub struct NordigenClient {
@@ -226,11 +230,12 @@ pub mod nordigen_client {
             let got_requisition = self.get_requisition(&created.id).await?;
 
             // overwrite cache
-            RequisitionFull::overwrite_file(
-                STARLING_REQUISITION_CACHE_FILE_NAME,
-                got_requisition.clone(),
-            )
-            .await?;
+            got_requisition.to_cache()?;
+            // RequisitionFull::overwrite_file(
+            //     STARLING_REQUISITION_CACHE_FILE_NAME,
+            //     got_requisition.clone(),
+            // )
+            // .await?;
 
             println!(
                 "Created new requisition, to activate it go to {}",
@@ -285,11 +290,12 @@ pub mod nordigen_client {
 
             let got_requisition = match self.get_requisition(&requisition.id).await {
                 Ok(requisition) => {
-                    RequisitionFull::overwrite_file(
-                        STARLING_REQUISITION_CACHE_FILE_NAME,
-                        requisition.clone(),
-                    )
-                    .await?;
+                    requisition.to_cache()?;
+                    // RequisitionFull::overwrite_file(
+                    //     STARLING_REQUISITION_CACHE_FILE_NAME,
+                    //     requisition.clone(),
+                    // )
+                    // .await?;
                     requisition
                 }
                 Err(err) => {
@@ -471,6 +477,12 @@ pub mod nordigen_client {
         }
         fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
             Ok(serde_json::from_slice(&bytes)?)
+        }
+    }
+    impl Cacheable for RequisitionFull {
+        type CacheType = CacheInRepo;
+        fn static_relative_path_str() -> &'static str {
+            STARLING_REQUISITION_CACHE_FILE_NAME
         }
     }
 

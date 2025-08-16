@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
     utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
     my-utils = {
@@ -11,58 +11,54 @@
   };
 
   outputs = { self, nixpkgs, utils, rust-overlay, my-utils }:
-    utils.lib.eachDefaultSystem
-      (system:
-        let
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [ (import rust-overlay) ];
-          };
-          customRust = pkgs.rust-bin.stable."1.80.0".default.override {
-            extensions = [ "rust-src" "rust-analyzer" ];
-            targets = [ ];
-          };
+    with builtins; utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        };
+        customRust = pkgs.rust-bin.stable."1.87.0".default.override {
+          extensions = [ "rust-src" "rust-analyzer" ];
+          targets = [ ];
+        };
 
-          baseInputs = [
-            customRust
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            pkgs.darwin.apple_sdk.frameworks.Security
-            pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-            pkgs.darwin.apple_sdk.frameworks.CoreServices
-            pkgs.darwin.apple_sdk.frameworks.CoreFoundation
-            pkgs.darwin.apple_sdk.frameworks.Foundation
-            pkgs.libiconv
-          ];
+        baseInputs = [
+          customRust
+          pkgs.pkg-config
+        ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+          pkgs.apple-sdk_15
+          pkgs.libiconv
+        ];
 
-          devInputs = with pkgs; [
-            nixpkgs-fmt
-            cargo-nextest
-            # cargo-watch
-            # cargo-edit
-          ];
+        devInputs = with pkgs; [
+          nixpkgs-fmt
+          cargo-nextest
+          # cargo-watch
+          # cargo-edit
+        ];
 
-          env = {
-            RUST_BACKTRACE = "1";
-          };
+        env = {
+          RUST_BACKTRACE = "1";
+        };
 
-          scripts = with pkgs; [
-            (writeScriptBin "run" ''cargo run -- "$@" '')
-            (writeScriptBin "utest" ''cargo nextest run --workspace -E '!test(nordigen)' --nocapture -- $SINGLE_TEST '')
-            (writeScriptBin "backup-txs" ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'')
-          ];
+        scripts = mapAttrs (name: value: pkgs.writeShellScriptBin name value) {
+          run = ''cargo run -- "$@" '';
+          utest = ''cargo nextest run --workspace -E '!test(nordigen)' --nocapture -- $SINGLE_TEST '';
+          backup-txs = ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'';
+        };
 
-        in
-        {
-          devShells.default = with pkgs; mkShell {
-            inherit env;
-            buildInputs = baseInputs ++ devInputs ++ scripts;
-            shellHook = "
+      in
+      {
+        devShells.default = with pkgs; mkShell {
+          inherit env;
+          buildInputs = baseInputs ++ devInputs ++ (attrValues scripts);
+          shellHook = "
               ${my-utils.binaries.${system}.configure-vscode};
               dotenv
             ";
-          };
-        }
-      );
+        };
+      }
+    );
 }
 
 
