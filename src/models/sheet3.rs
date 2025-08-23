@@ -1,13 +1,12 @@
 use super::*;
 use crate::adapters::exchange_rates::models::DayPricePoint;
-use crate::adapters::exchange_rates::{AssetPair, CachedRatesApi, Currency, RatesApi, RATES_API};
-use crate::utils::{DateRange, DatetimeUtcExt, NumExt};
+use crate::adapters::exchange_rates::{CachedRatesApi, RATES_API};
+use crate::utils::{DatetimeUtcExt, NumExt};
 use anyhow::anyhow;
-use chrono::{Duration, TimeZone};
-use rust_decimal::{prelude::Zero, MathematicalOps};
-use static_data::{EUR, GBP, NEXO_EUR};
+use chrono::TimeZone;
+use rust_decimal::MathematicalOps;
+use static_data::{EUR, GBP};
 use std::collections::HashMap;
-use std::ops::Add;
 use tx2::Transaction2;
 
 // TODO recalculate interest on AccountBalanceChanges: go through transaction dates in order
@@ -15,7 +14,7 @@ use tx2::Transaction2;
 #[derive(Debug, Clone)]
 pub struct AccountBalanceChanges {
     pub account_id: AccountId,
-    pub balance_changes: Vec<TxOutput>,
+    pub balance_changes: Vec<TxEffect>,
 }
 impl AccountBalanceChanges {
     pub fn new(account_id: AccountId) -> Self {
@@ -24,7 +23,7 @@ impl AccountBalanceChanges {
             balance_changes: Vec::new(),
         }
     }
-    pub fn push(&mut self, balance_change: TxOutput) -> &mut Self {
+    pub fn push(&mut self, balance_change: TxEffect) -> &mut Self {
         self.balance_changes.push(balance_change);
         self
     }
@@ -101,7 +100,7 @@ impl AccountBalance2 {
                 return Ok(AccountBalance2 {
                     datetime,
                     ..self.clone()
-                })
+                });
             }
         };
         if datetime.date_naive() < self.datetime.date_naive() {
@@ -178,7 +177,8 @@ impl BalanceSheet3 {
                 rate_high: Decimal::from_f64(GBP_TO_EUR).unwrap(),
                 rate_low: Decimal::from_f64(GBP_TO_EUR).unwrap(),
             }
-        };
+        }
+
         Ok(BalanceSheet3 {
             accounts: HashMap::new(),
             date,
@@ -302,7 +302,7 @@ impl BalanceSheet3 {
                 return Err(anyhow!(
                     "Unexpected account type: {:?}",
                     account.account_type()
-                ))
+                ));
             }
         };
         Ok(bal_gbp_rounded)
@@ -408,10 +408,11 @@ mod tests {
         bs = bs.with_date(Utc::now().date_naive());
         assert_eq!(bs.account_balance(&BANK)?, 0);
         // one year later, loan balance should be 1000 + 2% APY
-        assert!(bs
-            .account_balance(&DIRECTORS_LOAN)?
-            .amount
-            .is_close_to(1020));
+        assert!(
+            bs.account_balance(&DIRECTORS_LOAN)?
+                .amount
+                .is_close_to(1020)
+        );
 
         // now repay 1 year later, make sure the balance gets set to zero
         bs.add_tx2(&Transaction2::director_repays_bank_gbp((1020, Utc::now())));

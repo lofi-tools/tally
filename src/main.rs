@@ -1,15 +1,16 @@
 use crate::models::profit_and_loss::ProfitAndLoss;
 use crate::models::sheet3::BalanceSheet3;
+use adapters::exchange_rates::RatesApi;
 use adapters::exchange_rates::models::DayPricePoint;
 use adapters::exchange_rates::{AssetPair, CachedRatesApi, Currency, TimeRange};
-use adapters::{banks::nordigen_client::NordigenClient, exchange_rates::RatesApi};
+use adapters::starling_bank::StarlingClient;
 use anyhow::anyhow;
 use chrono::{DateTime, Duration, NaiveDate};
-use config::Config;
 pub use config::CONFIG;
-use file_cache::{FileBytes, FromFileOrNew};
+use config::Config;
+use file_cache::FileBytes;
 use models::static_data::{DIRECTORS_LOAN, EXPENSES_TO_REPAY, NEXO_EUR};
-use models::tx2::{Transaction2, TxOutput};
+use models::tx2::{Transaction2, TxEffect};
 use models::{AssetId, DateAndAmount};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -20,8 +21,12 @@ pub mod config;
 pub mod models;
 pub mod utils;
 pub mod adapters {
-    pub mod banks;
+    pub mod banks_via_truelayer;
     pub mod exchange_rates;
+    pub mod nordigen_banks;
+    pub mod plaid_banks;
+    pub mod starling_bank;
+    pub mod yapily_banks;
 }
 
 // TODO calculate interest on director's loan -> add interest in transaction
@@ -37,7 +42,7 @@ pub mod adapters {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut state = AppState::from_config(&CONFIG)?;
-    let mut transactions = state.fetch_starling_transactions().await?;
+    let mut transactions = state.bank_api.transactions().await?;
     transactions
         .add_directors_loan_repayments(&state.rates_api)
         .await?;
@@ -62,39 +67,43 @@ async fn main() -> anyhow::Result<()> {
 }
 
 pub struct AppState {
-    pub bank_api: NordigenClient,
+    // pub bank_api: NordigenClient,
+    pub bank_api: StarlingClient,
     pub rates_api: CachedRatesApi,
 }
 impl AppState {
     pub fn from_config(_config: &Config) -> anyhow::Result<Self> {
         Ok(Self {
-            bank_api: NordigenClient::new(),
+            // bank_api: NordigenClient::new(),
+            bank_api: StarlingClient::new()?,
             rates_api: CachedRatesApi::new()?,
         })
     }
 
-    async fn fetch_starling_transactions(&mut self) -> anyhow::Result<ListTxs> {
-        pub async fn make_new(app_state: &mut AppState) -> anyhow::Result<ListTxs> {
-            let transactions = app_state.bank_api.list_starling_transactions().await?;
+    // async fn fetch_starling_transactions(&mut self) -> anyhow::Result<ListTxs> {
+    //     // pub async fn make_new(app_state: &mut AppState) -> anyhow::Result<ListTxs> {
+    //     //     let transactions = app_state.bank_api.list_starling_transactions().await?;
 
-            let mapped_transactions: Vec<Transaction2> = transactions
-                .items
-                .iter()
-                .map(|tx| Transaction2::from_starling(tx))
-                .collect::<Result<Vec<_>, _>>()?;
+    //     //     let mapped_transactions: Vec<Transaction2> = transactions
+    //     //         .items
+    //     //         .iter()
+    //     //         .map(|tx| Transaction2::from_starling(tx))
+    //     //         .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(ListTxs::from_txs(mapped_transactions))
-        }
+    //     //     Ok(ListTxs::from_txs(mapped_transactions))
+    //     // }
 
-        return ListTxs::from_file_or_save_new("starling_transactions.json", make_new(self)).await;
-    }
+    //     // return ListTxs::from_file_or_save_new("starling_transactions.json", make_new(self)).await;
+
+    //     todo!()
+    // }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ListTxs {
+pub struct ListTxns {
     pub txs: Vec<Transaction2>,
 }
-impl ListTxs {
+impl ListTxns {
     pub fn empty() -> Self {
         Self { txs: Vec::new() }
     }
@@ -110,8 +119,8 @@ impl ListTxs {
         self
     }
 
-    pub fn before(&self, date: NaiveDate) -> ListTxs {
-        ListTxs::from_txs(
+    pub fn before(&self, date: NaiveDate) -> ListTxns {
+        ListTxns::from_txs(
             self.txs
                 .iter()
                 .filter(|tx| tx.date() < date)
@@ -119,8 +128,8 @@ impl ListTxs {
                 .collect(),
         )
     }
-    pub fn between_dates(&self, after: NaiveDate, before: NaiveDate) -> ListTxs {
-        ListTxs::from_txs(
+    pub fn between_dates(&self, after: NaiveDate, before: NaiveDate) -> ListTxns {
+        ListTxns::from_txs(
             self.txs
                 .iter()
                 .filter(|tx| tx.date() >= after && tx.date() <= before)
@@ -128,7 +137,7 @@ impl ListTxs {
                 .collect(),
         )
     }
-    pub fn director_borrows(&self) -> ListTxs {
+    pub fn director_borrows(&self) -> ListTxns {
         let mut borrows = self
             .txs
             .iter()
@@ -136,7 +145,7 @@ impl ListTxs {
             .cloned()
             .collect::<Vec<Transaction2>>();
         borrows.sort_by(|a, b| a.datetime.cmp(&b.datetime));
-        ListTxs::from_txs(borrows)
+        ListTxns::from_txs(borrows)
     }
 
     pub async fn add_directors_loan_repayments(
@@ -190,12 +199,12 @@ impl ListTxs {
 
             let repayment_tx = Transaction2 {
                 outputs: vec![
-                    TxOutput {
+                    TxEffect {
                         account_id: NEXO_EUR.id.clone(),
                         amount_diff: min_repay.amount_eur.trunc_with_scale(2),
                         datetime: min_repay.day_price_point.datetime,
                     },
-                    TxOutput {
+                    TxEffect {
                         account_id: DIRECTORS_LOAN.id.clone(),
                         amount_diff: -min_repay.amount_plus_interest_gbp,
                         datetime: min_repay.day_price_point.datetime,
@@ -212,13 +221,13 @@ impl ListTxs {
         self.push_many(&expenses.transactions())
     }
 }
-impl std::ops::Deref for ListTxs {
+impl std::ops::Deref for ListTxns {
     type Target = Vec<Transaction2>;
     fn deref(&self) -> &Self::Target {
         &self.txs
     }
 }
-impl FileBytes for ListTxs {
+impl FileBytes for ListTxns {
     fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
         Ok(serde_json::to_vec_pretty(self)?)
     }
@@ -238,7 +247,7 @@ impl Expense {
         Expense {
             desc: "Professional insurance".to_string(),
             tx: Transaction2 {
-                outputs: vec![TxOutput {
+                outputs: vec![TxEffect {
                     account_id: EXPENSES_TO_REPAY.id.clone(),
                     amount_diff: amount,
                     datetime: DateTime::from_naive_date(date),
@@ -273,7 +282,7 @@ impl Expense {
         Expense {
             desc: "Energy bill".to_string(),
             tx: Transaction2 {
-                outputs: vec![TxOutput {
+                outputs: vec![TxEffect {
                     account_id: EXPENSES_TO_REPAY.id.clone(),
                     amount_diff: amount_repayable,
                     datetime: DateTime::from_naive_date(date),
@@ -302,7 +311,7 @@ impl Expenses {
             .map(|e| Expense {
                 desc: e.description,
                 tx: Transaction2 {
-                    outputs: vec![TxOutput {
+                    outputs: vec![TxEffect {
                         account_id: EXPENSES_TO_REPAY.id.clone(),
                         amount_diff: e.amount,
                         datetime: DateTime::from_naive_date(e.date),

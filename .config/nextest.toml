@@ -1,0 +1,3 @@
+# [[profile.default.overrides]]
+# retries = 1
+# filter = 'test(banks*)'

@@ -21,10 +21,12 @@ pub static DB: LazyLock<StaticDb> = LazyLock::new(|| StaticDb {
         .with_account(Account { id: AccountId(Cow::Borrowed("WAGES_GROSS")), code: 7000, name: "Gross wages paid",details: "",account_tag: AccountTag::ExpensesPaid,asset_id: GBP.clone(),loan_apy: None, })
         .with_account(Account { id: AccountId(Cow::Borrowed("WAGES_NET")), code: 2220, name: "Net wages paid",details: "",account_tag: AccountTag::ExpensesPaid,asset_id: GBP.clone(),loan_apy: None, })
         .with_account(Account{ id:AccountId::new("EXPENSES_TO_REPAY"), code:2230, name: "Provision for expenses to repay (within 1 year)", details:"Employee has paid, has not been repaid yet. Repay within 1 year of accounting period end.", account_tag: AccountTag::ExpensesToRepay, asset_id:GBP.clone(),loan_apy:None })
+        .with_account(Account { id: AccountId(Cow::Borrowed("EXPENSES_PAID")), code: 7005, name: "Expenses paid",details: "",account_tag: AccountTag::ExpensesPaid,asset_id: GBP.clone(),loan_apy: None, })
         // NOTE credit this account when paying PAYE taxes
         .with_account(Account { id: AccountId(Cow::Borrowed("PAYE_PAID")), code: 2210, name: "P.A.Y.E. paid",details: "",account_tag: AccountTag::ExpensesPaid,asset_id: GBP.clone(),loan_apy: None, })
         // NOTE employer's NI debit is balanced with a PAYE credit
         .with_account(Account { id: AccountId(Cow::Borrowed("EMPLOYERS_NI_PAID")), code: 7006, name: "Employer's N.I.",details: "",account_tag: AccountTag::ExpensesPaid,asset_id: GBP.clone(),loan_apy: None, })
+        .with_account(Account { id: AccountId(Cow::Borrowed("TAXES_PAID")), code: 5501, name: "Taxes paid",details: "",account_tag: AccountTag::ExpensesPaid,asset_id: GBP.clone(),loan_apy: None, })
         .with_account(Account { id: AccountId(Cow::Borrowed("CORP_TAX_PAID")), code: 5500, name: "Corporate tax paid",details: "",account_tag: AccountTag::ExpensesPaid,asset_id: GBP.clone(),loan_apy: None, })
         .with_account(Account { id: AccountId(Cow::Borrowed("RETAINED_EARNINGS")), code: 3300, name: "Retained earnings",details: "",account_tag: AccountTag::Equity,asset_id: GBP.clone(),loan_apy: None, })
         // test-only accounts
@@ -48,9 +50,19 @@ pub static WAGES_GROSS: LazyLock<&'static Account> = LazyLock::new(|| DB.account
 pub static WAGES_NET: LazyLock<&'static Account> = LazyLock::new(|| DB.accounts.wages_net());
 pub static EXPENSES_TO_REPAY: LazyLock<&'static Account> =
     LazyLock::new(|| DB.accounts.expenses_to_repay());
+pub static EXPENSES_PAID: LazyLock<&'static Account> = LazyLock::new(|| {
+    DB.accounts
+        .try_get(&AccountId::new("EXPENSES_PAID"))
+        .unwrap()
+});
 pub static EMPLOYERS_NI_PAID: LazyLock<&'static Account> =
     LazyLock::new(|| DB.accounts.employers_ni_paid());
 pub static PAYE_PAID: LazyLock<&'static Account> = LazyLock::new(|| DB.accounts.paye_paid());
+pub static TAXES_PAID: LazyLock<&'static Account> = LazyLock::new(|| {
+    DB.accounts
+        .try_get(&AccountId(Cow::Borrowed("TAXES_PAID")))
+        .unwrap()
+});
 // Test-only accounts
 pub static BORROW: LazyLock<&'static Account> = LazyLock::new(|| {
     DB.accounts

@@ -1,5 +1,5 @@
 use self::models::RateHistory;
-use crate::{utils::api_client_utils::FetchErr, CONFIG};
+use crate::{CONFIG, utils::api_client_utils::FetchErr};
 use anyhow::anyhow;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use file_cache::{CacheInRepo, CacheLocation, FileBytes};
@@ -74,7 +74,7 @@ impl RatesApi for CachedRatesApi {
                     .read()
                     .unwrap()
                     .clone()
-                    .ok_or(ExchangeRateErr::Other(anyhow::anyhow!("No cached rates")))
+                    .ok_or(ExchangeRateErr::Other(anyhow::anyhow!("No cached rates")));
             }
         };
         dbg!(&complement_time_range);
@@ -486,9 +486,9 @@ impl std::fmt::Display for Currency {
     }
 }
 impl std::ops::Mul<Currency> for f64 {
-    type Output = CurrencyAmount;
+    type Output = AssetAmount;
     fn mul(self, currency: Currency) -> Self::Output {
-        CurrencyAmount {
+        AssetAmount {
             currency,
             amount: self,
         }
@@ -502,7 +502,7 @@ pub struct AssetPair {
 }
 
 #[derive(Debug, Clone)]
-pub struct CurrencyAmount {
+pub struct AssetAmount {
     pub currency: Currency,
     pub amount: f64,
 }

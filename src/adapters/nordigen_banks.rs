@@ -1,7 +1,6 @@
 use crate::utils;
 use crate::utils::api_client_utils::{ApiClient, RequestBuilderExt};
 use crate::utils::rand_string;
-use crate::CONFIG;
 use anyhow::anyhow as err;
 use chrono::{DateTime, NaiveDate, Utc};
 use file_cache::{FileBytes, FromFileOrNew};
@@ -12,10 +11,10 @@ use serde_json::json;
 use std::time::Duration;
 
 pub mod map_starling {
-    use crate::adapters::banks::nordigen_client::BookedTransaction;
-    use crate::models::static_data::{BANK, CLIENTS, DIRECTORS_LOAN, PAYE_PAID, SALES, WAGES_NET};
+    use crate::adapters::nordigen_banks::nordigen_client::BookedTransaction;
+    use crate::models::DateAndAmount;
+    use crate::models::static_data::{CLIENTS, DIRECTORS_LOAN, PAYE_PAID, WAGES_NET};
     use crate::models::tx2::Transaction2;
-    use crate::models::{Account, DateAndAmount};
 
     impl Transaction2 {
         pub fn from_starling(starling_tx: &BookedTransaction) -> anyhow::Result<Transaction2> {
@@ -73,7 +72,7 @@ pub mod map_starling {
 
     #[cfg(test)]
     pub mod tests {
-        use crate::adapters::banks::nordigen_client::NordigenClient;
+        use crate::adapters::nordigen_banks::nordigen_client::NordigenClient;
 
         #[tokio::test]
         #[ignore = "API is rate limited"]
@@ -95,20 +94,30 @@ pub mod map_starling {
 }
 
 pub mod nordigen_client {
-    use file_cache::{CacheInRepo, Cacheable};
-
     use super::*;
-    use crate::models::List;
-    use std::{path::PathBuf, sync::LazyLock};
-
+    use crate::{config::expect_env_var, models::List};
+    use file_cache::Cacheable;
     pub const ID_STARLING: &str = "STARLING_SRLGGB3L";
     pub const MAX_TRANSACTION_TOTAL_DAYS: u32 = 730;
     const STARLING_REQUISITION_CACHE_FILE_NAME: &str = "nordigen_starling_requisition";
-    // static STARLING_REQUISISTION_FILE_PATH: LazyLock<PathBuf> =
-    //     LazyLock::new(|| PathBuf::from(STARLING_REQUISITION_CACHE_FILE_NAME));
 
-    #[derive(Default, Debug)]
+    #[derive(Debug)]
+    pub struct NordigenConfig {
+        pub api_secret_id: String,
+        pub api_secret_key: String,
+    }
+    impl NordigenConfig {
+        pub fn from_env() -> Self {
+            NordigenConfig {
+                api_secret_id: expect_env_var("NORDIGEN_API_SECRET_ID"),
+                api_secret_key: expect_env_var("NORDIGEN_API_SECRET_KEY"),
+            }
+        }
+    }
+
+    #[derive(Debug)]
     pub struct NordigenClient {
+        pub config: NordigenConfig,
         pub http_client: reqwest::Client,
         pub access_jwt: Option<String>,
     }
@@ -129,7 +138,11 @@ pub mod nordigen_client {
     }
     impl NordigenClient {
         pub fn new() -> Self {
-            Self::default()
+            NordigenClient {
+                config: NordigenConfig::from_env(),
+                http_client: reqwest::Client::new(),
+                access_jwt: None,
+            }
         }
 
         async fn expect_login(&self) -> anyhow::Result<()> {
@@ -149,8 +162,8 @@ pub mod nordigen_client {
             let response_json = self
                 .post("https://ob.nordigen.com/api/v2/token/new/")
                 .json(&json!({
-                    "secret_id": CONFIG.nordigen_api_secret_id,
-                    "secret_key": CONFIG.nordigen_api_secret_key,
+                    "secret_id": self.config.api_secret_id,
+                    "secret_key": self.config.api_secret_key,
                 }))
                 .fetch_json::<serde_json::Value>()
                 .await?;
@@ -351,15 +364,6 @@ pub mod nordigen_client {
         pub async fn list_starling_transactions(
             &mut self,
         ) -> anyhow::Result<List<BookedTransaction>> {
-            impl FileBytes for List<BookedTransaction> {
-                fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
-                    Ok(serde_json::to_vec_pretty(self)?)
-                }
-                fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-                    Ok(serde_json::from_slice(&bytes)?)
-                }
-            }
-
             async fn fetch(
                 nclient: &mut NordigenClient,
             ) -> anyhow::Result<List<BookedTransaction>> {
@@ -480,7 +484,6 @@ pub mod nordigen_client {
         }
     }
     impl Cacheable for RequisitionFull {
-        type CacheType = CacheInRepo;
         fn static_relative_path_str() -> &'static str {
             STARLING_REQUISITION_CACHE_FILE_NAME
         }
@@ -520,6 +523,14 @@ pub mod nordigen_client {
         #[serde(rename = "remittanceInformationUnstructured")]
         pub remittance_information_unstructured: String,
         pub bank_transaction_code: Option<String>,
+    }
+    impl FileBytes for List<BookedTransaction> {
+        fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
+            Ok(serde_json::to_vec_pretty(self)?)
+        }
+        fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+            Ok(serde_json::from_slice(&bytes)?)
+        }
     }
 
     #[derive(Serialize, Deserialize, Debug)]

@@ -17,7 +17,7 @@
           inherit system;
           overlays = [ (import rust-overlay) ];
         };
-        customRust = pkgs.rust-bin.stable."1.87.0".default.override {
+        customRust = pkgs.rust-bin.stable."1.86.0".default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
           targets = [ ];
         };
@@ -43,7 +43,10 @@
 
         scripts = mapAttrs (name: value: pkgs.writeShellScriptBin name value) {
           run = ''cargo run -- "$@" '';
-          utest = ''cargo nextest run --workspace -E '!test(nordigen)' --nocapture -- $SINGLE_TEST '';
+          packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
+          # utest = ''cargo nextest run --workspace -E '!test(nordigen)' --nocapture -- $SINGLE_TEST '';
+          utest = ''set -x; cargo nextest run $(packages) -E "$TEST_FILTER" --nocapture "$@" -- $SINGLE_TEST '';
+          ftest = ''set -x; cargo nextest run --workspace -E "$TEST_FILTER" --nocapture "$@" '';
           backup-txs = ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'';
         };
 

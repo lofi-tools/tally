@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, NaiveDate, NaiveTime, Utc};
 use num_traits::FromPrimitive;
-use rand::distributions::Alphanumeric;
 use rand::Rng;
+use rand::distributions::Alphanumeric;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer};
 use std::{collections::HashMap, fmt::Debug, hash::Hash, str::FromStr};
@@ -28,6 +28,15 @@ pub mod api_client_utils {
             request_builder.timeout(Duration::new(5, 0))
         }
 
+        // fn with_base_url(&mut self, url: &str) -> &mut Self {
+        //     // Self {
+        //     //     base_url: url.to_string(),
+        //     //     ..self.clone()
+        //     // }
+        //     // self.base_url = url.to_string();
+        //     // self
+        //     todo!()
+        // }
         fn get(&self, url_path: &str) -> RequestBuilder {
             self.default_params(self.http_client().get(self.path(url_path)))
         }
@@ -39,6 +48,7 @@ pub mod api_client_utils {
     #[async_trait::async_trait]
     pub trait RequestBuilderExt {
         async fn fetch_json<D: DeserializeOwned>(self) -> Result<D, FetchErr>;
+        // fn replace_header(self, key: &str, value: impl Into<String>) -> RequestBuilder;
     }
     #[async_trait::async_trait]
     impl RequestBuilderExt for RequestBuilder {
@@ -48,6 +58,7 @@ pub mod api_client_utils {
                 .header("Accept", "application/json");
             let (client, req) = builder.build_split();
             let req = req?;
+            // let headers = req.headers().clone();
 
             let method = req.method().clone();
             let resp = client.execute(req).await?;
@@ -74,6 +85,11 @@ pub mod api_client_utils {
                 })?;
             Ok(deserialized)
         }
+
+        // fn replace_header(self, key: &str, value: impl Into<String>) -> RequestBuilder {
+        //     // self.header(key, value.into())
+        //     self.re().insert(key, value.into());
+        // }
     }
 
     #[derive(thiserror::Error, Debug)]

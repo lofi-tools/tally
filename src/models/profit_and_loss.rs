@@ -1,8 +1,6 @@
-use super::{
-    static_data::{CLIENTS, EXPENSES_TO_REPAY, WAGES_NET},
-    tx2::TxOutput,
-};
-use crate::{adapters::exchange_rates::TimeRange, Expense, Expenses, ListTxs};
+use super::static_data::{CLIENTS, WAGES_NET};
+use super::tx2::TxEffect;
+use crate::{Expenses, ListTxns, adapters::exchange_rates::TimeRange};
 use chrono::NaiveDate;
 use num_traits::FromPrimitive;
 use rust_decimal::Decimal;
@@ -22,7 +20,7 @@ pub struct ProfitAndLoss {
     // net
 }
 impl ProfitAndLoss {
-    pub fn new(dates: TimeRange, txs: &ListTxs) -> anyhow::Result<Self> {
+    pub fn new(dates: TimeRange, txs: &ListTxns) -> anyhow::Result<Self> {
         let txs = txs.between_dates(dates.start.date_naive(), dates.end.date_naive());
         Ok(ProfitAndLoss {
             time_range: dates,
@@ -83,7 +81,7 @@ impl ProfitAndLoss {
         fn tax_new_rate(profit: Decimal) -> Decimal {
             let on_first_50k =
                 (Decimal::from(50_000).min(profit) * Decimal::from_f64(0.19).unwrap()).trunc();
-            let on_rest = match (profit - Decimal::from(50_000)) {
+            let on_rest = match profit - Decimal::from(50_000) {
                 x if x.is_sign_positive() => x * Decimal::from_f64(0.265).unwrap(),
                 _ => Decimal::ZERO,
             }
@@ -147,7 +145,7 @@ impl std::fmt::Display for ProfitAndLoss {
 }
 
 #[derive(Debug)]
-pub struct Outputs(pub Vec<TxOutput>);
+pub struct Outputs(pub Vec<TxEffect>);
 impl Outputs {
     pub fn between_times(&self, times: TimeRange) -> Outputs {
         Outputs(
@@ -191,14 +189,14 @@ impl Outputs {
     }
 }
 
-impl ListTxs {
+impl ListTxns {
     pub fn outputs(&self) -> Outputs {
         Outputs(
             self.txs
                 .iter()
                 .map(|tx| tx.outputs.clone())
                 .flatten()
-                .collect::<Vec<TxOutput>>(),
+                .collect::<Vec<TxEffect>>(),
         )
     }
     pub fn sale_outputs(&self) -> Outputs {
