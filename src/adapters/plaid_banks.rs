@@ -76,13 +76,13 @@ impl PlaidClient {
 
         Ok(())
     }
-    async fn expect_login(&self) -> anyhow::Result<()> {
+    async fn _expect_login(&self) -> anyhow::Result<()> {
         if self.access_token.is_none() {
             return Err(err!("Not logged in"));
         }
         Ok(())
     }
-    async fn ensure_login(&mut self) -> anyhow::Result<()> {
+    async fn _ensure_login(&mut self) -> anyhow::Result<()> {
         if self.access_token.is_none() {
             self.login().await?;
         }

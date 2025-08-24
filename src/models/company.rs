@@ -116,12 +116,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_last_accounting_period() {
+    fn test_last_accounting_period() -> anyhow::Result<()> {
         let company = Company {
             registration_date: NaiveDate::from_ymd_opt(2022, 11, 28).unwrap(),
         };
         let period = company.last_accounting_period();
-        dbg!(period);
+        dbg!(period)?;
+        Ok(())
     }
 
     #[tokio::test]

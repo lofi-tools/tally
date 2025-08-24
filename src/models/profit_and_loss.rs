@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use super::static_data::{CLIENTS, WAGES_NET};
 use super::tx2::TxEffect;
 use crate::{Expenses, ListTxns, adapters::exchange_rates::TimeRange};
@@ -58,8 +60,7 @@ impl ProfitAndLoss {
         self.total_earnings() - self.total_expenses()
     }
     pub fn corp_tax(&self) -> Decimal {
-        // self.overall_profit() * Decimal::from_f64(0.2).unwrap()
-        let OVERALL_PROFIT_OVERRIDE = Decimal::from(68946);
+        const OVERALL_PROFIT_OVERRIDE: LazyLock<Decimal> = LazyLock::new(|| Decimal::from(68946));
 
         let num_days_old_calc = (NaiveDate::from_ymd_opt(2023, 03, 31).unwrap()
             - self.time_range.start.date_naive())
@@ -74,7 +75,7 @@ impl ProfitAndLoss {
             Decimal::from(num_days_new_calc) / Decimal::from(num_days_old_calc + num_days_new_calc);
 
         let tax_old_rate = (Decimal::from_f64(0.2).unwrap()
-            * OVERALL_PROFIT_OVERRIDE
+            * (*OVERALL_PROFIT_OVERRIDE)
             * Decimal::from(proportion_old_calc))
         .trunc();
 
@@ -90,7 +91,7 @@ impl ProfitAndLoss {
             (on_first_50k + on_rest).trunc()
         }
         let tax_new_rate =
-            tax_new_rate(OVERALL_PROFIT_OVERRIDE * Decimal::from(proportion_new_calc));
+            tax_new_rate((*OVERALL_PROFIT_OVERRIDE) * Decimal::from(proportion_new_calc));
 
         // let corp_tax = Decimal::from(50_000) * Decimal::from_f64(0.19).unwrap()
         //     + (OVERALL_PROFIT_OVERRIDE - Decimal::from(50_000)) * Decimal::from_f64(0.265).unwrap();
@@ -178,7 +179,7 @@ impl Outputs {
             .collect();
         Outputs(filtered)
     }
-    fn expenses_to_repay(&self) -> Outputs {
+    fn _expenses_to_repay(&self) -> Outputs {
         Outputs(
             self.0
                 .iter()

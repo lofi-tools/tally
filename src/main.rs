@@ -354,7 +354,7 @@ pub mod test_expenses {
 
     #[test]
     fn test_energy_bills() -> anyhow::Result<()> {
-        let all_energy_bills = Expense::all_energy_bills()?;
+        let _all_energy_bills = Expense::all_energy_bills()?;
         Ok(())
     }
 }

@@ -257,7 +257,7 @@ pub mod nordigen_client {
 
             Ok(got_requisition)
         }
-        async fn list_requisitions(&self) -> anyhow::Result<Vec<RequisitionFull>> {
+        pub async fn list_requisitions(&self) -> anyhow::Result<Vec<RequisitionFull>> {
             self.expect_login().await?;
 
             let requisitions = self

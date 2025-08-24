@@ -78,7 +78,7 @@ impl TrueLayerClient {
         }
         Ok(())
     }
-    async fn ensure_login(&mut self) -> anyhow::Result<()> {
+    async fn _ensure_login(&mut self) -> anyhow::Result<()> {
         if self.access_token.is_none() {
             self.login().await?;
         }
@@ -283,10 +283,10 @@ impl TrueLayerClient {
         //     }
         // }
 
-        async fn fetch(
+        pub async fn _fetch_all_txns(
             tlclient: &mut TrueLayerClient,
         ) -> anyhow::Result<List<TrueLayerTransaction>> {
-            tlclient.ensure_login().await?;
+            tlclient._ensure_login().await?;
 
             let accounts = tlclient.list_accounts().await?;
             let futures = accounts

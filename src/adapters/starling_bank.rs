@@ -81,7 +81,7 @@ impl StarlingClient {
 
         Ok(())
     }
-    async fn expect_login(&self) -> anyhow::Result<()> {
+    async fn _expect_login(&self) -> anyhow::Result<()> {
         if self.access_token.is_none() {
             return Err(err!("Not logged in"));
         }
@@ -241,8 +241,7 @@ pub mod map_starling {
     use super::*;
     use crate::ListTxns;
     use crate::models::static_data::{
-        BANK, CLIENTS, DIRECTORS_LOAN, EXPENSES_PAID, EXPENSES_TO_REPAY, GBP, PAYE_PAID,
-        TAXES_PAID, WAGES_NET,
+        BANK, CLIENTS, DIRECTORS_LOAN, EXPENSES_PAID, GBP, PAYE_PAID, TAXES_PAID, WAGES_NET,
     };
     use crate::models::tx2::Transaction2;
     use crate::models::{Account, Asset2, AssetAmount2, HasAssetAmount, HasDatetime, HasFromTo};
@@ -406,7 +405,7 @@ pub mod tests {
     #[ignore = "Uses external API call"]
     async fn test_starling_fetch_account() -> anyhow::Result<()> {
         let mut client = StarlingClient::new()?;
-        let accounts = client.list_accounts().await?;
+        let _accounts = client.list_accounts().await?;
 
         let primary_account = client.primary_account().await?;
         dbg!(&primary_account);
@@ -418,10 +417,10 @@ pub mod tests {
     #[ignore = "Uses external API call"]
     async fn test_starling_fetch_transactions() -> anyhow::Result<()> {
         let mut client = StarlingClient::new()?;
-        let transactions = client.refetch_transactions().await?;
+        let _transactions = client.refetch_transactions().await?;
         // dbg!(&transactions);
 
-        let cached_transactions = client.transactions().await?;
+        let _cached_transactions = client.transactions().await?;
         // dbg!(&cached_transactions);
 
         Ok(())
