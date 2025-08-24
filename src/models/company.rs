@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Asset2;
 use super::sheet3::BalanceSheetBuilder;
-use super::static_data::AccountId;
+use super::static_data::{AccountId, BALANCE_SHEET_2023_11_30};
 
 pub struct Company {
     pub registration_date: NaiveDate,
@@ -47,7 +47,7 @@ impl Company {
     }
     pub async fn prev_balance_sheet(&self) -> anyhow::Result<BalanceSheet4> {
         let cached = PastBalanceSheets::uniq_from_cache_or(|| async {
-            Ok::<_, String>(PastBalanceSheets::default())
+            Ok::<_, String>(PastBalanceSheets::default().with(BALANCE_SHEET_2023_11_30.clone()))
         })
         .await?;
         let last_accounting_period = self.last_accounting_period()?;
@@ -86,6 +86,18 @@ pub struct BalanceSheet4 {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PastBalanceSheets {
     pub sheets: HashMap<NaiveDate, BalanceSheet4>,
+}
+impl PastBalanceSheets {
+    pub fn get(&self, date: &NaiveDate) -> Option<&BalanceSheet4> {
+        self.sheets.get(date)
+    }
+    pub fn insert(&mut self, sheet: BalanceSheet4) {
+        self.sheets.insert(sheet.date, sheet);
+    }
+    pub fn with(mut self, sheet: BalanceSheet4) -> Self {
+        self.insert(sheet);
+        self
+    }
 }
 impl JsonFileBytes for PastBalanceSheets {}
 impl Cacheable for PastBalanceSheets {}

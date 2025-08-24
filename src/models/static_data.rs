@@ -1,4 +1,5 @@
-use super::{Account, AccountTag, AllAssets, Asset, AssetId};
+use super::{Account, AccountTag, AllAssets, Asset, AssetId, company::BalanceSheet4};
+use chrono::DateTime;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
@@ -163,8 +164,9 @@ impl AccountsMap {
     }
 }
 
-// const BALANCE_SHEET_2023_11_30: LazyLock<BalanceSheetBuilder> = LazyLock::new(|| BalanceSheetBuilder {
-//     accounts: todo!(),
-//     date: todo!(),
-//     rate_gbp_eur: todo!(),
-// });
+pub const BALANCE_SHEET_2023_11_30: LazyLock<BalanceSheet4> = LazyLock::new(|| BalanceSheet4 {
+    account_balances: HashMap::new(),
+    date: DateTime::parse_from_rfc3339("2023-11-30T00:00:00Z")
+        .unwrap()
+        .date_naive(),
+});

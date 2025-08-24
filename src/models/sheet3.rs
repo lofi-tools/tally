@@ -1,6 +1,6 @@
 use super::*;
 use crate::adapters::exchange_rates::models::DayPricePoint;
-use crate::adapters::exchange_rates::{CachedRatesApi, RATES_API};
+use crate::adapters::exchange_rates::{CachedRatesApi, GBP_EUR_PAIR, RATES_API, RatesApi};
 use crate::utils::{DatetimeUtcExt, NumExt};
 use anyhow::anyhow;
 use chrono::TimeZone;
@@ -166,10 +166,10 @@ pub struct BalanceSheetBuilder {
     pub rate_gbp_eur: DayPricePoint,
 }
 impl BalanceSheetBuilder {
-    pub fn now(rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
-        BalanceSheetBuilder::new(Utc::now().date_naive(), rates_api)
-    }
-    pub fn new(date: NaiveDate, rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
+    // pub fn now(rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
+    //     BalanceSheetBuilder::new(Utc::now().date_naive(), rates_api)
+    // }
+    pub async fn new(date: NaiveDate, rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
         fn const_rate_20240827() -> DayPricePoint {
             const GBP_TO_EUR: f64 = 1.18321;
             DayPricePoint {
@@ -182,7 +182,10 @@ impl BalanceSheetBuilder {
         Ok(BalanceSheetBuilder {
             accounts: HashMap::new(),
             date,
-            rate_gbp_eur: rates_api.rate_at_date(date)?.max(const_rate_20240827()),
+            rate_gbp_eur: rates_api
+                .rate_at(&date, &GBP_EUR_PAIR)
+                .await?
+                .max(const_rate_20240827()),
             // .max(rates_api.rate_at_date(NaiveDate::from_ymd_opt(2024, 08, 27).unwrap())?),
             // TODO include notes (include gbp/eur rate at time)
         })
@@ -191,8 +194,15 @@ impl BalanceSheetBuilder {
         self.date = date;
         self
     }
-    pub fn now_from_transactions2(transactions: &[Transaction2]) -> anyhow::Result<Self> {
-        let mut bs = BalanceSheetBuilder::new(Utc::now().date_naive(), &RATES_API)?;
+    // pub fn now_from_transactions2(transactions: &[Transaction2]) -> anyhow::Result<Self> {
+    //     let mut bs = BalanceSheetBuilder::new(Utc::now().date_naive(), &RATES_API)?;
+    //     for tx2 in transactions.iter() {
+    //         bs.add_tx2(tx2);
+    //     }
+    //     Ok(bs)
+    // }
+    pub async fn from_txns(date: NaiveDate, transactions: &[Transaction2]) -> anyhow::Result<Self> {
+        let mut bs = BalanceSheetBuilder::new(date, &RATES_API).await?;
         for tx2 in transactions.iter() {
             bs.add_tx2(tx2);
         }
@@ -370,14 +380,15 @@ impl std::fmt::Display for BalanceSheetBuilder {
 mod tests {
     use super::*;
     use crate::utils::NumExt;
-    use chrono::Months;
+    use chrono::{Duration, Months};
     use static_data::{BANK, CLIENTS, DIRECTORS_LOAN};
 
-    #[test]
-    fn tx2_test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
-        let mut bs = BalanceSheetBuilder::now(&RATES_API)?;
+    #[tokio::test]
+    async fn tx2_test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
+        let yesterday = Utc::now() - Duration::days(1);
+        let mut bs = BalanceSheetBuilder::new(yesterday.date_naive(), &RATES_API).await?;
 
-        bs.add_tx2(&Transaction2::sale((1000, Utc::now())));
+        bs.add_tx2(&Transaction2::sale((1000, yesterday)));
         assert_eq!(bs.account_balance(&BANK)?, 1000);
         assert_eq!(bs.account_balance(&CLIENTS)?, (-1000));
 
@@ -392,11 +403,11 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn tx2_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn tx2_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
         let year_ago = Utc::now() - Months::new(12);
 
-        let mut bs = BalanceSheetBuilder::new(year_ago.date_naive(), &RATES_API)?;
+        let mut bs = BalanceSheetBuilder::new(year_ago.date_naive(), &RATES_API).await?;
         bs.add_tx2(&Transaction2::sale((1000, year_ago)));
         assert_eq!(bs.account_balance(&BANK)?, 1000);
         assert_eq!(bs.account_balance(&CLIENTS)?, (-1000));

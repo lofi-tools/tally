@@ -1,26 +1,47 @@
 use self::models::RateHistory;
 use crate::{CONFIG, utils::api_client_utils::FetchErr};
-use anyhow::anyhow;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use file_cache::{CacheInRepo, CacheLocation, FileBytes};
 use models::DayPricePoint;
 use num_traits::FromPrimitive;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    sync::{LazyLock, RwLock},
-};
+use std::collections::HashMap;
+use std::sync::{LazyLock, RwLock};
 
 pub static RATES_API: LazyLock<CachedRatesApi> = LazyLock::new(|| CachedRatesApi::new().unwrap());
+pub const GBP_EUR_PAIR: LazyLock<AssetPair> = LazyLock::new(|| AssetPair {
+    from_currency: Currency::GBP,
+    to_currency: Currency::EUR,
+});
 
 pub trait RatesApi {
     fn rate_hist(
         &self,
         time_range: &TimeRange,
         currencies: &AssetPair,
-    ) -> impl futures::Future<Output = Result<RateHistory, ExchangeRateErr>>;
+    ) -> impl Future<Output = Result<RateHistory, ExchangeRateErr>>;
+    fn rate_at(
+        &self,
+        date: &NaiveDate,
+        currencies: &AssetPair,
+    ) -> impl Future<Output = Result<DayPricePoint, ExchangeRateErr>> {
+        async {
+            let want_time_range = TimeRange::new(
+                DateTime::<Utc>::from_utc(date.and_hms_opt(0, 0, 0).unwrap(), Utc),
+                DateTime::<Utc>::from_utc(date.and_hms_opt(23, 59, 59).unwrap(), Utc),
+            );
+            let rate_hist = self.rate_hist(&want_time_range, currencies).await?;
+            rate_hist.rate_at(date.clone()).cloned().map_err(|_| {
+                ExchangeRateErr::NoRateForCurrencyAndDate {
+                    currencies: currencies.clone(),
+                    date: date.clone(),
+                }
+            })
+        }
+    }
 }
+
 pub struct CachedRatesApi {
     pub api_client: twelvedata::TwelvedataClient,
     pub rates_gbp_eur: RwLock<Option<RateHistory>>,
@@ -38,12 +59,42 @@ impl CachedRatesApi {
             },
         })
     }
-    pub fn rate_at_date(&self, date: NaiveDate) -> anyhow::Result<DayPricePoint> {
-        let cached_rates_rg = self.rates_gbp_eur.read().unwrap();
-        let cached_rates = cached_rates_rg
-            .as_ref()
-            .ok_or(anyhow!("can't read cached_rates"))?;
-        cached_rates.rate_at(date).cloned()
+    // pub fn rate_at_date(&self, date: NaiveDate) -> anyhow::Result<DayPricePoint> {
+    //     let cached_rates_rg = self.rates_gbp_eur.read().unwrap();
+    //     let cached_rates = cached_rates_rg
+    //         .as_ref()
+    //         .ok_or(anyhow!("can't read cached_rates"))?;
+    //     cached_rates.rate_at(date).cloned()
+    // }
+
+    pub async fn find_complement_timerange(
+        &self,
+        want_time_range: &TimeRange,
+    ) -> Option<TimeRange> {
+        let cached_rates = self.rates_gbp_eur.read().unwrap();
+
+        let cached_rates = match cached_rates.as_ref() {
+            Some(cached_rates) => cached_rates,
+            None => return Some(want_time_range.clone()),
+        };
+        if cached_rates.time_range().contains_range(want_time_range) {
+            return None;
+        }
+
+        let new_start = match cached_rates.contains_datetime(want_time_range.start) {
+            true => cached_rates.time_range().end,
+            false => want_time_range.start,
+        };
+        let new_end = match cached_rates.contains_datetime(want_time_range.end) {
+            true => cached_rates.time_range().start,
+            false => want_time_range.end,
+        };
+
+        let new_timerange = TimeRange::new(new_start, new_end);
+        match new_timerange.dates().num_days() <= 1 {
+            true => None,
+            false => Some(new_timerange),
+        }
     }
 }
 impl RatesApi for CachedRatesApi {
@@ -98,37 +149,6 @@ impl RatesApi for CachedRatesApi {
             .map_err(ExchangeRateErr::Other)?;
 
         Ok(updated_rates.subset(want_time_range))
-    }
-}
-impl CachedRatesApi {
-    pub async fn find_complement_timerange(
-        &self,
-        want_time_range: &TimeRange,
-    ) -> Option<TimeRange> {
-        let cached_rates = self.rates_gbp_eur.read().unwrap();
-
-        let cached_rates = match cached_rates.as_ref() {
-            Some(cached_rates) => cached_rates,
-            None => return Some(want_time_range.clone()),
-        };
-        if cached_rates.time_range().contains_range(want_time_range) {
-            return None;
-        }
-
-        let new_start = match cached_rates.contains_datetime(want_time_range.start) {
-            true => cached_rates.time_range().end,
-            false => want_time_range.start,
-        };
-        let new_end = match cached_rates.contains_datetime(want_time_range.end) {
-            true => cached_rates.time_range().start,
-            false => want_time_range.end,
-        };
-
-        let new_timerange = TimeRange::new(new_start, new_end);
-        match new_timerange.dates().num_days() <= 1 {
-            true => None,
-            false => Some(new_timerange),
-        }
     }
 }
 
@@ -448,8 +468,11 @@ pub mod models {
 pub enum ExchangeRateErr {
     #[error("Failed fetching rates: {0}")]
     FetchErr(#[from] FetchErr),
-    #[error("No rate found for currencies and date")]
-    NoRateForCurrencyAndDate, // TODO include currencies and date
+    #[error("No rate found for {currencies} on {date:?}")]
+    NoRateForCurrencyAndDate {
+        currencies: AssetPair,
+        date: NaiveDate,
+    },
     #[error("Failed parsing response: {0}")]
     ParseJson(serde_json::Error),
     #[error("Failed parsing field {field_name}: {source:?}")]
@@ -495,10 +518,15 @@ impl std::ops::Mul<Currency> for f64 {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AssetPair {
     pub from_currency: Currency,
     pub to_currency: Currency,
+}
+impl std::fmt::Display for AssetPair {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "{}/{}", self.from_currency, self.to_currency)
+    }
 }
 
 #[derive(Debug, Clone)]

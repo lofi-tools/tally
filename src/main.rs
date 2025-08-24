@@ -54,7 +54,8 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let balance_sheet =
-        BalanceSheetBuilder::new(accounting_period.end.date_naive(), &state.rates_api)?
+        BalanceSheetBuilder::new(accounting_period.end.date_naive(), &state.rates_api)
+            .await?
             .with_transactions(&transactions);
     println!("{balance_sheet}");
 
