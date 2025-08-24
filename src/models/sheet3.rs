@@ -170,22 +170,20 @@ impl BalanceSheetBuilder {
     //     BalanceSheetBuilder::new(Utc::now().date_naive(), rates_api)
     // }
     pub async fn new(date: NaiveDate, rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
-        fn const_rate_20240827() -> DayPricePoint {
-            const GBP_TO_EUR: f64 = 1.18321;
-            DayPricePoint {
-                datetime: Utc.with_ymd_and_hms(2024, 08, 27, 0, 0, 0).unwrap(),
-                rate_high: Decimal::from_f64(GBP_TO_EUR).unwrap(),
-                rate_low: Decimal::from_f64(GBP_TO_EUR).unwrap(),
-            }
-        }
+        // fn const_rate_20240827() -> DayPricePoint {
+        //     const GBP_TO_EUR: f64 = 1.18321;
+        //     DayPricePoint {
+        //         datetime: Utc.with_ymd_and_hms(2024, 08, 27, 0, 0, 0).unwrap(),
+        //         rate_high: Decimal::from_f64(GBP_TO_EUR).unwrap(),
+        //         rate_low: Decimal::from_f64(GBP_TO_EUR).unwrap(),
+        //     }
+        // }
 
         Ok(BalanceSheetBuilder {
             accounts: HashMap::new(),
             date,
-            rate_gbp_eur: rates_api
-                .rate_at(&date, &GBP_EUR_PAIR)
-                .await?
-                .max(const_rate_20240827()),
+            rate_gbp_eur: rates_api.rate_at(&date, &GBP_EUR_PAIR).await?,
+            // .max(const_rate_20240827()),
             // .max(rates_api.rate_at_date(NaiveDate::from_ymd_opt(2024, 08, 27).unwrap())?),
             // TODO include notes (include gbp/eur rate at time)
         })

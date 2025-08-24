@@ -21,6 +21,7 @@ pub trait RatesApi {
         time_range: &TimeRange,
         currencies: &AssetPair,
     ) -> impl Future<Output = Result<RateHistory, ExchangeRateErr>>;
+
     fn rate_at(
         &self,
         date: &NaiveDate,
@@ -59,13 +60,6 @@ impl CachedRatesApi {
             },
         })
     }
-    // pub fn rate_at_date(&self, date: NaiveDate) -> anyhow::Result<DayPricePoint> {
-    //     let cached_rates_rg = self.rates_gbp_eur.read().unwrap();
-    //     let cached_rates = cached_rates_rg
-    //         .as_ref()
-    //         .ok_or(anyhow!("can't read cached_rates"))?;
-    //     cached_rates.rate_at(date).cloned()
-    // }
 
     pub async fn find_complement_timerange(
         &self,
@@ -77,20 +71,20 @@ impl CachedRatesApi {
             Some(cached_rates) => cached_rates,
             None => return Some(want_time_range.clone()),
         };
+        // complete overlap: 2 cases
         if cached_rates.time_range().contains_range(want_time_range) {
             return None;
         }
+        if want_time_range.contains_range(&cached_rates.time_range()) {
+            return Some(want_time_range.clone());
+        }
 
-        let new_start = match cached_rates.contains_datetime(want_time_range.start) {
-            true => cached_rates.time_range().end,
-            false => want_time_range.start,
-        };
-        let new_end = match cached_rates.contains_datetime(want_time_range.end) {
-            true => cached_rates.time_range().start,
-            false => want_time_range.end,
+        // partial/no overlap: only 2 cases left
+        let new_timerange = match want_time_range.end > cached_rates.datetime_end() {
+            true => TimeRange::new(cached_rates.datetime_end(), want_time_range.end),
+            false => TimeRange::new(want_time_range.start, cached_rates.datetime_start()),
         };
 
-        let new_timerange = TimeRange::new(new_start, new_end);
         match new_timerange.dates().num_days() <= 1 {
             true => None,
             false => Some(new_timerange),
