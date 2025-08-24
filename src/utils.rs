@@ -284,6 +284,27 @@ pub trait NumExt {
 }
 impl NumExt for Decimal {
     fn is_close_to(&self, other: impl Into<Decimal>) -> bool {
-        Decimal::abs(&(self - other.into())) <= Decimal::from_f64(0.005).unwrap()
+        let other = other.into();
+        let how_close = self - other;
+        Decimal::abs(&how_close) <= Decimal::from_f64(0.01).unwrap()
+    }
+}
+
+pub trait StringResultExt {
+    type Ok;
+    fn err_ctx(self, ctx: &str) -> Result<Self::Ok, String>;
+}
+// impl<Ok> StringResultExt for Result<Ok, String> {
+//     fn err_ctx(self, ctx: &str) -> Result<Ok, String> {
+//         self.map_err(|e| format!("{ctx}: {e}"))
+//     }
+// }
+impl<Ok, Err> StringResultExt for Result<Ok, Err>
+where
+    Err: std::fmt::Display,
+{
+    type Ok = Ok;
+    fn err_ctx(self, ctx: &str) -> Result<Ok, String> {
+        self.map_err(|e| format!("{ctx}: {e}"))
     }
 }

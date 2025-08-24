@@ -132,8 +132,8 @@ mod tests {
         let company = Company {
             registration_date: NaiveDate::from_ymd_opt(2022, 11, 28).unwrap(),
         };
-        let period = company.last_accounting_period();
-        dbg!(period)?;
+        let _period = company.last_accounting_period();
+        // dbg!(period)?;
         Ok(())
     }
 

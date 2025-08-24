@@ -3,7 +3,6 @@ use crate::adapters::exchange_rates::models::DayPricePoint;
 use crate::adapters::exchange_rates::{CachedRatesApi, GBP_EUR_PAIR, RATES_API, RatesApi};
 use crate::utils::{DatetimeUtcExt, NumExt};
 use anyhow::anyhow;
-use chrono::TimeZone;
 use rust_decimal::MathematicalOps;
 use static_data::{EUR, GBP};
 use std::collections::HashMap;
@@ -93,35 +92,37 @@ impl AccountBalance2 {
         let balance_at = self.with_interest_at(datetime)?.amount;
         Ok(Some(balance_at - self.amount))
     }
-    pub fn with_interest_at(&self, datetime: DateTime<Utc>) -> anyhow::Result<AccountBalance2> {
+    pub fn with_interest_at(&self, datetime_end: DateTime<Utc>) -> anyhow::Result<AccountBalance2> {
         let apy = match self.loan_apy()? {
             Some(apy) => apy,
             None => {
                 return Ok(AccountBalance2 {
-                    datetime,
+                    datetime: datetime_end,
                     ..self.clone()
                 });
             }
         };
-        if datetime.date_naive() < self.datetime.date_naive() {
+        if datetime_end.date_naive() < self.datetime.date_naive() {
             return Err(anyhow!(
                 "Trying to calculate interest at a date before the prev balance"
             ));
         }
 
         let num_days =
-            Decimal::from_i64((datetime.date_naive() - self.datetime.date_naive()).num_days())
+            Decimal::from_i64((datetime_end.date_naive() - self.datetime.date_naive()).num_days())
                 .ok_or(anyhow!("Failed converting num_days to Decimal"))?;
         let apy_multiplier_per_year = Decimal::from(1)
             + apy
                 / Decimal::from_f64(100.0)
                     .ok_or(anyhow::Error::msg("value can't be represented as Decimal"))?;
+        // Regulations use 365 days as fixed basis for year / APY calcullations (ignoring leap years)
+        // See 12 CFR 1030.4(d) (CFPB regulations) and Regulation DD (Truth in Savings Act)
         let balance_plus_interest =
-            self.amount * apy_multiplier_per_year.powd(num_days / Decimal::from(366));
+            self.amount * apy_multiplier_per_year.powd(num_days / Decimal::from(365));
 
         Ok(AccountBalance2 {
             account_id: self.account_id.clone(),
-            datetime,
+            datetime: datetime_end,
             amount: balance_plus_interest.trunc_with_scale(2),
         })
     }
@@ -378,7 +379,7 @@ impl std::fmt::Display for BalanceSheetBuilder {
 mod tests {
     use super::*;
     use crate::utils::NumExt;
-    use chrono::{Duration, Months};
+    use chrono::{Days, Duration};
     use static_data::{BANK, CLIENTS, DIRECTORS_LOAN};
 
     #[tokio::test]
@@ -390,11 +391,13 @@ mod tests {
         assert_eq!(bs.account_balance(&BANK)?, 1000);
         assert_eq!(bs.account_balance(&CLIENTS)?, (-1000));
 
-        bs.add_tx2(&Transaction2::director_borrows_gbp(1000_f64));
+        bs.add_tx2(&Transaction2::director_borrows_gbp((1000_f64, yesterday)));
         assert_eq!(bs.account_balance(&BANK)?, 0);
         assert_eq!(bs.account_balance(&DIRECTORS_LOAN)?, 1000);
 
-        bs.add_tx2(&Transaction2::director_repays_bank_gbp(1000_f64));
+        bs.add_tx2(&Transaction2::director_repays_bank_gbp((
+            1000_f64, yesterday,
+        )));
         assert_eq!(bs.account_balance(&BANK)?, 1000);
         assert_eq!(bs.account_balance(&DIRECTORS_LOAN)?, 0);
 
@@ -403,7 +406,8 @@ mod tests {
 
     #[tokio::test]
     async fn tx2_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
-        let year_ago = Utc::now() - Months::new(12);
+        // Regulations use 365 days as fixed basis for year / APY calcullations (ignoring leap years)
+        let year_ago = Utc::now() - Days::new(365);
 
         let mut bs = BalanceSheetBuilder::new(year_ago.date_naive(), &RATES_API).await?;
         bs.add_tx2(&Transaction2::sale((1000, year_ago)));
@@ -427,7 +431,6 @@ mod tests {
         bs.add_tx2(&Transaction2::director_repays_bank_gbp((1020, Utc::now())));
         assert_eq!(bs.account_balance(&BANK)?, 1020);
         assert_eq!(bs.account_balance(&DIRECTORS_LOAN)?, 0);
-        dbg!(bs.account_balance(&DIRECTORS_LOAN)?);
 
         Ok(())
     }

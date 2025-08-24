@@ -302,7 +302,6 @@ pub mod map_starling {
             // && self.spending_category == "LOAN_PRINCIPAL"
         }
         pub fn is_director_repays(&self) -> bool {
-            dbg!(self.reference.to_lowercase());
             self.counter_party_name == "Me Monzo"
                 && self.reference.to_lowercase().contains("loan repayment")
                 && self.spending_category == "LOAN_PRINCIPAL"

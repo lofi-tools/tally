@@ -29,10 +29,20 @@ pub trait RatesApi {
     ) -> impl Future<Output = Result<DayPricePoint, ExchangeRateErr>> {
         async {
             let want_time_range = TimeRange::new(
-                DateTime::<Utc>::from_utc(date.and_hms_opt(0, 0, 0).unwrap(), Utc),
-                DateTime::<Utc>::from_utc(date.and_hms_opt(23, 59, 59).unwrap(), Utc),
+                DateTime::<Utc>::from_naive_utc_and_offset(date.and_hms_opt(0, 0, 0).unwrap(), Utc),
+                DateTime::<Utc>::from_naive_utc_and_offset(
+                    date.and_hms_opt(23, 59, 59).unwrap(),
+                    Utc,
+                ),
             );
             let rate_hist = self.rate_hist(&want_time_range, currencies).await?;
+
+            // let ext_time_range = &rate_hist
+            //     .time_range()?
+            //     .with_ext_start(Duration::days(2))
+            //     .with_ext_end(Duration::days(2));
+            // dbg!(&ext_time_range, rate_hist.subset(ext_time_range));
+
             rate_hist.rate_at(date.clone()).cloned().map_err(|_| {
                 ExchangeRateErr::NoRateForCurrencyAndDate {
                     currencies: currencies.clone(),
@@ -64,30 +74,30 @@ impl CachedRatesApi {
     pub async fn find_complement_timerange(
         &self,
         want_time_range: &TimeRange,
-    ) -> Option<TimeRange> {
+    ) -> Result<Option<TimeRange>, ExchangeRateErr> {
         let cached_rates = self.rates_gbp_eur.read().unwrap();
 
         let cached_rates = match cached_rates.as_ref() {
             Some(cached_rates) => cached_rates,
-            None => return Some(want_time_range.clone()),
+            None => return Ok(Some(want_time_range.clone())),
         };
         // complete overlap: 2 cases
-        if cached_rates.time_range().contains_range(want_time_range) {
-            return None;
+        if cached_rates.time_range()?.contains_range(want_time_range) {
+            return Ok(None);
         }
-        if want_time_range.contains_range(&cached_rates.time_range()) {
-            return Some(want_time_range.clone());
+        if want_time_range.contains_range(&cached_rates.time_range()?) {
+            return Ok(Some(want_time_range.clone()));
         }
 
         // partial/no overlap: only 2 cases left
-        let new_timerange = match want_time_range.end > cached_rates.datetime_end() {
-            true => TimeRange::new(cached_rates.datetime_end(), want_time_range.end),
-            false => TimeRange::new(want_time_range.start, cached_rates.datetime_start()),
+        let new_timerange = match want_time_range.end > cached_rates.datetime_end()? {
+            true => TimeRange::new(cached_rates.datetime_end()?, want_time_range.end),
+            false => TimeRange::new(want_time_range.start, cached_rates.datetime_start()?),
         };
 
         match new_timerange.dates().num_days() <= 1 {
-            true => None,
-            false => Some(new_timerange),
+            true => Ok(None),
+            false => Ok(Some(new_timerange)),
         }
     }
 }
@@ -105,24 +115,22 @@ impl RatesApi for CachedRatesApi {
 
         // if in cache, return from cache
         if let Some(cached_rates) = self.rates_gbp_eur.read().unwrap().as_ref() {
-            if cached_rates.time_range().contains_range(want_time_range) {
+            if cached_rates.time_range()?.contains_range(want_time_range) {
                 return Ok(cached_rates.subset(want_time_range));
             }
         }
 
         // if not in cache, fetch and cache
-        let complement_time_range = match self.find_complement_timerange(want_time_range).await {
+        let complement_time_range = match self.find_complement_timerange(want_time_range).await? {
             Some(complement_time_range) => complement_time_range,
             None => {
-                return self
-                    .rates_gbp_eur
-                    .read()
-                    .unwrap()
-                    .clone()
-                    .ok_or(ExchangeRateErr::Other(anyhow::anyhow!("No cached rates")));
+                let rates = match self.rates_gbp_eur.read().unwrap().clone() {
+                    Some(rates) => rates,
+                    None => return Err(ExchangeRateErr::Other(anyhow::anyhow!("No cached rates"))),
+                };
+                return Ok(rates.subset(want_time_range));
             }
         };
-        dbg!(&complement_time_range);
 
         let new_rates = self
             .api_client
@@ -141,6 +149,15 @@ impl RatesApi for CachedRatesApi {
         updated_rates
             .to_file(&cache_file)
             .map_err(ExchangeRateErr::Other)?;
+
+        dbg!(
+            updated_rates.subset(
+                &updated_rates
+                    .time_range()?
+                    .with_ext_start(Duration::days(2))
+                    .with_ext_end(Duration::days(2))
+            )
+        );
 
         Ok(updated_rates.subset(want_time_range))
     }
@@ -338,8 +355,9 @@ pub mod twelvedata {
 }
 
 pub mod models {
+
     use super::*;
-    use chrono::NaiveDate;
+    use chrono::{NaiveDate, NaiveTime};
     use file_cache::FileBytes;
     use rust_decimal::Decimal;
     use serde::Serialize;
@@ -368,25 +386,31 @@ pub mod models {
                 .find(|dpp| dpp.datetime.date_naive() == date)
                 .ok_or(anyhow::anyhow!("No rate found for date {date}"))
         }
-        pub fn datetime_start(&self) -> DateTime<Utc> {
-            self.rates
+        pub fn datetime_start(&self) -> Result<DateTime<Utc>, ExchangeRateErr> {
+            Ok(self
+                .rates
                 .iter()
                 .min_by_key(|dpp| dpp.datetime)
-                .unwrap()
+                .ok_or(ExchangeRateErr::EmptyRatesHist)?
                 .datetime
+                .with_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+                .unwrap())
         }
-        pub fn datetime_end(&self) -> DateTime<Utc> {
-            self.rates
+        pub fn datetime_end(&self) -> Result<DateTime<Utc>, ExchangeRateErr> {
+            Ok(self
+                .rates
                 .iter()
                 .max_by_key(|dpp| dpp.datetime)
-                .unwrap()
+                .ok_or(ExchangeRateErr::EmptyRatesHist)?
                 .datetime
+                .with_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
+                .unwrap())
         }
-        pub fn time_range(&self) -> TimeRange {
-            TimeRange::new(self.datetime_start(), self.datetime_end())
+        pub fn time_range(&self) -> Result<TimeRange, ExchangeRateErr> {
+            Ok(TimeRange::new(self.datetime_start()?, self.datetime_end()?))
         }
-        pub fn contains_datetime(&self, datetime: DateTime<Utc>) -> bool {
-            self.time_range().contains_datetime(datetime)
+        pub fn contains_datetime(&self, datetime: DateTime<Utc>) -> Result<bool, ExchangeRateErr> {
+            Ok(self.time_range()?.contains_datetime(datetime))
         }
 
         pub fn subset(&self, time_range: &TimeRange) -> Self {
@@ -476,6 +500,10 @@ pub enum ExchangeRateErr {
     },
     #[error("other:{0}")]
     Other(anyhow::Error),
+    #[error("other string err: {0}")]
+    OtherStringErr(String),
+    #[error("Rates history is empty")]
+    EmptyRatesHist,
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -564,6 +592,22 @@ impl TimeRange {
             start: self.start.date_naive(),
             end: self.end.date_naive(),
         }
+    }
+    pub fn extend_start(&mut self, duration: Duration) -> &mut Self {
+        self.start = self.start - duration;
+        self
+    }
+    pub fn with_ext_start(mut self, duration: Duration) -> Self {
+        self.extend_start(duration);
+        self
+    }
+    pub fn extend_end(&mut self, duration: Duration) -> &mut Self {
+        self.end = self.end + duration;
+        self
+    }
+    pub fn with_ext_end(mut self, duration: Duration) -> Self {
+        self.extend_end(duration);
+        self
     }
 }
 
