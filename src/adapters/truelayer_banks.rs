@@ -349,7 +349,7 @@ impl FileBytes for TrueLayerAccessToken {
 
 impl Cacheable for TrueLayerAccessToken {
     // type CacheType = CacheInRepo;
-    fn static_relative_path_str() -> &'static str {
+    fn uniq_relative_path_str() -> &'static str {
         TRUELAYER_ACCESS_TOKEN_CACHE_FILE_NAME
     }
 }
@@ -420,7 +420,7 @@ pub mod tests {
     use super::*;
 
     #[tokio::test]
-    // #[ignore = "Requires TrueLayer API credentials and setup"]
+    #[ignore = "Needs manual web login"]
     async fn test_truelayer_login_and_fetch_accounts() -> anyhow::Result<()> {
         // Ensure CONFIG.truelayer_client_id and CONFIG.truelayer_client_secret are set in .env
         let mut tlclient = TrueLayerClient::new();
@@ -435,7 +435,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires TrueLayer API credentials and setup, and an account_id"]
+    #[ignore = "Needs manual web login"]
     async fn test_truelayer_fetch_transactions() -> anyhow::Result<()> {
         let mut tlclient = TrueLayerClient::new();
         tlclient.login().await?;

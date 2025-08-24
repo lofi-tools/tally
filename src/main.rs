@@ -1,5 +1,5 @@
 use crate::models::profit_and_loss::ProfitAndLoss;
-use crate::models::sheet3::BalanceSheet3;
+use crate::models::sheet3::BalanceSheetBuilder;
 use adapters::exchange_rates::RatesApi;
 use adapters::exchange_rates::models::DayPricePoint;
 use adapters::exchange_rates::{AssetPair, CachedRatesApi, Currency, TimeRange};
@@ -21,11 +21,11 @@ pub mod config;
 pub mod models;
 pub mod utils;
 pub mod adapters {
-    pub mod banks_via_truelayer;
     pub mod exchange_rates;
     pub mod nordigen_banks;
     pub mod plaid_banks;
     pub mod starling_bank;
+    pub mod truelayer_banks;
     pub mod yapily_banks;
 }
 
@@ -53,8 +53,9 @@ async fn main() -> anyhow::Result<()> {
         DateTime::from_naive_date(NaiveDate::from_ymd_opt(2023, 11, 30).unwrap()),
     );
 
-    let balance_sheet = BalanceSheet3::new(accounting_period.end.date_naive(), &state.rates_api)?
-        .with_transactions(&transactions);
+    let balance_sheet =
+        BalanceSheetBuilder::new(accounting_period.end.date_naive(), &state.rates_api)?
+            .with_transactions(&transactions);
     println!("{balance_sheet}");
 
     let profit_and_loss = ProfitAndLoss::new(accounting_period, &transactions)?;

@@ -1,13 +1,9 @@
-use crate::ListTxns;
-use crate::config::expect_env_var;
 use crate::utils::api_client_utils::{ApiClient, RequestBuilderExt};
 use anyhow::anyhow as err;
 use chrono::{DateTime, Utc};
 use file_cache::{Cacheable, FileBytes};
 use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::fs::File;
 
 // TODO pub mod starling_client
 
@@ -62,7 +58,7 @@ impl StarlingClient {
         // temporary solution: use personal access token
         self.access_token = Some(self.config.personal_access_token.clone());
 
-        // if let Ok(cached_token) = TokenResp::from_cache(TokenResp::static_relative_path()) {
+        // if let Ok(cached_token) = TokenResp::from_cache(TokenResp::uniq_relative_path()) {
         //     self.access_token = Some(cached_token.access_token);
         //     return Ok(());
         // }
@@ -115,7 +111,7 @@ impl StarlingClient {
         }
     }
     pub async fn primary_account(&mut self) -> anyhow::Result<Account> {
-        if let Ok(cached_account) = Account::from_cache(Account::static_relative_path()) {
+        if let Ok(cached_account) = Account::from_cache(Account::uniq_relative_path()) {
             return Ok(cached_account);
         }
         let account = self.refetch_primary_account().await?;
@@ -137,7 +133,7 @@ impl StarlingClient {
         Ok(resp)
     }
     // pub async fn transactions(&mut self) -> anyhow::Result<ListTxs> {
-    //     if let Ok(cached_txs) = ListTxs::from_cache(ListTxs::static_relative_path()) {
+    //     if let Ok(cached_txs) = ListTxs::from_cache(ListTxs::uniq_relative_path()) {
     //         return Ok(cached_txs);
     //     }
 
@@ -181,7 +177,7 @@ impl FileBytes for Account {
     }
 }
 impl Cacheable for Account {
-    fn static_relative_path_str() -> &'static str {
+    fn uniq_relative_path_str() -> &'static str {
         "starling_account.json"
     }
 }
@@ -234,7 +230,7 @@ impl FileBytes for ListTransactionsResp {
     }
 }
 impl Cacheable for ListTransactionsResp {
-    fn static_relative_path_str() -> &'static str {
+    fn uniq_relative_path_str() -> &'static str {
         "starling_transactions.json"
     }
 }
@@ -248,21 +244,18 @@ pub mod map_starling {
         BANK, CLIENTS, DIRECTORS_LOAN, EXPENSES_PAID, EXPENSES_TO_REPAY, GBP, PAYE_PAID,
         TAXES_PAID, WAGES_NET,
     };
-    use crate::models::tx2::{Transaction2, TxEffect};
-    use crate::models::{
-        Account, Asset, Asset2, AssetAmount2, HasAssetAmount, HasDatetime, HasFromTo,
-    };
+    use crate::models::tx2::Transaction2;
+    use crate::models::{Account, Asset2, AssetAmount2, HasAssetAmount, HasDatetime, HasFromTo};
 
     impl StarlingClient {
         pub async fn transactions(&mut self) -> anyhow::Result<ListTxns> {
-            if let Ok(cached_mapped_txns) =
-                MappedTxns::from_cache(MappedTxns::static_relative_path())
+            if let Ok(cached_mapped_txns) = MappedTxns::from_cache(MappedTxns::uniq_relative_path())
             {
                 return Ok(cached_mapped_txns.transactions);
             }
 
             let starling_txns = match ListTransactionsResp::from_cache(
-                ListTransactionsResp::static_relative_path(),
+                ListTransactionsResp::uniq_relative_path(),
             ) {
                 Ok(cached) => cached.transactions,
                 Err(_) => {
@@ -385,7 +378,7 @@ pub mod map_starling {
         }
     }
     impl Cacheable for MappedTxns {
-        fn static_relative_path_str() -> &'static str {
+        fn uniq_relative_path_str() -> &'static str {
             "starling_mapped_transactions.json"
         }
     }
@@ -426,18 +419,18 @@ pub mod tests {
     async fn test_starling_fetch_transactions() -> anyhow::Result<()> {
         let mut client = StarlingClient::new()?;
         let transactions = client.refetch_transactions().await?;
-        dbg!(&transactions);
+        // dbg!(&transactions);
 
         let cached_transactions = client.transactions().await?;
-        dbg!(&cached_transactions);
+        // dbg!(&cached_transactions);
 
         Ok(())
     }
     #[tokio::test]
     async fn test_starling_cached_transactions() -> anyhow::Result<()> {
         let mut client = StarlingClient::new()?;
-        let transactions = client.transactions().await?;
-        dbg!(&transactions);
+        let _transactions = client.transactions().await?;
+        // dbg!(&transactions);
         Ok(())
     }
 }

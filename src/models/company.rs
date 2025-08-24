@@ -1,6 +1,14 @@
-use crate::adapters::exchange_rates::TimeRange;
-use crate::utils::DatetimeUtcExt;
+use std::collections::HashMap;
+
+use crate::utils::{DateExt, DatetimeUtcExt};
+use crate::{AppState, adapters::exchange_rates::TimeRange};
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, Utc};
+use file_cache::{Cacheable, JsonFileBytes};
+use serde::{Deserialize, Serialize};
+
+use super::Asset2;
+use super::sheet3::BalanceSheetBuilder;
+use super::static_data::AccountId;
 
 pub struct Company {
     pub registration_date: NaiveDate,
@@ -26,6 +34,30 @@ impl Company {
             end: DateTime::from_naive_date(period_end),
         })
     }
+
+    pub fn next_balance_sheet(
+        &self,
+        _at_date: NaiveDate,
+        _state: &AppState,
+    ) -> anyhow::Result<BalanceSheetBuilder> {
+        let _accounting_period = self.last_accounting_period()?;
+        // BalanceSheetBuilder::new(date, &state.rates_api)?.with_transactions(&transactions);
+
+        todo!()
+    }
+    pub async fn prev_balance_sheet(&self) -> anyhow::Result<BalanceSheet4> {
+        let cached = PastBalanceSheets::uniq_from_cache_or(|| async {
+            Ok::<_, String>(PastBalanceSheets::default())
+        })
+        .await?;
+        let last_accounting_period = self.last_accounting_period()?;
+
+        let sheet = cached
+            .sheets
+            .get(&(last_accounting_period.start - Duration::days(1)).naive_date())
+            .ok_or(anyhow::Error::msg("No balance sheet found"))?;
+        Ok(sheet.clone())
+    }
 }
 
 // pub fn last_of_month(any_day_of_month: NaiveDate) -> NaiveDate {
@@ -45,6 +77,40 @@ pub fn last_of_prev_month(any_day_of_month: NaiveDate) -> NaiveDate {
     first_of_month - Duration::days(1)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceSheet4 {
+    pub account_balances: HashMap<AccountId, u64>,
+    pub date: NaiveDate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PastBalanceSheets {
+    pub sheets: HashMap<NaiveDate, BalanceSheet4>,
+}
+impl JsonFileBytes for PastBalanceSheets {}
+impl Cacheable for PastBalanceSheets {}
+
+pub struct MicroEntityBalanceSheetReport {
+    pub date: NaiveDate,
+    pub currency: Asset2,
+
+    pub called_up_share_capital_not_paid: u64,
+    pub total_fixed_assets: u64,
+    pub total_current_assets: u64,
+    pub prepayments_and_accrued_income: u64,
+    pub creditors_amount_due_within_one_year: u64,
+    /// negative means liabilities
+    pub net_current_assets_or_liabilities: i64,
+    pub total_assets_less_current_liabilities: i64,
+    pub creditors_amount_due_after_more_than_one_year: u64,
+    pub provision_for_liabilities: u64,
+    pub accruals_and_deferred_income: u64,
+    /// negative means liabilities
+    pub total_net_assets_or_liabilities: i64,
+    pub capital_and_reserves: i64,
+    pub num_employees: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,5 +122,15 @@ mod tests {
         };
         let period = company.last_accounting_period();
         dbg!(period);
+    }
+
+    #[tokio::test]
+    async fn test_prev_balance_sheets() -> anyhow::Result<()> {
+        let company = Company {
+            registration_date: NaiveDate::from_ymd_opt(2022, 11, 28).unwrap(),
+        };
+        let sheet = company.prev_balance_sheet().await?;
+        dbg!(sheet);
+        Ok(())
     }
 }

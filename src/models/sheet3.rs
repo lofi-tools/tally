@@ -160,14 +160,14 @@ impl std::fmt::Display for AccountBalance2 {
 }
 
 #[derive(Debug)]
-pub struct BalanceSheet3 {
+pub struct BalanceSheetBuilder {
     pub accounts: HashMap<AccountId, AccountBalanceChanges>,
     pub date: NaiveDate,
     pub rate_gbp_eur: DayPricePoint,
 }
-impl BalanceSheet3 {
+impl BalanceSheetBuilder {
     pub fn now(rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
-        BalanceSheet3::new(Utc::now().date_naive(), rates_api)
+        BalanceSheetBuilder::new(Utc::now().date_naive(), rates_api)
     }
     pub fn new(date: NaiveDate, rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
         fn const_rate_20240827() -> DayPricePoint {
@@ -179,7 +179,7 @@ impl BalanceSheet3 {
             }
         }
 
-        Ok(BalanceSheet3 {
+        Ok(BalanceSheetBuilder {
             accounts: HashMap::new(),
             date,
             rate_gbp_eur: rates_api.rate_at_date(date)?.max(const_rate_20240827()),
@@ -192,7 +192,7 @@ impl BalanceSheet3 {
         self
     }
     pub fn now_from_transactions2(transactions: &[Transaction2]) -> anyhow::Result<Self> {
-        let mut bs = BalanceSheet3::new(Utc::now().date_naive(), &RATES_API)?;
+        let mut bs = BalanceSheetBuilder::new(Utc::now().date_naive(), &RATES_API)?;
         for tx2 in transactions.iter() {
             bs.add_tx2(tx2);
         }
@@ -346,7 +346,7 @@ impl BalanceSheet3 {
         Ok(())
     }
 }
-impl std::fmt::Display for BalanceSheet3 {
+impl std::fmt::Display for BalanceSheetBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "BALANCE SHEET AT DATE: {}", self.date)?;
         writeln!(f, "ASSETS:")?;
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn tx2_test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
-        let mut bs = BalanceSheet3::now(&RATES_API)?;
+        let mut bs = BalanceSheetBuilder::now(&RATES_API)?;
 
         bs.add_tx2(&Transaction2::sale((1000, Utc::now())));
         assert_eq!(bs.account_balance(&BANK)?, 1000);
@@ -396,7 +396,7 @@ mod tests {
     fn tx2_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
         let year_ago = Utc::now() - Months::new(12);
 
-        let mut bs = BalanceSheet3::new(year_ago.date_naive(), &RATES_API)?;
+        let mut bs = BalanceSheetBuilder::new(year_ago.date_naive(), &RATES_API)?;
         bs.add_tx2(&Transaction2::sale((1000, year_ago)));
         assert_eq!(bs.account_balance(&BANK)?, 1000);
         assert_eq!(bs.account_balance(&CLIENTS)?, (-1000));

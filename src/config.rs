@@ -1,7 +1,7 @@
 use std::{env, sync::LazyLock};
 
 use crate::adapters::{
-    banks_via_truelayer::TruelayerConfig, nordigen_banks::nordigen_client::NordigenConfig,
+    nordigen_banks::nordigen_client::NordigenConfig, truelayer_banks::TruelayerConfig,
     yapily_banks::YapilyConfig,
 };
 

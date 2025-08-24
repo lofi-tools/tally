@@ -45,8 +45,8 @@
           run = ''cargo run -- "$@" '';
           packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
           # utest = ''cargo nextest run --workspace -E '!test(nordigen)' --nocapture -- $SINGLE_TEST '';
-          utest = ''set -x; cargo nextest run $(packages) -E "$TEST_FILTER" --nocapture "$@" -- $SINGLE_TEST '';
-          ftest = ''set -x; cargo nextest run --workspace -E "$TEST_FILTER" --nocapture "$@" '';
+          utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
+          ftest = ''set -x; cargo nextest run --workspace -E "''${TEST_FILTER:-all()}" --nocapture "$@" '';
           backup-txs = ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'';
         };
 

@@ -53,7 +53,7 @@ impl PlaidClient {
 
     pub async fn login(&mut self) -> anyhow::Result<()> {
         // try from cache
-        if let Ok(cached_token) = TokenResp::from_cache(TokenResp::static_relative_path()) {
+        if let Ok(cached_token) = TokenResp::from_cache(TokenResp::uniq_relative_path()) {
             self.access_token = Some(cached_token.access_token);
             return Ok(());
         }

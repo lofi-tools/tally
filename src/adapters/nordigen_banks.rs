@@ -484,7 +484,7 @@ pub mod nordigen_client {
         }
     }
     impl Cacheable for RequisitionFull {
-        fn static_relative_path_str() -> &'static str {
+        fn uniq_relative_path_str() -> &'static str {
             STARLING_REQUISITION_CACHE_FILE_NAME
         }
     }
@@ -560,6 +560,7 @@ pub mod nordigen_client {
         use super::*;
 
         #[tokio::test]
+        #[ignore = "Needs manual web login"]
         async fn test_ensure_starling_agreement() -> anyhow::Result<()> {
             let mut nclient = NordigenClient::new();
             nclient.login().await?;
@@ -570,6 +571,7 @@ pub mod nordigen_client {
         }
 
         #[tokio::test]
+        #[ignore = "Needs manual web login"]
         async fn test_ensure_requisition() -> anyhow::Result<()> {
             let mut nclient = NordigenClient::new();
             nclient.login().await?;
