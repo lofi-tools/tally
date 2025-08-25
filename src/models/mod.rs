@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use file_cache::FileBytes;
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::{Deserialize, Serialize};
-use static_data::{AccountId, DB};
+use static_data::AccountId;
 use std::{
     borrow::Cow,
     collections::HashMap,
