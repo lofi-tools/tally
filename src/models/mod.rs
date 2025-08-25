@@ -2,9 +2,15 @@ use chrono::{DateTime, NaiveDate, Utc};
 use file_cache::FileBytes;
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::{Deserialize, Serialize};
-use static_data::AccountId;
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use static_data::{AccountId, DB};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 use tx2::{Transaction2, TxEffect};
+
+use crate::utils::MapExt;
 
 pub mod company;
 pub mod profit_and_loss;
@@ -64,6 +70,8 @@ pub mod tx2 {
                 .map_err(|e| anyhow!("Failed getting datetime: {e}"))?;
             let amount_pos = txn
                 .asset_amount_positive()
+                .map_err(|e| anyhow!("Failed getting asset amount positive: {e}"))?
+                .amount_decimal()
                 .map_err(|e| anyhow!("Failed getting asset amount positive: {e}"))?;
             let from_to = txn
                 .from_to()
@@ -72,12 +80,12 @@ pub mod tx2 {
                 outputs: vec![
                     TxEffect {
                         account_id: from_to.0.id.clone(),
-                        amount_diff: -Decimal::from(amount_pos.amount),
+                        amount_diff: -amount_pos,
                         datetime: datetime.clone(),
                     },
                     TxEffect {
                         account_id: from_to.1.id.clone(),
-                        amount_diff: Decimal::from(amount_pos.amount),
+                        amount_diff: amount_pos,
                         datetime: datetime.clone(),
                     },
                 ],
@@ -400,6 +408,11 @@ impl std::fmt::Display for AssetId {
         write!(f, "{}", self.0)
     }
 }
+impl From<&str> for AssetId {
+    fn from(s: &str) -> Self {
+        AssetId(Cow::Owned(s.to_string()))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Asset {
@@ -426,18 +439,56 @@ impl AllAssets {
 pub enum Asset2 {
     Id(AssetId),
     Val {
-        id: String,
-        amount: u64,
+        id: AssetId,
         decimals: u32,
         symbol: char,
         ticker: String,
     },
 }
+impl Asset2 {
+    pub fn new(id: &str, decimals: u32, symbol: char, ticker: &str) -> Self {
+        Asset2::Val {
+            id: AssetId(Cow::Owned(id.to_string())),
+            decimals,
+            symbol,
+            ticker: ticker.to_string(),
+        }
+    }
+}
+pub static ALL_ASSET2S: LazyLock<HashMap<AssetId, Asset2>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    map.insert("USD".into(), Asset2::new("USD", 2, '$', "USD"));
+    map.insert("EUR".into(), Asset2::new("EUR", 2, '€', "EUR"));
+    map.insert("GBP".into(), Asset2::new("GBP", 2, '£', "GBP"));
+    map
+});
+impl Asset2 {
+    pub fn load(self) -> Result<Asset2, String> {
+        match self {
+            Asset2::Id(id) => Ok(ALL_ASSET2S.try_get(&id).unwrap().clone()),
+            Asset2::Val { .. } => Ok(self),
+        }
+    }
+    pub fn decimals(&self) -> Result<u32, String> {
+        match self {
+            Asset2::Id(_) => self.clone().load()?.decimals(),
+            Asset2::Val { decimals, .. } => Ok(*decimals),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct AssetAmount2 {
     pub asset: Arc<Asset2>,
-    pub amount: u64,
+    amount: u64,
+}
+impl AssetAmount2 {
+    pub fn new(asset: Arc<Asset2>, amount: u64) -> Self {
+        AssetAmount2 { asset, amount }
+    }
+    pub fn amount_decimal(&self) -> Result<Decimal, String> {
+        Ok(Decimal::from(self.amount) / Decimal::from(10u64.pow(self.asset.decimals()?)))
+    }
 }
 
 pub trait HasDatetime {

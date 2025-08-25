@@ -150,15 +150,6 @@ impl RatesApi for CachedRatesApi {
             .to_file(&cache_file)
             .map_err(ExchangeRateErr::Other)?;
 
-        dbg!(
-            updated_rates.subset(
-                &updated_rates
-                    .time_range()?
-                    .with_ext_start(Duration::days(2))
-                    .with_ext_end(Duration::days(2))
-            )
-        );
-
         Ok(updated_rates.subset(want_time_range))
     }
 }

@@ -321,10 +321,10 @@ pub mod map_starling {
     }
     impl HasAssetAmount for StTransaction {
         fn asset_amount_positive(&self) -> Result<AssetAmount2, String> {
-            Ok(AssetAmount2 {
-                asset: Arc::new(Asset2::Id(GBP.clone())), // TODO handle currencies
-                amount: self.amount.minor_units.abs() as u64, // Convert minor units to major units
-            })
+            Ok(AssetAmount2::new(
+                Arc::new(Asset2::Id(GBP.clone())), // TODO handle currencies (though starling is only in GBP)
+                self.amount.minor_units.abs() as u64, // Convert minor units to major units
+            ))
         }
     }
     impl HasDatetime for StTransaction {

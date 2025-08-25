@@ -165,7 +165,11 @@ impl AccountsMap {
 }
 
 pub const BALANCE_SHEET_2023_11_30: LazyLock<BalanceSheet4> = LazyLock::new(|| BalanceSheet4 {
-    account_balances: HashMap::new(),
+    account_balances: {
+        let mut map = HashMap::new();
+        map.insert(NEXO_EUR.id.clone(), 82230_u64);
+        map
+    },
     date: DateTime::parse_from_rfc3339("2023-11-30T00:00:00Z")
         .unwrap()
         .date_naive(),

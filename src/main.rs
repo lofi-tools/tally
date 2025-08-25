@@ -57,6 +57,8 @@ async fn main() -> anyhow::Result<()> {
         BalanceSheetBuilder::new(accounting_period.end.date_naive(), &state.rates_api)
             .await?
             .with_transactions(&transactions);
+    let account_balances = balance_sheet.accounts.clone();
+    dbg!(&account_balances);
     println!("{balance_sheet}");
 
     let profit_and_loss = ProfitAndLoss::new(accounting_period, &transactions)?;
