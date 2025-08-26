@@ -3,7 +3,7 @@ use num_traits::FromPrimitive;
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, fmt::Debug, hash::Hash, str::FromStr};
 
 pub mod api_client_utils {
@@ -346,3 +346,18 @@ pub mod errors {
         }
     }
 }
+
+// pub struct Loader<T>(pub Option<T>);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Loader<T> {
+    Loaded(T),
+    None,
+}
+// impl<T> Loader<T> {
+//     pub fn load(&mut self) -> Result<&T, AnyErr> {}
+// }
+
+// pub trait Load<T> {
+//     type Args;
+//     fn load(&mut self, args: Self::Args) -> Result<&T, AnyErr>;
+// }

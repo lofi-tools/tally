@@ -24,23 +24,29 @@ pub mod tx2 {
     use crate::models::Account;
     use crate::models::DateAndAmount;
     use crate::models::static_data::{BANK, CLIENTS, EXPENSES_TO_REPAY};
-    use crate::utils::DatetimeUtcExt;
+    use crate::utils::{DatetimeUtcExt, Loader};
     use anyhow::anyhow;
     use chrono::{DateTime, NaiveDate, Utc};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
 
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    pub struct TxnId(pub String);
+
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Transaction2 {
-        pub outputs: Vec<TxEffect>,
+        pub id: TxnId,
+        pub effects: Vec<TxEffect>,
         pub datetime: DateTime<Utc>,
         pub tags: Vec<TxnTag>,
     }
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct TxEffect {
+        pub txn_id: TxnId,
         pub account_id: AccountId,
         pub amount_diff: Decimal,
         pub datetime: DateTime<Utc>,
+        pub tags: Loader<Vec<TxnTag>>,
     }
     impl Transaction2 {
         fn tx_to_from(
@@ -49,17 +55,23 @@ pub mod tx2 {
             to: &'static Account,
         ) -> Transaction2 {
             let DateAndAmount { date, amount } = dam.into();
+            let txn_id = TxnId(format!("{}->{}_{}_{}", from.id, to.id, date, amount));
             Transaction2 {
-                outputs: vec![
+                id: txn_id.clone(),
+                effects: vec![
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: from.id.clone(),
                         amount_diff: -amount,
                         datetime: DateTime::from_naive_date(date),
+                        tags: Loader::None,
                     },
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: to.id.clone(),
                         amount_diff: amount,
                         datetime: DateTime::from_naive_date(date),
+                        tags: Loader::None,
                     },
                 ],
                 datetime: DateTime::from_naive_date(date),
@@ -79,17 +91,26 @@ pub mod tx2 {
                 .from_to()
                 .map_err(|e| anyhow!("Failed getting from/to accounts: {e}"))?;
             let tags = txn.tags()?;
+            let txn_id = TxnId(format!(
+                "{}->{}_{}_{}",
+                from_to.0.id, from_to.1.id, datetime, amount_pos
+            ));
             Ok(Transaction2 {
-                outputs: vec![
+                id: txn_id.clone(),
+                effects: vec![
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: from_to.0.id.clone(),
                         amount_diff: -amount_pos,
                         datetime: datetime.clone(),
+                        tags: Loader::Loaded(tags.clone()),
                     },
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: from_to.1.id.clone(),
                         amount_diff: amount_pos,
                         datetime: datetime.clone(),
+                        tags: Loader::Loaded(tags.clone()),
                     },
                 ],
                 datetime,
@@ -176,7 +197,7 @@ pub mod tx2 {
         }
         pub fn loan_output(&self) -> anyhow::Result<&TxEffect> {
             let outputs_with_apy = self
-                .outputs
+                .effects
                 .iter()
                 .filter(|output| {
                     output
@@ -221,7 +242,7 @@ pub mod tx2 {
         //     })
         // }
         pub fn is_expense_to_repay(&self) -> bool {
-            self.outputs.iter().any(|output| {
+            self.effects.iter().any(|output| {
                 output
                     .account()
                     .map(|account| account.id == EXPENSES_TO_REPAY.id)

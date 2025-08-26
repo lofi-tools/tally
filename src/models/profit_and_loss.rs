@@ -104,7 +104,7 @@ impl ProfitAndLoss {
             let curr_total = expenses_by_desc
                 .entry(expense.desc.clone())
                 .or_insert(Decimal::ZERO);
-            *curr_total += expense.tx.outputs[0].amount_diff;
+            *curr_total += expense.tx.effects[0].amount_diff;
         }
         dbg!(&expenses_by_desc);
 
@@ -195,7 +195,7 @@ impl ListTxns {
         Outputs(
             self.txs
                 .iter()
-                .map(|tx| tx.outputs.clone())
+                .map(|tx| tx.effects.clone())
                 .flatten()
                 .collect::<Vec<TxEffect>>(),
         )

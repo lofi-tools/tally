@@ -238,6 +238,8 @@ impl Cacheable for ListTransactionsResp {
 pub mod map_starling {
     use std::sync::Arc;
 
+    use file_cache::JsonFileBytes;
+
     use super::*;
     use crate::ListTxns;
     use crate::models::static_data::{
@@ -301,7 +303,7 @@ pub mod map_starling {
         }
         pub fn is_director_borrows(&self) -> bool {
             self.counter_party_name == "Me Monzo"
-                && self.reference.to_lowercase() == "director's loan"
+                && self.reference.to_lowercase().contains("loan")
                 && self.direction == "OUT"
             // && self.spending_category == "LOAN_PRINCIPAL"
         }
@@ -309,6 +311,7 @@ pub mod map_starling {
             self.counter_party_name == "Me Monzo"
                 && self.reference.to_lowercase().contains("loan repayment")
                 && self.spending_category == "LOAN_PRINCIPAL"
+                && self.direction == "IN"
                 || self.reference == "For corporate tax"
         }
         pub fn is_paye(&self) -> bool {
@@ -338,6 +341,9 @@ pub mod map_starling {
     }
     impl HasFromTo for StTransaction {
         fn from_to(&self) -> Result<(&Account, &Account), String> {
+            if self.source_amount.minor_units == 550000 {
+                dbg!(&self);
+            }
             if self.is_sale() {
                 return Ok((*CLIENTS, *BANK));
             }
@@ -380,19 +386,11 @@ pub mod map_starling {
         }
     }
 
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct MappedTxns {
         pub transactions: ListTxns,
     }
-    impl FileBytes for MappedTxns {
-        fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
-            Ok(serde_json::to_vec_pretty(&self.transactions)?)
-        }
-        fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-            Ok(MappedTxns {
-                transactions: serde_json::from_slice(bytes)?,
-            })
-        }
-    }
+    impl JsonFileBytes for MappedTxns {}
     impl Cacheable for MappedTxns {
         fn uniq_relative_path_str() -> &'static str {
             "starling_mapped_transactions.json"

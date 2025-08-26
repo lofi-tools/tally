@@ -252,7 +252,7 @@ impl BalanceSheetBuilder {
     // }
 
     pub fn add_tx2(&mut self, tx: &Transaction2) -> &mut Self {
-        for output in tx.outputs.iter() {
+        for output in tx.effects.iter() {
             self.account_mut(&output.account_id).push(output.clone());
         }
         self

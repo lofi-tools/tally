@@ -10,12 +10,12 @@ pub use config::CONFIG;
 use config::Config;
 use file_cache::FileBytes;
 use models::static_data::{DIRECTORS_LOAN, EXPENSES_TO_REPAY, NEXO_EUR};
-use models::tx2::{Transaction2, TxEffect};
+use models::tx2::{Transaction2, TxEffect, TxnId};
 use models::{AssetId, DateAndAmount, TXN_TAGS};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use utils::{DateRange, DatetimeUtcExt};
+use utils::{DateRange, DatetimeUtcExt, Loader};
 
 pub mod config;
 pub mod models;
@@ -210,17 +210,26 @@ impl ListTxns {
             }
             let min_repay = min_repay_opt.ok_or(anyhow!("No min repay price point found"))?;
 
+            let txn_id = TxnId(format!(
+                "NEXO_EUR_repayment_{}",
+                min_repay.day_price_point.datetime
+            ));
             let repayment_tx = Transaction2 {
-                outputs: vec![
+                id: txn_id.clone(),
+                effects: vec![
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: NEXO_EUR.id.clone(),
                         amount_diff: min_repay.amount_eur.trunc_with_scale(2),
                         datetime: min_repay.day_price_point.datetime,
+                        tags: Loader::None,
                     },
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: DIRECTORS_LOAN.id.clone(),
                         amount_diff: -min_repay.amount_plus_interest_gbp,
                         datetime: min_repay.day_price_point.datetime,
+                        tags: Loader::None,
                     },
                 ],
                 datetime: min_repay.day_price_point.datetime,
@@ -261,10 +270,13 @@ impl Expense {
         Expense {
             desc: "Professional insurance".to_string(),
             tx: Transaction2 {
-                outputs: vec![TxEffect {
+                id: TxnId(format!("Professional-Insurance_{}", date)),
+                effects: vec![TxEffect {
+                    txn_id: TxnId(format!("Professional-Insurance_{}", date)),
                     account_id: EXPENSES_TO_REPAY.id.clone(),
                     amount_diff: amount,
                     datetime: DateTime::from_naive_date(date),
+                    tags: Loader::None,
                 }],
                 datetime: DateTime::from_naive_date(date),
                 tags: vec![TXN_TAGS.refc("ExpenseToReimburse").unwrap()],
@@ -294,13 +306,17 @@ impl Expense {
     pub fn energy(dam: impl Into<DateAndAmount>) -> Self {
         let DateAndAmount { date, amount } = dam.into();
         let amount_repayable = amount / Decimal::from(4);
+        let txn_id = TxnId(format!("Energy-Bill_{}", date));
         Expense {
             desc: "Energy bill".to_string(),
             tx: Transaction2 {
-                outputs: vec![TxEffect {
+                id: txn_id.clone(),
+                effects: vec![TxEffect {
+                    txn_id: txn_id.clone(),
                     account_id: EXPENSES_TO_REPAY.id.clone(),
                     amount_diff: amount_repayable,
                     datetime: DateTime::from_naive_date(date),
+                    tags: Loader::None,
                 }],
                 datetime: DateTime::from_naive_date(date),
                 tags: vec![TXN_TAGS.refc("ExpenseToReimburse").unwrap()],
@@ -324,17 +340,23 @@ impl Expenses {
         let loaded_expenses: Vec<StoredExpense> = serde_json::from_str(&file_str)?;
         let mut expenses = loaded_expenses
             .into_iter()
-            .map(|e| Expense {
-                desc: e.description,
-                tx: Transaction2 {
-                    outputs: vec![TxEffect {
-                        account_id: EXPENSES_TO_REPAY.id.clone(),
-                        amount_diff: e.amount,
+            .map(|e| {
+                let txn_id = TxnId(format!("Expense_{}", e.date));
+                Expense {
+                    desc: e.description,
+                    tx: Transaction2 {
+                        id: txn_id.clone(),
+                        effects: vec![TxEffect {
+                            txn_id: txn_id.clone(),
+                            account_id: EXPENSES_TO_REPAY.id.clone(),
+                            amount_diff: e.amount,
+                            datetime: DateTime::from_naive_date(e.date),
+                            tags: Loader::None,
+                        }],
                         datetime: DateTime::from_naive_date(e.date),
-                    }],
-                    datetime: DateTime::from_naive_date(e.date),
-                    tags: vec![TXN_TAGS.refc("ReimburseExpense").unwrap()],
-                },
+                        tags: vec![TXN_TAGS.refc("ReimburseExpense").unwrap()],
+                    },
+                }
             })
             .collect::<Vec<_>>();
 
@@ -348,7 +370,7 @@ impl Expenses {
                 .iter()
                 .filter(|ex| {
                     ex.tx
-                        .outputs
+                        .effects
                         .iter()
                         .any(|o| o.account_id == EXPENSES_TO_REPAY.id)
                 })
@@ -360,7 +382,7 @@ impl Expenses {
         self.0.iter().map(|exp| exp.tx.clone()).collect()
     }
     pub fn total(&self) -> Decimal {
-        self.0.iter().map(|exp| exp.tx.outputs[0].amount_diff).sum()
+        self.0.iter().map(|exp| exp.tx.effects[0].amount_diff).sum()
     }
 }
 

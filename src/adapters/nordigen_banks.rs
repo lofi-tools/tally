@@ -36,7 +36,7 @@ pub mod map_starling {
             anyhow::bail!("no match for tx: {starling_tx:?}")
         }
         pub fn is_director_borrows(&self) -> bool {
-            self.outputs.iter().any(|output| {
+            self.effects.iter().any(|output| {
                 output.account_id == DIRECTORS_LOAN.id && output.amount_diff.is_sign_positive()
             })
         }

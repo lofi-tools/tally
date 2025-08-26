@@ -117,7 +117,7 @@ pub mod tests {
     use super::*;
 
     #[tokio::test]
-    // #[ignore = "Test needs manual web login"]
+    #[ignore = "Test needs manual web login"]
     async fn test_plaid_login_and_fetch_accounts() -> anyhow::Result<()> {
         let mut client = PlaidClient::new();
         client.login().await?;
