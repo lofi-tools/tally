@@ -11,7 +11,7 @@ use config::Config;
 use file_cache::FileBytes;
 use models::static_data::{DIRECTORS_LOAN, EXPENSES_TO_REPAY, NEXO_EUR};
 use models::tx2::{Transaction2, TxEffect};
-use models::{AssetId, DateAndAmount};
+use models::{AssetId, DateAndAmount, TXN_TAGS};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -141,6 +141,15 @@ impl ListTxns {
                 .collect(),
         )
     }
+    pub fn in_time_range(&self, time_range: &TimeRange) -> ListTxns {
+        ListTxns::from_txs(
+            self.txs
+                .iter()
+                .filter(|tx| time_range.contains_datetime(tx.datetime))
+                .cloned()
+                .collect(),
+        )
+    }
     pub fn director_borrows(&self) -> ListTxns {
         let mut borrows = self
             .txs
@@ -215,6 +224,7 @@ impl ListTxns {
                     },
                 ],
                 datetime: min_repay.day_price_point.datetime,
+                tags: vec![TXN_TAGS.refc("DirectorRepays")?],
             };
             repayments.push(repayment_tx);
         }
@@ -257,6 +267,7 @@ impl Expense {
                     datetime: DateTime::from_naive_date(date),
                 }],
                 datetime: DateTime::from_naive_date(date),
+                tags: vec![TXN_TAGS.refc("ExpenseToReimburse").unwrap()],
             },
         }
     }
@@ -292,6 +303,7 @@ impl Expense {
                     datetime: DateTime::from_naive_date(date),
                 }],
                 datetime: DateTime::from_naive_date(date),
+                tags: vec![TXN_TAGS.refc("ExpenseToReimburse").unwrap()],
             },
         }
     }
@@ -321,6 +333,7 @@ impl Expenses {
                         datetime: DateTime::from_naive_date(e.date),
                     }],
                     datetime: DateTime::from_naive_date(e.date),
+                    tags: vec![TXN_TAGS.refc("ReimburseExpense").unwrap()],
                 },
             })
             .collect::<Vec<_>>();

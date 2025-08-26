@@ -290,21 +290,59 @@ impl NumExt for Decimal {
     }
 }
 
-pub trait StringResultExt {
-    type Ok;
-    fn err_ctx(self, ctx: &str) -> Result<Self::Ok, String>;
-}
-// impl<Ok> StringResultExt for Result<Ok, String> {
-//     fn err_ctx(self, ctx: &str) -> Result<Ok, String> {
-//         self.map_err(|e| format!("{ctx}: {e}"))
-//     }
-// }
-impl<Ok, Err> StringResultExt for Result<Ok, Err>
-where
-    Err: std::fmt::Display,
-{
-    type Ok = Ok;
-    fn err_ctx(self, ctx: &str) -> Result<Ok, String> {
-        self.map_err(|e| format!("{ctx}: {e}"))
+pub mod errors {
+    // pub trait StringResultExt {
+    //     type Ok;
+    //     fn err_ctx(self, ctx: &str) -> Result<Self::Ok, String>;
+    // }
+    // // impl<Ok> StringResultExt for Result<Ok, String> {
+    // //     fn err_ctx(self, ctx: &str) -> Result<Ok, String> {
+    // //         self.map_err(|e| format!("{ctx}: {e}"))
+    // //     }
+    // // }
+    // impl<Ok, Err> StringResultExt for Result<Ok, Err>
+    // where
+    //     Err: std::fmt::Display,
+    // {
+    //     type Ok = Ok;
+    //     fn err_ctx(self, ctx: &str) -> Result<Ok, String> {
+    //         self.map_err(|e| format!("{ctx}: {e}"))
+    //     }
+    // }
+
+    #[derive(Debug)]
+    pub struct AnyErr(pub String);
+    impl AnyErr {
+        pub fn ctx(self, ctx: &str) -> Self {
+            AnyErr(format!("{ctx}: {self}"))
+        }
+    }
+    impl std::fmt::Display for AnyErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+    impl std::error::Error for AnyErr {}
+    impl From<String> for AnyErr {
+        fn from(s: String) -> Self {
+            AnyErr(s)
+        }
+    }
+    impl From<&str> for AnyErr {
+        fn from(s: &str) -> Self {
+            AnyErr(s.to_string())
+        }
+    }
+
+    pub trait ResultExt<Ok> {
+        fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr>;
+    }
+    impl<Ok, Err> ResultExt<Ok> for Result<Ok, Err>
+    where
+        Err: std::error::Error,
+    {
+        fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr> {
+            self.map_err(|e| AnyErr(format!("{ctx}: {e}")))
+        }
     }
 }

@@ -244,7 +244,11 @@ pub mod map_starling {
         BANK, CLIENTS, DIRECTORS_LOAN, EXPENSES_PAID, GBP, PAYE_PAID, TAXES_PAID, WAGES_NET,
     };
     use crate::models::tx2::Transaction2;
-    use crate::models::{Account, Asset2, AssetAmount2, HasAssetAmount, HasDatetime, HasFromTo};
+    use crate::models::{
+        Account, AddTags, Asset2, AssetAmount2, HasAssetAmount, HasDatetime, HasFromTo, TXN_TAGS,
+        TxnTag,
+    };
+    use crate::utils::errors::AnyErr;
 
     impl StarlingClient {
         pub async fn transactions(&mut self) -> anyhow::Result<ListTxns> {
@@ -359,6 +363,20 @@ pub mod map_starling {
                 "No matching FROM/TO account for transaction: {:?}",
                 self
             ))
+        }
+    }
+    impl AddTags for StTransaction {
+        fn tags(&self) -> Result<Vec<TxnTag>, AnyErr> {
+            Ok(match self {
+                s if s.is_sale() => vec![TXN_TAGS.refc("Income")?],
+                s if s.is_wage() => vec![TXN_TAGS.refc("PayWagesNet")?],
+                s if s.is_director_borrows() => vec![TXN_TAGS.refc("DirectorBorrows")?],
+                s if s.is_director_repays() => vec![TXN_TAGS.refc("DirectorRepays")?],
+                s if s.is_paye() => vec![TXN_TAGS.refc("PayPaye")?],
+                s if s.is_expense_reimbursement() => vec![TXN_TAGS.refc("ReimburseExpense")?],
+                s if s.is_tax() => vec![TXN_TAGS.refc("PayCorporateTax")?],
+                _ => return Err(format!("No matching tags for transaction: {:?}", self).into()),
+            })
         }
     }
 

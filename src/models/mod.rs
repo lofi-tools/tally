@@ -10,7 +10,7 @@ use std::{
 };
 use tx2::{Transaction2, TxEffect};
 
-use crate::utils::MapExt;
+use crate::utils::{MapExt, errors::AnyErr};
 
 pub mod company;
 pub mod profit_and_loss;
@@ -18,9 +18,9 @@ pub mod sheet3;
 pub mod static_data;
 
 pub mod tx2 {
-    use super::HasTxnDetails;
     use super::sheet3::AccountBalance2;
     use super::static_data::{AccountId, DIRECTORS_LOAN, NEXO_GBP, PAYE_PAID, WAGES_NET};
+    use super::{HasTxnDetails, TxnTag};
     use crate::models::Account;
     use crate::models::DateAndAmount;
     use crate::models::static_data::{BANK, CLIENTS, EXPENSES_TO_REPAY};
@@ -34,6 +34,7 @@ pub mod tx2 {
     pub struct Transaction2 {
         pub outputs: Vec<TxEffect>,
         pub datetime: DateTime<Utc>,
+        pub tags: Vec<TxnTag>,
     }
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct TxEffect {
@@ -62,6 +63,7 @@ pub mod tx2 {
                     },
                 ],
                 datetime: DateTime::from_naive_date(date),
+                tags: vec![],
             }
         }
         pub fn from_details(txn: impl HasTxnDetails) -> anyhow::Result<Transaction2> {
@@ -76,6 +78,7 @@ pub mod tx2 {
             let from_to = txn
                 .from_to()
                 .map_err(|e| anyhow!("Failed getting from/to accounts: {e}"))?;
+            let tags = txn.tags()?;
             Ok(Transaction2 {
                 outputs: vec![
                     TxEffect {
@@ -90,6 +93,7 @@ pub mod tx2 {
                     },
                 ],
                 datetime,
+                tags,
             })
         }
 
@@ -498,7 +502,7 @@ pub trait HasAssetAmount {
     fn asset_amount_positive(&self) -> Result<AssetAmount2, String>;
 }
 
-/// Implement either from_to or from_account/to_account
+/// Implement either from_to or from_account/to_account. TODO define 2 traits inherited by a third trait
 pub trait HasFromTo {
     fn from_to(&self) -> Result<(&Account, &Account), String> {
         self.__inner_from_to(0)
@@ -536,8 +540,65 @@ pub trait HasFromTo {
         Ok(())
     }
 }
-pub trait HasTxnDetails: HasDatetime + HasAssetAmount + HasFromTo {}
-impl<T> HasTxnDetails for T where T: HasDatetime + HasAssetAmount + HasFromTo {} // auto-implement for all
+pub trait HasTxnDetails: HasDatetime + HasAssetAmount + HasFromTo + AddTags {}
+impl<T> HasTxnDetails for T where T: HasDatetime + HasAssetAmount + HasFromTo + AddTags {} // auto-implement for all
+
+pub trait AddTags {
+    fn tags(&self) -> Result<Vec<TxnTag>, AnyErr>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TxnTag {
+    pub name: String,
+}
+impl TxnTag {
+    pub fn arc(name: &str) -> Arc<Self> {
+        Arc::new(Self {
+            name: name.to_string(),
+        })
+    }
+    pub fn from_str(s: &str) -> Result<Arc<Self>, AnyErr> {
+        TXN_TAGS.try_get(s)
+    }
+}
+
+pub struct AllStaticTxnTags(pub LazyLock<HashMap<&'static str, Arc<TxnTag>>>);
+impl AllStaticTxnTags {
+    pub fn try_get<'a>(&'a self, s: &str) -> Result<Arc<TxnTag>, AnyErr> {
+        let res = self
+            .0
+            .get(&s)
+            .ok_or(format!("No txn tag found for {s}").into());
+        res.map(|t| t.clone())
+    }
+    pub fn refc(&self, name: &str) -> Result<TxnTag, AnyErr> {
+        self.try_get(name).map(|t| (*t).clone())
+    }
+}
+pub const TXN_TAGS: AllStaticTxnTags = AllStaticTxnTags(LazyLock::new(|| {
+    let mut map = HashMap::new();
+    map.insert("Income", TxnTag::arc("Income"));
+    map.insert("DirectorBorrows", TxnTag::arc("DirectorBorrows"));
+    map.insert("DirectorRepays", TxnTag::arc("DirectorRepays"));
+    map.insert("PayWagesNet", TxnTag::arc("PayWagesNet"));
+    map.insert("PayPaye", TxnTag::arc("PayPaye"));
+    map.insert("ExpenseToReimburse", TxnTag::arc("ExpenseToReimburse"));
+    map.insert("ReimburseExpense", TxnTag::arc("ReimburseExpense"));
+    map.insert("PayCorporateTax", TxnTag::arc("PayCorporateTax"));
+    map
+}));
+
+// pub enum EnumTxnTags {
+//     Income,
+//     DirectorsBorrows,
+//     DirectorRepays,
+//     PayPaye,
+//     ReimburseExpense,
+//     PayCorporateTax,
+// }
+// impl EnumTxnTags {
+
+// }
 
 // pub mod _old {
 //     pub mod tx1 {

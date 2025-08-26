@@ -52,6 +52,18 @@ pub trait RatesApi {
         }
     }
 }
+impl<T> RatesApi for &T
+where
+    T: RatesApi + ?Sized,
+{
+    async fn rate_hist(
+        &self,
+        time_range: &TimeRange,
+        currencies: &AssetPair,
+    ) -> Result<RateHistory, ExchangeRateErr> {
+        (*self).rate_hist(time_range, currencies).await
+    }
+}
 
 pub struct CachedRatesApi {
     pub api_client: twelvedata::TwelvedataClient,
@@ -153,6 +165,15 @@ impl RatesApi for CachedRatesApi {
         Ok(updated_rates.subset(want_time_range))
     }
 }
+// impl RatesApi for CachedRatesApi {
+//     async fn rate_hist(
+//         &self,
+//         time_range: &TimeRange,
+//         currencies: &AssetPair,
+//     ) -> Result<RateHistory, ExchangeRateErr> {
+//         (&self).rate_hist(time_range, currencies).await
+//     }
+// }
 
 impl RatesApi for twelvedata::TwelvedataClient {
     async fn rate_hist(
