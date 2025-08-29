@@ -6,6 +6,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, fmt::Debug, hash::Hash, str::FromStr};
 
+use crate::adapters::exchange_rates::TimeRange;
+
 pub mod api_client_utils {
     use reqwest::{RequestBuilder, StatusCode};
     use serde::de::DeserializeOwned;
@@ -241,10 +243,23 @@ impl DatetimeUtcExt for DateTime<Utc> {
     }
 }
 
-pub struct DateRange(pub NaiveDate, pub NaiveDate);
+#[derive(Debug, Clone)]
+pub struct DateRange {
+    pub start: NaiveDate,
+    pub end: NaiveDate,
+}
 impl DateRange {
     pub fn new(start: impl DateExt, end: impl DateExt) -> Self {
-        DateRange(start.naive_date(), end.naive_date())
+        DateRange {
+            start: start.naive_date(),
+            end: end.naive_date(),
+        }
+    }
+    pub fn from_timerange(timerange: TimeRange) -> Self {
+        DateRange {
+            start: timerange.start.date_naive(),
+            end: timerange.end.date_naive(),
+        }
     }
 }
 impl<'a> IntoIterator for &'a DateRange {
@@ -253,7 +268,7 @@ impl<'a> IntoIterator for &'a DateRange {
     fn into_iter(self) -> Self::IntoIter {
         DateRangeIter {
             range: &self,
-            curr: self.0,
+            curr: self.start,
         }
     }
 }
@@ -264,7 +279,7 @@ pub struct DateRangeIter<'a> {
 impl<'a> Iterator for DateRangeIter<'a> {
     type Item = NaiveDate;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr <= self.range.1 {
+        if self.curr < self.range.end {
             let next = self.curr + Duration::days(1);
             self.curr = next;
             Some(next)
@@ -341,6 +356,15 @@ pub mod errors {
     where
         Err: std::error::Error,
     {
+        fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr> {
+            self.map_err(|e| AnyErr(format!("{ctx}: {e}")))
+        }
+    }
+
+    pub trait AnyhowResExt<Ok> {
+        fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr>;
+    }
+    impl<Ok> AnyhowResExt<Ok> for anyhow::Result<Ok> {
         fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr> {
             self.map_err(|e| AnyErr(format!("{ctx}: {e}")))
         }

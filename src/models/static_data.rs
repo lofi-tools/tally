@@ -1,4 +1,4 @@
-use super::{Account, AccountTag, AllAssets, Asset, AssetId, company::BalanceSheet4};
+use super::{Account, AccountTag, AllAssets, Asset, Asset2, AssetId, company::BalanceSheet4};
 use chrono::DateTime;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -80,23 +80,29 @@ impl AccountId {
     pub fn account(&self) -> anyhow::Result<&'static Account> {
         DB.accounts.try_get(&self)
     }
-
-    // pub fn increase(&self, amount_diff: Decimal) -> TxOutput {
-    //     TxOutput {
-    //         account_id: self.clone(),
-    //         amount_diff,
-    //     }
-    // }
-    // pub fn decrease(&self, amount_diff: Decimal) -> TxOutput {
-    //     TxOutput {
-    //         account_id: self.clone(),
-    //         amount_diff: -amount_diff,
-    //     }
-    // }
 }
 impl std::fmt::Display for AccountId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+impl From<&str> for AccountId {
+    fn from(s: &str) -> Self {
+        AccountId(Cow::Owned(s.to_string()))
+    }
+}
+
+pub trait HasAccountId {
+    fn account_id(&self) -> &AccountId;
+}
+impl HasAccountId for Account {
+    fn account_id(&self) -> &AccountId {
+        &self.id
+    }
+}
+impl HasAccountId for AccountId {
+    fn account_id(&self) -> &AccountId {
+        self
     }
 }
 
@@ -167,11 +173,12 @@ impl AccountsMap {
 pub const BALANCE_SHEET_2023_11_30: LazyLock<BalanceSheet4> = LazyLock::new(|| BalanceSheet4 {
     account_balances: {
         let mut map = HashMap::new();
-        map.insert(NEXO_GBP.id.clone(), 68946_u64);
-        map.insert(EXPENSES_TO_REPAY.id.clone(), 540_u64);
+        map.insert(NEXO_GBP.id.clone(), 68946.into());
+        map.insert(EXPENSES_TO_REPAY.id.clone(), 540.into());
         map
     },
     date: DateTime::parse_from_rfc3339("2023-11-30T00:00:00Z")
         .unwrap()
         .date_naive(),
+    target_currency: GBP.clone(),
 });

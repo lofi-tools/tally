@@ -1,13 +1,18 @@
-use super::Asset2;
-use super::sheet3::BalanceSheetBuilder;
-use super::static_data::{AccountId, BALANCE_SHEET_2023_11_30};
-use crate::adapters::exchange_rates::RatesApi;
-use crate::adapters::exchange_rates::TimeRange;
+use super::sheet3::CompanyAccounts;
+use super::static_data::{
+    AccountId, BALANCE_SHEET_2023_11_30, BANK, DIRECTORS_LOAN, GBP, HasAccountId, NEXO_EUR,
+    NEXO_GBP,
+};
+use super::{Account, Asset, Asset2, AssetId};
+use crate::adapters::exchange_rates::{AssetPair, GBP_EUR_PAIR, RATES_API, TimeRange};
+use crate::adapters::exchange_rates::{Currency, RatesApi};
 use crate::adapters::starling_bank::StarlingClient;
+use crate::utils::errors::AnyErr;
 use crate::utils::{DateExt, DatetimeUtcExt};
 use crate::{Expenses, ListTxns};
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, Utc};
 use file_cache::{Cacheable, JsonFileBytes};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -36,10 +41,11 @@ impl Company {
         let now = Utc::now();
 
         let birthday_this_year = self.registration_date.with_year(now.year()).unwrap();
-        let go_back_n_years = match (birthday_this_year - Months::new(3)) > now.date_naive() {
-            true => 2,
-            false => 1,
-        };
+        let go_back_n_years =
+            match (first_of_next_month(birthday_this_year) - Months::new(3)) > now.date_naive() {
+                true => 2,
+                false => 1,
+            };
 
         let period_start = first_of_next_month(birthday_this_year)
             .with_year(now.year() - go_back_n_years)
@@ -58,15 +64,16 @@ impl Company {
         at_date: NaiveDate,
         bank_api: &mut StarlingClient,
         rates_api: &impl RatesApi,
-    ) -> anyhow::Result<BalanceSheetBuilder> {
+    ) -> anyhow::Result<CompanyAccounts> {
         let accounting_period = self.last_accounting_period()?;
 
         let real_and_virtual_transactions = self
             .real_and_virtual_transactions(bank_api, rates_api)
             .await?
             .in_time_range(&accounting_period);
+        dbg!(&real_and_virtual_transactions);
 
-        let mut builder = BalanceSheetBuilder::new(at_date, &rates_api)
+        let mut builder = CompanyAccounts::new(at_date, &rates_api)
             .await?
             .with_transactions(&real_and_virtual_transactions);
 
@@ -84,11 +91,10 @@ impl Company {
         })
         .await?;
         let last_accounting_period = self.last_accounting_period()?;
-
         let sheet = cached
             .sheets
             .get(&(last_accounting_period.start - Duration::days(1)).naive_date())
-            .ok_or(anyhow::Error::msg("No balance sheet found"))?;
+            .ok_or(anyhow::Error::msg("No prev balance sheet found"))?;
         Ok(sheet.clone())
     }
 
@@ -107,8 +113,8 @@ impl Company {
     ) -> anyhow::Result<ListTxns> {
         let mut transactions = bank_api.transactions().await?;
         transactions
-            .add_directors_loan_repayments(&rates_api)
-            .await?;
+            .add_cached_directors_loan_repayments(&rates_api)
+            .await;
         transactions.add_expenses(Expenses::static_expenses_to_repay()?);
 
         Ok(transactions)
@@ -134,8 +140,71 @@ pub fn last_of_prev_month(any_day_of_month: NaiveDate) -> NaiveDate {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BalanceSheet4 {
-    pub account_balances: HashMap<AccountId, u64>,
+    pub target_currency: AssetId,
+    pub account_balances: HashMap<AccountId, Decimal>,
     pub date: NaiveDate,
+}
+impl BalanceSheet4 {
+    pub fn get(&self, account_id: &AccountId) -> Result<Decimal, AnyErr> {
+        self.account_balances
+            .get(account_id)
+            .cloned()
+            .ok_or("No balance found".into())
+    }
+    pub fn set_value(&mut self, account_id: &AccountId, value: Decimal) {
+        self.account_balances.insert(account_id.clone(), value);
+    }
+    pub async fn total_from_accounts(
+        &self,
+        accounts: &[&Account],
+        rates: impl RatesApi,
+    ) -> Decimal {
+        let mut sum = Decimal::ZERO;
+        for account in accounts {
+            // convert if different currency
+            let balance_converted = match self.target_currency == account.asset_id {
+                true => self.get(account.account_id()).unwrap(),
+                false => {
+                    let asset_pair = GBP_EUR_PAIR.clone(); // TODO
+                    let rate = rates.rate_at(&self.date, &asset_pair).await.unwrap();
+                    let converted = self.get(account.account_id()).unwrap() * rate.rate_low;
+                    converted
+                }
+            };
+            //     let asset_pair = GBP_EUR_PAIR.clone(); // TODO
+            //     let rate = rates.rate_at(&self.date, &asset_pair).await.unwrap();
+            // }
+            sum += balance_converted;
+        }
+
+        sum
+    }
+    pub async fn total_current_assets(&self) -> Decimal {
+        self.total_from_accounts(&[*BANK, *DIRECTORS_LOAN, *NEXO_GBP, *NEXO_EUR], &*RATES_API)
+            .await
+    }
+    pub async fn report(&self) -> MicroEntityBalanceSheetReport {
+        MicroEntityBalanceSheetReport {
+            date: self.date,
+            currency: Asset2::Id(GBP.clone()),
+            called_up_share_capital_not_paid: 0,
+            total_fixed_assets: 0,
+            total_current_assets: {
+                let dec = self.total_current_assets().await;
+                todo!()
+            },
+            prepayments_and_accrued_income: 0,
+            creditors_amount_due_within_one_year: 0,
+            net_current_assets_or_liabilities: 0,
+            total_assets_less_current_liabilities: 0,
+            creditors_amount_due_after_more_than_one_year: 0,
+            provision_for_liabilities: 0,
+            accruals_and_deferred_income: 0,
+            total_net_assets_or_liabilities: 0,
+            capital_and_reserves: 0,
+            num_employees: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -193,7 +262,7 @@ pub struct MicroEntityBalanceSheetReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::exchange_rates::RATES_API;
+    use crate::{adapters::exchange_rates::RATES_API, models::static_data::DIRECTORS_LOAN};
 
     #[test]
     fn test_last_accounting_period() -> anyhow::Result<()> {
@@ -221,13 +290,17 @@ mod tests {
             registration_date: NaiveDate::from_ymd_opt(2022, 11, 28).unwrap(),
         };
         let mut starling = StarlingClient::new()?;
-        let now = Utc::now().date_naive();
+
+        let period = company.last_accounting_period()?;
 
         let sheet = company
-            .balance_sheet_at(now, &mut starling, &*RATES_API)
+            .balance_sheet_at(period.end.date_naive(), &mut starling, &*RATES_API)
             .await?;
-        dbg!(&sheet);
+        // dbg!(&sheet.for_account(*DIRECTORS_LOAN));
         println!("{sheet}");
+
+        let report = sheet.balance_sheet();
+        dbg!(&report);
         Ok(())
     }
 }

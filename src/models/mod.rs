@@ -2,6 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use file_cache::FileBytes;
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::{Deserialize, Serialize};
+use sheet3::AccountBalanceChanges;
 use static_data::AccountId;
 use std::{
     borrow::Cow,
@@ -18,7 +19,7 @@ pub mod sheet3;
 pub mod static_data;
 
 pub mod tx2 {
-    use super::sheet3::AccountBalance2;
+    use super::sheet3::AccountBalanceAt;
     use super::static_data::{AccountId, DIRECTORS_LOAN, NEXO_GBP, PAYE_PAID, WAGES_NET};
     use super::{HasTxnDetails, TxnTag};
     use crate::models::Account;
@@ -32,6 +33,11 @@ pub mod tx2 {
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
     pub struct TxnId(pub String);
+    impl From<&str> for TxnId {
+        fn from(s: &str) -> Self {
+            TxnId(s.to_string())
+        }
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Transaction2 {
@@ -224,7 +230,7 @@ pub mod tx2 {
                 .loan_apy
                 .ok_or(anyhow!("Expected output account to have a loan APY"))
         }
-        pub fn balance_at(&self, date: NaiveDate) -> anyhow::Result<AccountBalance2> {
+        pub fn balance_at(&self, date: NaiveDate) -> anyhow::Result<AccountBalanceAt> {
             self.loan_output()?
                 .balance_at(DateTime::from_naive_date(date))
         }
@@ -260,11 +266,11 @@ pub mod tx2 {
                 .loan_apy
                 .ok_or(anyhow!("Expected output account to have a loan APY"))
         }
-        pub fn balance_at(&self, datetime: DateTime<Utc>) -> anyhow::Result<AccountBalance2> {
+        pub fn balance_at(&self, datetime: DateTime<Utc>) -> anyhow::Result<AccountBalanceAt> {
             self.balance_then().with_interest_at(datetime)
         }
-        pub fn balance_then(&self) -> AccountBalance2 {
-            AccountBalance2 {
+        pub fn balance_then(&self) -> AccountBalanceAt {
+            AccountBalanceAt {
                 account_id: self.account_id.clone(),
                 datetime: self.datetime,
                 amount: self.amount_diff,
@@ -460,7 +466,7 @@ impl AllAssets {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Asset2 {
     Id(AssetId),
     Val {
@@ -1115,3 +1121,30 @@ pub const TXN_TAGS: AllStaticTxnTags = AllStaticTxnTags(LazyLock::new(|| {
 //         }
 //     }
 // }
+
+#[derive(Debug, Clone)]
+pub struct EffectsByAccount(pub HashMap<AccountId, AccountBalanceChanges>);
+impl EffectsByAccount {
+    pub fn new() -> Self {
+        EffectsByAccount(HashMap::new())
+    }
+    pub fn for_account(&self, account_id: &AccountId) -> &AccountBalanceChanges {
+        self.0.get(account_id).unwrap()
+    }
+    pub fn account_mut(&mut self, account_id: &AccountId) -> &mut AccountBalanceChanges {
+        self.0
+            .entry(account_id.clone())
+            .or_insert_with(|| AccountBalanceChanges::new(account_id.clone()))
+    }
+    pub fn accounts_of_type(&self, account_type: AccountType) -> Vec<AccountBalanceChanges> {
+        self.0
+            .values()
+            .filter(|a| {
+                a.account()
+                    .map(|acc| acc.account_type() == account_type)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+}

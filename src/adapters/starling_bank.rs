@@ -1,7 +1,7 @@
 use crate::utils::api_client_utils::{ApiClient, RequestBuilderExt};
 use anyhow::anyhow as err;
 use chrono::{DateTime, Utc};
-use file_cache::{Cacheable, FileBytes};
+use file_cache::{Cacheable, FileBytes, JsonFileBytes};
 use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
 
@@ -221,13 +221,13 @@ pub struct StAmount {
     pub minor_units: i64, // Use i64 for minor units to handle large values
 }
 
-impl FileBytes for ListTransactionsResp {
-    fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
-        Ok(serde_json::to_vec_pretty(self)?)
-    }
-    fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-        Ok(serde_json::from_slice(bytes)?)
-    }
+impl JsonFileBytes for ListTransactionsResp {
+    // fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
+    //     Ok(serde_json::to_vec_pretty(self)?)
+    // }
+    // fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+    //     Ok(serde_json::from_slice(bytes)?)
+    // }
 }
 impl Cacheable for ListTransactionsResp {
     fn uniq_relative_path_str() -> &'static str {
@@ -263,7 +263,8 @@ pub mod map_starling {
                 ListTransactionsResp::uniq_relative_path(),
             ) {
                 Ok(cached) => cached.transactions,
-                Err(_) => {
+                Err(_e) => {
+                    dbg!(&_e);
                     let resp = self.refetch_transactions().await?;
                     resp.to_cache()?;
                     resp.transactions
@@ -341,9 +342,6 @@ pub mod map_starling {
     }
     impl HasFromTo for StTransaction {
         fn from_to(&self) -> Result<(&Account, &Account), String> {
-            if self.source_amount.minor_units == 550000 {
-                dbg!(&self);
-            }
             if self.is_sale() {
                 return Ok((*CLIENTS, *BANK));
             }
