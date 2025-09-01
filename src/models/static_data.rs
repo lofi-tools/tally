@@ -1,4 +1,4 @@
-use super::{Account, AccountTag, AllAssets, Asset, Asset2, AssetId, company::BalanceSheet4};
+use super::{Account, AccountTag, AllAssets, Asset, AssetId, company::BalanceSheet4};
 use chrono::DateTime;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,8 @@ pub static NEXO_GBP: LazyLock<&'static Account> = LazyLock::new(|| DB.accounts.n
 pub static NEXO_EUR: LazyLock<&'static Account> = LazyLock::new(|| DB.accounts.nexo_eur());
 pub static WAGES_GROSS: LazyLock<&'static Account> = LazyLock::new(|| DB.accounts.wages_gross());
 pub static WAGES_NET: LazyLock<&'static Account> = LazyLock::new(|| DB.accounts.wages_net());
+pub static CORP_TAX_PAID: LazyLock<&'static Account> =
+    LazyLock::new(|| DB.accounts.corp_tax_paid());
 pub static EXPENSES_TO_REPAY: LazyLock<&'static Account> =
     LazyLock::new(|| DB.accounts.expenses_to_repay());
 pub static EXPENSES_PAID: LazyLock<&'static Account> = LazyLock::new(|| {

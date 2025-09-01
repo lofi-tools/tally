@@ -243,7 +243,8 @@ pub mod map_starling {
     use super::*;
     use crate::ListTxns;
     use crate::models::static_data::{
-        BANK, CLIENTS, DIRECTORS_LOAN, EXPENSES_PAID, GBP, PAYE_PAID, TAXES_PAID, WAGES_NET,
+        BANK, CLIENTS, CORP_TAX_PAID, DIRECTORS_LOAN, EXPENSES_PAID, GBP, PAYE_PAID, TAXES_PAID,
+        WAGES_NET,
     };
     use crate::models::tx2::Transaction2;
     use crate::models::{
@@ -321,10 +322,11 @@ pub mod map_starling {
         pub fn is_expense_reimbursement(&self) -> bool {
             self.reference.contains("Exp insur") || self.reference.contains("Exp: nrg")
         }
-        pub fn is_tax(&self) -> bool {
+        pub fn is_corp_tax(&self) -> bool {
             let has_oneof_refs =
                 self.reference == "4396519254A00101A" || self.reference == "4396519254A00102A";
             self.counter_party_name.contains("HMRC") && has_oneof_refs
+            // 31 aug 2025: 4396519254A00103A 4396519254A00103A
         }
     }
     impl HasAssetAmount for StTransaction {
@@ -360,8 +362,8 @@ pub mod map_starling {
             if self.is_expense_reimbursement() {
                 return Ok((*BANK, *EXPENSES_PAID));
             }
-            if self.is_tax() {
-                return Ok((*BANK, *TAXES_PAID));
+            if self.is_corp_tax() {
+                return Ok((*BANK, *CORP_TAX_PAID));
             }
             Err(format!(
                 "No matching FROM/TO account for transaction: {:?}",
@@ -378,7 +380,7 @@ pub mod map_starling {
                 s if s.is_director_repays() => vec![TXN_TAGS.refc("DirectorRepays")?],
                 s if s.is_paye() => vec![TXN_TAGS.refc("PayPaye")?],
                 s if s.is_expense_reimbursement() => vec![TXN_TAGS.refc("ReimburseExpense")?],
-                s if s.is_tax() => vec![TXN_TAGS.refc("PayCorporateTax")?],
+                s if s.is_corp_tax() => vec![TXN_TAGS.refc("PayCorporateTax")?],
                 _ => return Err(format!("No matching tags for transaction: {:?}", self).into()),
             })
         }

@@ -1,5 +1,5 @@
 use crate::models::profit_and_loss::ProfitAndLoss;
-use crate::models::sheet3::CompanyAccounts;
+use crate::models::sheet3::CompanyAccounting;
 use adapters::exchange_rates::models::DayPricePoint;
 use adapters::exchange_rates::{AssetPair, CachedRatesApi, Currency, TimeRange};
 use adapters::exchange_rates::{GBP_EUR_PAIR, RatesApi};
@@ -9,6 +9,7 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 pub use config::CONFIG;
 use config::Config;
 use file_cache::{Cacheable, JsonFileBytes};
+use models::profit_and_loss::Outputs;
 use models::static_data::{DIRECTORS_LOAN, EXPENSES_TO_REPAY, NEXO_EUR};
 use models::tx2::{Transaction2, TxEffect, TxnId};
 use models::{AssetId, DateAndAmount, TXN_TAGS};
@@ -54,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         DateTime::from_naive_date(NaiveDate::from_ymd_opt(2023, 11, 30).unwrap()),
     );
 
-    let balance_sheet = CompanyAccounts::new(accounting_period.end.date_naive(), &state.rates_api)
+    let balance_sheet = CompanyAccounting::empty(accounting_period.clone(), &state.rates_api)
         .await?
         .with_transactions(&transactions);
     let account_balances = balance_sheet.accounts.clone();
@@ -103,7 +104,7 @@ impl AppState {
     // }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ListTxns {
     pub txs: Vec<Transaction2>,
 }
@@ -310,6 +311,14 @@ impl ListTxns {
     }
     pub fn add_expenses(&mut self, expenses: Expenses) -> &mut Self {
         self.push_many(&expenses.transactions())
+    }
+
+    fn effects_corp_tax_paid(&self) -> Outputs {
+        let effects = self.outputs();
+        dbg!(&effects);
+        let effects = effects.corp_tax_paid();
+        dbg!(&effects);
+        effects
     }
 }
 impl std::ops::Deref for ListTxns {

@@ -1,14 +1,15 @@
 use super::company::BalanceSheet4;
+use super::profit_and_loss::{Outputs, ProfitAndLoss};
 use super::static_data::HasAccountId;
 use super::*;
 use crate::adapters::exchange_rates::models::DayPricePoint;
 use crate::adapters::exchange_rates::{GBP_EUR_PAIR, RATES_API, RatesApi, TimeRange};
 use crate::utils::errors::{AnyhowResExt, ResultExt};
 use crate::utils::{DateRange, DatetimeUtcExt, NumExt};
+use crate::{Expenses, ListTxns};
 use anyhow::anyhow;
 use rust_decimal::MathematicalOps;
 use static_data::{EUR, GBP};
-use std::ops::Deref;
 use tx2::Transaction2;
 
 // TODO recalculate interest on AccountBalanceChanges: go through transaction dates in order
@@ -274,7 +275,7 @@ impl AccountBalanceAt {
             + apy
                 / Decimal::from_f64(100.0)
                     .ok_or(anyhow::Error::msg("value can't be represented as Decimal"))?;
-        // Regulations use 365 days as fixed basis for year / APY calcullations (ignoring leap years)
+        // Regulations use 365 days as fixed basis for year / APY calculations (ignoring leap years)
         // See 12 CFR 1030.4(d) (CFPB regulations) and Regulation DD (Truth in Savings Act)
         let balance_plus_interest =
             self.amount * apy_multiplier_per_year.powd(num_days / Decimal::from(365));
@@ -320,18 +321,21 @@ impl std::fmt::Display for AccountBalanceAt {
 }
 
 #[derive(Debug)]
-pub struct CompanyAccounts {
+pub struct CompanyAccounting {
+    // pub company: Arc<Company>,
     pub prev_balance_sheet: Option<BalanceSheet4>,
+    pub time_range: TimeRange,
+    pub transactions: ListTxns,
     pub accounts: EffectsByAccount,
     // pub balance_hist_by_account: BalanceHistByAccount,
-    pub date: NaiveDate,
+    // pub date: NaiveDate,
     pub rate_gbp_eur: DayPricePoint,
 }
-impl CompanyAccounts {
+impl CompanyAccounting {
     // pub fn now(rates_api: &CachedRatesApi) -> anyhow::Result<Self> {
     //     BalanceSheetBuilder::new(Utc::now().date_naive(), rates_api)
     // }
-    pub async fn new(date: NaiveDate, rates_api: impl RatesApi) -> anyhow::Result<Self> {
+    pub async fn empty(times: TimeRange, rates_api: impl RatesApi) -> anyhow::Result<Self> {
         // fn const_rate_20240827() -> DayPricePoint {
         //     const GBP_TO_EUR: f64 = 1.18321;
         //     DayPricePoint {
@@ -341,19 +345,23 @@ impl CompanyAccounts {
         //     }
         // }
 
-        Ok(CompanyAccounts {
+        Ok(CompanyAccounting {
+            transactions: ListTxns::empty(),
             accounts: EffectsByAccount::new(),
-            date,
-            rate_gbp_eur: rates_api.rate_at(&date, &GBP_EUR_PAIR).await?,
+            // date,
+            rate_gbp_eur: rates_api
+                .rate_at(&times.end.date_naive(), &GBP_EUR_PAIR)
+                .await?,
             prev_balance_sheet: None,
-            // .max(const_rate_20240827()),
-            // .max(rates_api.rate_at_date(NaiveDate::from_ymd_opt(2024, 08, 27).unwrap())?),
-            // TODO include notes (include gbp/eur rate at time)
+            time_range: times,
         })
     }
-    pub fn with_date(mut self, date: NaiveDate) -> Self {
-        self.date = date;
-        self
+    // pub fn with_date(mut self, date: NaiveDate) -> Self {
+    //     self.date = date;
+    //     self
+    // }
+    pub fn date(&self) -> NaiveDate {
+        self.time_range.end.date_naive()
     }
     pub fn with_prev_balance_sheet(mut self, prev_balance_sheet: BalanceSheet4) -> Self {
         self.prev_balance_sheet = Some(prev_balance_sheet);
@@ -366,13 +374,13 @@ impl CompanyAccounts {
     //     }
     //     Ok(bs)
     // }
-    pub async fn from_txns(date: NaiveDate, transactions: &[Transaction2]) -> anyhow::Result<Self> {
-        let mut bs = CompanyAccounts::new(date, RATES_API.deref()).await?;
-        for tx2 in transactions.iter() {
-            bs.add_tx2(tx2);
-        }
-        Ok(bs)
-    }
+    // pub async fn from_txns(date: NaiveDate, transactions: &[Transaction2]) -> anyhow::Result<Self> {
+    //     let mut bs = CompanyAccounts::new(date, RATES_API.deref()).await?;
+    //     for tx2 in transactions.iter() {
+    //         bs.add_tx2(tx2);
+    //     }
+    //     Ok(bs)
+    // }
 
     pub fn for_account(&self, account: &impl HasAccountId) -> &AccountBalanceChanges {
         self.accounts.for_account(account.account_id())
@@ -380,8 +388,8 @@ impl CompanyAccounts {
     pub fn account_mut(&mut self, account_id: &AccountId) -> &mut AccountBalanceChanges {
         self.accounts.account_mut(account_id)
     }
-    pub fn datetime(&self) -> DateTime<Utc> {
-        DateTime::from_naive_date(self.date)
+    pub fn end(&self) -> DateTime<Utc> {
+        self.time_range.end
     }
     // pub fn add_tx1(&mut self, transaction: &Transaction1) -> &mut Self {
     //     self.account_mut(&transaction.from.id).push(BalanceChange {
@@ -408,6 +416,7 @@ impl CompanyAccounts {
     // }
 
     pub fn add_tx2(&mut self, tx: &Transaction2) -> &mut Self {
+        self.transactions.push(tx.clone());
         for output in tx.effects.iter() {
             self.account_mut(&output.account_id).push(output.clone());
         }
@@ -421,7 +430,7 @@ impl CompanyAccounts {
     }
 
     pub fn account_balance(&self, account: &'static Account) -> anyhow::Result<AccountBalanceAt> {
-        Ok(self.for_account(&account.id).balance_at(self.datetime())?)
+        Ok(self.for_account(&account.id).balance_at(self.end())?)
     }
     // pub fn account_balance_total(&mut self, account: &'static Account) -> anyhow::Result<Decimal> {
     //     Ok(self.account_balance(&account)?)
@@ -445,7 +454,7 @@ impl CompanyAccounts {
         // account_balance_changes: &AccountBalanceChanges,
     ) -> anyhow::Result<Decimal> {
         let account = account_id.account()?;
-        let balance = self.for_account(&account_id).balance_at(self.datetime())?;
+        let balance = self.for_account(&account_id).balance_at(self.end())?;
         // let account = account_balance_changes
         //     .account()
         //     .map_err(|_| std::fmt::Error)?;
@@ -489,7 +498,7 @@ impl CompanyAccounts {
             .account()
             .map_err(|_| std::fmt::Error)?;
         let balance = account_balance_changes
-            .balance_at(self.datetime())
+            .balance_at(self.end())
             .map_err(|_| std::fmt::Error)?;
         write!(
             f,
@@ -509,49 +518,37 @@ impl CompanyAccounts {
     }
 
     pub fn balance_sheet(&self) -> Result<BalanceSheet4, AnyErr> {
-        let mut balance_sheet = self.prev_balance_sheet.clone().unwrap_or(BalanceSheet4 {
-            account_balances: HashMap::new(),
-            date: self.date,
+        let mut balance_sheet = BalanceSheet4 {
+            account_balances: match &self.prev_balance_sheet {
+                Some(prev) => prev.account_balances.clone(),
+                None => HashMap::new(),
+            },
+            date: self.end().date_naive(),
             target_currency: GBP.clone(),
-        });
+        };
 
         for abc in self.accounts.0.values() {
             let start_bal = balance_sheet.get(&abc.account_id).unwrap_or(Decimal::ZERO);
-            dbg!(&start_bal);
+
             let end_bal = start_bal
                 + self
                     .account_balance(&abc.account().unwrap())
                     .unwrap()
                     .amount;
-            dbg!(&end_bal);
+
             balance_sheet.set_value(&abc.account_id, end_bal);
         }
 
-        // let accounts = self
-        //     .accounts
-        //     .0
-        //     .values()
-        //     .map(|a| {
-        //         let start_balance = match &self.prev_balance_sheet {
-        //             Some(prev) => {
-        //                 dbg!(&prev);
-        //                 prev.get(&a.account_id).unwrap_or(Decimal::from(0))
-        //             }
-        //             None => todo!(),
-        //         };
-        //         dbg!(&start_balance);
-        //         let end_balance =
-        //             (self.account_balance(&a.account().unwrap()).unwrap()) + start_balance;
-        //         (a.account_id.clone(), end_balance.amount)
-        //     })
-        //     .collect::<HashMap<AccountId, Decimal>>();
-
         Ok(balance_sheet)
     }
+    pub fn profit_loss(&self) -> Result<ProfitAndLoss, AnyErr> {
+        ProfitAndLoss::new(self.time_range.clone(), &self.transactions)
+    }
 }
-impl std::fmt::Display for CompanyAccounts {
+
+impl std::fmt::Display for CompanyAccounting {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "BALANCE SHEET AT DATE: {}", self.date)?;
+        writeln!(f, "BALANCE SHEET AT DATE: {}", self.end().date_naive())?;
         writeln!(f, "ASSETS:")?;
         for account in &self.accounts_of_type(AccountType::Asset) {
             self.fmt_account(f, account)?;
@@ -608,7 +605,11 @@ mod tests {
     #[tokio::test]
     async fn tx2_test_balance_sheet3_directors_loan_instant_repayment() -> anyhow::Result<()> {
         let yesterday = Utc::now() - Duration::days(1);
-        let mut bs = CompanyAccounts::new(yesterday.date_naive(), RATES_API.deref()).await?;
+        let times = TimeRange {
+            start: Utc::now() - Duration::days(2),
+            end: yesterday,
+        };
+        let mut bs = CompanyAccounting::empty(times, &*RATES_API).await?;
 
         bs.add_tx2(&Transaction2::sale((1000, yesterday)));
         assert_eq!(bs.account_balance(&BANK)?, 1000);
@@ -629,31 +630,35 @@ mod tests {
 
     #[tokio::test]
     async fn tx2_test_balance_sheet3_loan_out_repayment_year_later() -> anyhow::Result<()> {
-        // Regulations use 365 days as fixed basis for year / APY calcullations (ignoring leap years)
+        // Regulations use 365 days as fixed basis for year / APY calculations (ignoring leap years)
         let year_ago = Utc::now() - Days::new(365);
+        let times = TimeRange {
+            start: year_ago,
+            end: Utc::now() - Duration::days(1),
+        };
 
-        let mut bs = CompanyAccounts::new(year_ago.date_naive(), RATES_API.deref()).await?;
-        bs.add_tx2(&Transaction2::sale((1000, year_ago)));
-        assert_eq!(bs.account_balance(&BANK)?, 1000);
-        assert_eq!(bs.account_balance(&CLIENTS)?, (-1000));
+        let mut ca = CompanyAccounting::empty(times, &*RATES_API).await?;
+        ca.add_tx2(&Transaction2::sale((1000, year_ago)));
+        assert_eq!(ca.account_balance(&BANK)?, 1000);
+        assert_eq!(ca.account_balance(&CLIENTS)?, (-1000));
 
-        bs.add_tx2(&Transaction2::director_borrows_gbp((1000, year_ago)));
-        assert_eq!(bs.account_balance(&BANK)?, 0);
-        assert_eq!(bs.account_balance(&DIRECTORS_LOAN)?, 1000);
+        ca.add_tx2(&Transaction2::director_borrows_gbp((1000, year_ago)));
+        assert_eq!(ca.account_balance(&BANK)?, 0);
+        assert_eq!(ca.account_balance(&DIRECTORS_LOAN)?, 1000);
 
-        bs = bs.with_date(Utc::now().date_naive());
-        assert_eq!(bs.account_balance(&BANK)?, 0);
+        // ca = ca.with_date(Utc::now().date_naive());
+        assert_eq!(ca.account_balance(&BANK)?, 0);
         // one year later, loan balance should be 1000 + 2% APY
         assert!(
-            bs.account_balance(&DIRECTORS_LOAN)?
+            ca.account_balance(&DIRECTORS_LOAN)?
                 .amount
                 .is_close_to(1020)
         );
 
         // now repay 1 year later, make sure the balance gets set to zero
-        bs.add_tx2(&Transaction2::director_repays_bank_gbp((1020, Utc::now())));
-        assert_eq!(bs.account_balance(&BANK)?, 1020);
-        assert_eq!(bs.account_balance(&DIRECTORS_LOAN)?, 0);
+        ca.add_tx2(&Transaction2::director_repays_bank_gbp((1020, Utc::now())));
+        assert_eq!(ca.account_balance(&BANK)?, 1020);
+        assert_eq!(ca.account_balance(&DIRECTORS_LOAN)?, 0);
 
         Ok(())
     }
