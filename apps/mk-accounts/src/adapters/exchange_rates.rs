@@ -241,7 +241,7 @@ pub mod twelvedata {
             times: &TimeRange,
             currencies: &AssetPair,
         ) -> Result<Vec<TdPricePoint>, ExchangeRateErr> {
-            const FORMAT_DATE: &'static str = "%Y-%m-%d";
+            const FORMAT_DATE: &str = "%Y-%m-%d";
             let AssetPair {
                 from_currency,
                 to_currency,
