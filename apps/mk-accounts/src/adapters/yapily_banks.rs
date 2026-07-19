@@ -1,7 +1,5 @@
 use base64::{Engine, prelude::BASE64_STANDARD};
 use reqwest::RequestBuilder;
-use serde::ser;
-use serde_json::json;
 
 use crate::{
     config::expect_env_var,
@@ -125,7 +123,7 @@ pub mod tests {
     use super::*;
 
     #[tokio::test]
-    // #[ignore = "Test needs manual web login"]
+    #[ignore = "Test needs manual web login"]
     async fn yapily_login_and_fetch_accounts() -> anyhow::Result<()> {
         let mut client = YapilyClient::new();
         client.login().await?;

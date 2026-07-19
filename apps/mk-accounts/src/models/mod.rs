@@ -2,9 +2,16 @@ use chrono::{DateTime, NaiveDate, Utc};
 use file_cache::FileBytes;
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::{Deserialize, Serialize};
+use sheet3::AccountBalanceChanges;
 use static_data::AccountId;
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 use tx2::{Transaction2, TxEffect};
+
+use crate::utils::{MapExt, errors::AnyErr};
 
 pub mod company;
 pub mod profit_and_loss;
@@ -12,28 +19,40 @@ pub mod sheet3;
 pub mod static_data;
 
 pub mod tx2 {
-    use super::HasTxnDetails;
-    use super::sheet3::AccountBalance2;
+    use super::sheet3::AccountBalanceAt;
     use super::static_data::{AccountId, DIRECTORS_LOAN, NEXO_GBP, PAYE_PAID, WAGES_NET};
+    use super::{HasTxnDetails, TxnTag};
     use crate::models::Account;
     use crate::models::DateAndAmount;
     use crate::models::static_data::{BANK, CLIENTS, EXPENSES_TO_REPAY};
-    use crate::utils::DatetimeUtcExt;
+    use crate::utils::{DatetimeUtcExt, Loader};
     use anyhow::anyhow;
     use chrono::{DateTime, NaiveDate, Utc};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
 
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    pub struct TxnId(pub String);
+    impl From<&str> for TxnId {
+        fn from(s: &str) -> Self {
+            TxnId(s.to_string())
+        }
+    }
+
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Transaction2 {
-        pub outputs: Vec<TxEffect>,
+        pub id: TxnId,
+        pub effects: Vec<TxEffect>,
         pub datetime: DateTime<Utc>,
+        pub tags: Vec<TxnTag>,
     }
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct TxEffect {
+        pub txn_id: TxnId,
         pub account_id: AccountId,
         pub amount_diff: Decimal,
         pub datetime: DateTime<Utc>,
+        pub tags: Loader<Vec<TxnTag>>,
     }
     impl Transaction2 {
         fn tx_to_from(
@@ -42,20 +61,27 @@ pub mod tx2 {
             to: &'static Account,
         ) -> Transaction2 {
             let DateAndAmount { date, amount } = dam.into();
+            let txn_id = TxnId(format!("{}->{}_{}_{}", from.id, to.id, date, amount));
             Transaction2 {
-                outputs: vec![
+                id: txn_id.clone(),
+                effects: vec![
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: from.id.clone(),
                         amount_diff: -amount,
                         datetime: DateTime::from_naive_date(date),
+                        tags: Loader::None,
                     },
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: to.id.clone(),
                         amount_diff: amount,
                         datetime: DateTime::from_naive_date(date),
+                        tags: Loader::None,
                     },
                 ],
                 datetime: DateTime::from_naive_date(date),
+                tags: vec![],
             }
         }
         pub fn from_details(txn: impl HasTxnDetails) -> anyhow::Result<Transaction2> {
@@ -64,24 +90,37 @@ pub mod tx2 {
                 .map_err(|e| anyhow!("Failed getting datetime: {e}"))?;
             let amount_pos = txn
                 .asset_amount_positive()
+                .map_err(|e| anyhow!("Failed getting asset amount positive: {e}"))?
+                .amount_decimal()
                 .map_err(|e| anyhow!("Failed getting asset amount positive: {e}"))?;
             let from_to = txn
                 .from_to()
                 .map_err(|e| anyhow!("Failed getting from/to accounts: {e}"))?;
+            let tags = txn.tags()?;
+            let txn_id = TxnId(format!(
+                "{}->{}_{}_{}",
+                from_to.0.id, from_to.1.id, datetime, amount_pos
+            ));
             Ok(Transaction2 {
-                outputs: vec![
+                id: txn_id.clone(),
+                effects: vec![
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: from_to.0.id.clone(),
-                        amount_diff: -Decimal::from(amount_pos.amount),
+                        amount_diff: -amount_pos,
                         datetime: datetime.clone(),
+                        tags: Loader::Loaded(tags.clone()),
                     },
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: from_to.1.id.clone(),
-                        amount_diff: Decimal::from(amount_pos.amount),
+                        amount_diff: amount_pos,
                         datetime: datetime.clone(),
+                        tags: Loader::Loaded(tags.clone()),
                     },
                 ],
                 datetime,
+                tags,
             })
         }
 
@@ -164,7 +203,7 @@ pub mod tx2 {
         }
         pub fn loan_output(&self) -> anyhow::Result<&TxEffect> {
             let outputs_with_apy = self
-                .outputs
+                .effects
                 .iter()
                 .filter(|output| {
                     output
@@ -191,7 +230,7 @@ pub mod tx2 {
                 .loan_apy
                 .ok_or(anyhow!("Expected output account to have a loan APY"))
         }
-        pub fn balance_at(&self, date: NaiveDate) -> anyhow::Result<AccountBalance2> {
+        pub fn balance_at(&self, date: NaiveDate) -> anyhow::Result<AccountBalanceAt> {
             self.loan_output()?
                 .balance_at(DateTime::from_naive_date(date))
         }
@@ -209,7 +248,7 @@ pub mod tx2 {
         //     })
         // }
         pub fn is_expense_to_repay(&self) -> bool {
-            self.outputs.iter().any(|output| {
+            self.effects.iter().any(|output| {
                 output
                     .account()
                     .map(|account| account.id == EXPENSES_TO_REPAY.id)
@@ -227,11 +266,11 @@ pub mod tx2 {
                 .loan_apy
                 .ok_or(anyhow!("Expected output account to have a loan APY"))
         }
-        pub fn balance_at(&self, datetime: DateTime<Utc>) -> anyhow::Result<AccountBalance2> {
+        pub fn balance_at(&self, datetime: DateTime<Utc>) -> anyhow::Result<AccountBalanceAt> {
             self.balance_then().with_interest_at(datetime)
         }
-        pub fn balance_then(&self) -> AccountBalance2 {
-            AccountBalance2 {
+        pub fn balance_then(&self) -> AccountBalanceAt {
+            AccountBalanceAt {
                 account_id: self.account_id.clone(),
                 datetime: self.datetime,
                 amount: self.amount_diff,
@@ -400,6 +439,11 @@ impl std::fmt::Display for AssetId {
         write!(f, "{}", self.0)
     }
 }
+impl From<&str> for AssetId {
+    fn from(s: &str) -> Self {
+        AssetId(Cow::Owned(s.to_string()))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Asset {
@@ -422,22 +466,60 @@ impl AllAssets {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Asset2 {
     Id(AssetId),
     Val {
-        id: String,
-        amount: u64,
+        id: AssetId,
         decimals: u32,
         symbol: char,
         ticker: String,
     },
 }
+impl Asset2 {
+    pub fn new(id: &str, decimals: u32, symbol: char, ticker: &str) -> Self {
+        Asset2::Val {
+            id: AssetId(Cow::Owned(id.to_string())),
+            decimals,
+            symbol,
+            ticker: ticker.to_string(),
+        }
+    }
+}
+pub static ALL_ASSET2S: LazyLock<HashMap<AssetId, Asset2>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    map.insert("USD".into(), Asset2::new("USD", 2, '$', "USD"));
+    map.insert("EUR".into(), Asset2::new("EUR", 2, '€', "EUR"));
+    map.insert("GBP".into(), Asset2::new("GBP", 2, '£', "GBP"));
+    map
+});
+impl Asset2 {
+    pub fn load(self) -> Result<Asset2, String> {
+        match self {
+            Asset2::Id(id) => Ok(ALL_ASSET2S.try_get(&id).unwrap().clone()),
+            Asset2::Val { .. } => Ok(self),
+        }
+    }
+    pub fn decimals(&self) -> Result<u32, String> {
+        match self {
+            Asset2::Id(_) => self.clone().load()?.decimals(),
+            Asset2::Val { decimals, .. } => Ok(*decimals),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct AssetAmount2 {
     pub asset: Arc<Asset2>,
-    pub amount: u64,
+    amount: u64,
+}
+impl AssetAmount2 {
+    pub fn new(asset: Arc<Asset2>, amount: u64) -> Self {
+        AssetAmount2 { asset, amount }
+    }
+    pub fn amount_decimal(&self) -> Result<Decimal, String> {
+        Ok(Decimal::from(self.amount) / Decimal::from(10u64.pow(self.asset.decimals()?)))
+    }
 }
 
 pub trait HasDatetime {
@@ -447,7 +529,7 @@ pub trait HasAssetAmount {
     fn asset_amount_positive(&self) -> Result<AssetAmount2, String>;
 }
 
-/// Implement either from_to or from_account/to_account
+/// Implement either from_to or from_account/to_account. TODO define 2 traits inherited by a third trait
 pub trait HasFromTo {
     fn from_to(&self) -> Result<(&Account, &Account), String> {
         self.__inner_from_to(0)
@@ -485,8 +567,65 @@ pub trait HasFromTo {
         Ok(())
     }
 }
-pub trait HasTxnDetails: HasDatetime + HasAssetAmount + HasFromTo {}
-impl<T> HasTxnDetails for T where T: HasDatetime + HasAssetAmount + HasFromTo {} // auto-implement for all
+pub trait HasTxnDetails: HasDatetime + HasAssetAmount + HasFromTo + AddTags {}
+impl<T> HasTxnDetails for T where T: HasDatetime + HasAssetAmount + HasFromTo + AddTags {} // auto-implement for all
+
+pub trait AddTags {
+    fn tags(&self) -> Result<Vec<TxnTag>, AnyErr>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TxnTag {
+    pub name: String,
+}
+impl TxnTag {
+    pub fn arc(name: &str) -> Arc<Self> {
+        Arc::new(Self {
+            name: name.to_string(),
+        })
+    }
+    pub fn from_str(s: &str) -> Result<Arc<Self>, AnyErr> {
+        TXN_TAGS.try_get(s)
+    }
+}
+
+pub struct AllStaticTxnTags(pub LazyLock<HashMap<&'static str, Arc<TxnTag>>>);
+impl AllStaticTxnTags {
+    pub fn try_get<'a>(&'a self, s: &str) -> Result<Arc<TxnTag>, AnyErr> {
+        let res = self
+            .0
+            .get(&s)
+            .ok_or(format!("No txn tag found for {s}").into());
+        res.map(|t| t.clone())
+    }
+    pub fn refc(&self, name: &str) -> Result<TxnTag, AnyErr> {
+        self.try_get(name).map(|t| (*t).clone())
+    }
+}
+pub const TXN_TAGS: AllStaticTxnTags = AllStaticTxnTags(LazyLock::new(|| {
+    let mut map = HashMap::new();
+    map.insert("Income", TxnTag::arc("Income"));
+    map.insert("DirectorBorrows", TxnTag::arc("DirectorBorrows"));
+    map.insert("DirectorRepays", TxnTag::arc("DirectorRepays"));
+    map.insert("PayWagesNet", TxnTag::arc("PayWagesNet"));
+    map.insert("PayPaye", TxnTag::arc("PayPaye"));
+    map.insert("ExpenseToReimburse", TxnTag::arc("ExpenseToReimburse"));
+    map.insert("ReimburseExpense", TxnTag::arc("ReimburseExpense"));
+    map.insert("PayCorporateTax", TxnTag::arc("PayCorporateTax"));
+    map
+}));
+
+// pub enum EnumTxnTags {
+//     Income,
+//     DirectorsBorrows,
+//     DirectorRepays,
+//     PayPaye,
+//     ReimburseExpense,
+//     PayCorporateTax,
+// }
+// impl EnumTxnTags {
+
+// }
 
 // pub mod _old {
 //     pub mod tx1 {
@@ -982,3 +1121,30 @@ impl<T> HasTxnDetails for T where T: HasDatetime + HasAssetAmount + HasFromTo {}
 //         }
 //     }
 // }
+
+#[derive(Debug, Clone)]
+pub struct EffectsByAccount(pub HashMap<AccountId, AccountBalanceChanges>);
+impl EffectsByAccount {
+    pub fn new() -> Self {
+        EffectsByAccount(HashMap::new())
+    }
+    pub fn for_account(&self, account_id: &AccountId) -> &AccountBalanceChanges {
+        self.0.get(account_id).unwrap()
+    }
+    pub fn account_mut(&mut self, account_id: &AccountId) -> &mut AccountBalanceChanges {
+        self.0
+            .entry(account_id.clone())
+            .or_insert_with(|| AccountBalanceChanges::new(account_id.clone()))
+    }
+    pub fn accounts_of_type(&self, account_type: AccountType) -> Vec<AccountBalanceChanges> {
+        self.0
+            .values()
+            .filter(|a| {
+                a.account()
+                    .map(|acc| acc.account_type() == account_type)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+}

@@ -53,7 +53,7 @@ impl PlaidClient {
 
     pub async fn login(&mut self) -> anyhow::Result<()> {
         // try from cache
-        if let Ok(cached_token) = TokenResp::from_cache(TokenResp::static_relative_path()) {
+        if let Ok(cached_token) = TokenResp::from_cache(TokenResp::uniq_relative_path()) {
             self.access_token = Some(cached_token.access_token);
             return Ok(());
         }
@@ -76,13 +76,13 @@ impl PlaidClient {
 
         Ok(())
     }
-    async fn expect_login(&self) -> anyhow::Result<()> {
+    async fn _expect_login(&self) -> anyhow::Result<()> {
         if self.access_token.is_none() {
             return Err(err!("Not logged in"));
         }
         Ok(())
     }
-    async fn ensure_login(&mut self) -> anyhow::Result<()> {
+    async fn _ensure_login(&mut self) -> anyhow::Result<()> {
         if self.access_token.is_none() {
             self.login().await?;
         }
@@ -117,7 +117,7 @@ pub mod tests {
     use super::*;
 
     #[tokio::test]
-    // #[ignore = "Test needs manual web login"]
+    #[ignore = "Test needs manual web login"]
     async fn test_plaid_login_and_fetch_accounts() -> anyhow::Result<()> {
         let mut client = PlaidClient::new();
         client.login().await?;

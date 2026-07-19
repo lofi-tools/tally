@@ -1,13 +1,9 @@
-use crate::ListTxns;
-use crate::config::expect_env_var;
 use crate::utils::api_client_utils::{ApiClient, RequestBuilderExt};
 use anyhow::anyhow as err;
 use chrono::{DateTime, Utc};
-use file_cache::{Cacheable, FileBytes};
+use file_cache::{Cacheable, FileBytes, JsonFileBytes};
 use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::fs::File;
 
 // TODO pub mod starling_client
 
@@ -62,7 +58,7 @@ impl StarlingClient {
         // temporary solution: use personal access token
         self.access_token = Some(self.config.personal_access_token.clone());
 
-        // if let Ok(cached_token) = TokenResp::from_cache(TokenResp::static_relative_path()) {
+        // if let Ok(cached_token) = TokenResp::from_cache(TokenResp::uniq_relative_path()) {
         //     self.access_token = Some(cached_token.access_token);
         //     return Ok(());
         // }
@@ -85,7 +81,7 @@ impl StarlingClient {
 
         Ok(())
     }
-    async fn expect_login(&self) -> anyhow::Result<()> {
+    async fn _expect_login(&self) -> anyhow::Result<()> {
         if self.access_token.is_none() {
             return Err(err!("Not logged in"));
         }
@@ -115,7 +111,7 @@ impl StarlingClient {
         }
     }
     pub async fn primary_account(&mut self) -> anyhow::Result<Account> {
-        if let Ok(cached_account) = Account::from_cache(Account::static_relative_path()) {
+        if let Ok(cached_account) = Account::from_cache(Account::uniq_relative_path()) {
             return Ok(cached_account);
         }
         let account = self.refetch_primary_account().await?;
@@ -137,7 +133,7 @@ impl StarlingClient {
         Ok(resp)
     }
     // pub async fn transactions(&mut self) -> anyhow::Result<ListTxs> {
-    //     if let Ok(cached_txs) = ListTxs::from_cache(ListTxs::static_relative_path()) {
+    //     if let Ok(cached_txs) = ListTxs::from_cache(ListTxs::uniq_relative_path()) {
     //         return Ok(cached_txs);
     //     }
 
@@ -181,7 +177,7 @@ impl FileBytes for Account {
     }
 }
 impl Cacheable for Account {
-    fn static_relative_path_str() -> &'static str {
+    fn uniq_relative_path_str() -> &'static str {
         "starling_account.json"
     }
 }
@@ -225,16 +221,16 @@ pub struct StAmount {
     pub minor_units: i64, // Use i64 for minor units to handle large values
 }
 
-impl FileBytes for ListTransactionsResp {
-    fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
-        Ok(serde_json::to_vec_pretty(self)?)
-    }
-    fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-        Ok(serde_json::from_slice(bytes)?)
-    }
+impl JsonFileBytes for ListTransactionsResp {
+    // fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
+    //     Ok(serde_json::to_vec_pretty(self)?)
+    // }
+    // fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+    //     Ok(serde_json::from_slice(bytes)?)
+    // }
 }
 impl Cacheable for ListTransactionsResp {
-    fn static_relative_path_str() -> &'static str {
+    fn uniq_relative_path_str() -> &'static str {
         "starling_transactions.json"
     }
 }
@@ -242,30 +238,34 @@ impl Cacheable for ListTransactionsResp {
 pub mod map_starling {
     use std::sync::Arc;
 
+    use file_cache::JsonFileBytes;
+
     use super::*;
     use crate::ListTxns;
     use crate::models::static_data::{
-        BANK, CLIENTS, DIRECTORS_LOAN, EXPENSES_PAID, EXPENSES_TO_REPAY, GBP, PAYE_PAID,
-        TAXES_PAID, WAGES_NET,
+        BANK, CLIENTS, CORP_TAX_PAID, DIRECTORS_LOAN, EXPENSES_PAID, GBP, PAYE_PAID, TAXES_PAID,
+        WAGES_NET,
     };
-    use crate::models::tx2::{Transaction2, TxEffect};
+    use crate::models::tx2::Transaction2;
     use crate::models::{
-        Account, Asset, Asset2, AssetAmount2, HasAssetAmount, HasDatetime, HasFromTo,
+        Account, AddTags, Asset2, AssetAmount2, HasAssetAmount, HasDatetime, HasFromTo, TXN_TAGS,
+        TxnTag,
     };
+    use crate::utils::errors::AnyErr;
 
     impl StarlingClient {
         pub async fn transactions(&mut self) -> anyhow::Result<ListTxns> {
-            if let Ok(cached_mapped_txns) =
-                MappedTxns::from_cache(MappedTxns::static_relative_path())
+            if let Ok(cached_mapped_txns) = MappedTxns::from_cache(MappedTxns::uniq_relative_path())
             {
                 return Ok(cached_mapped_txns.transactions);
             }
 
             let starling_txns = match ListTransactionsResp::from_cache(
-                ListTransactionsResp::static_relative_path(),
+                ListTransactionsResp::uniq_relative_path(),
             ) {
                 Ok(cached) => cached.transactions,
-                Err(_) => {
+                Err(_e) => {
+                    dbg!(&_e);
                     let resp = self.refetch_transactions().await?;
                     resp.to_cache()?;
                     resp.transactions
@@ -305,15 +305,15 @@ pub mod map_starling {
         }
         pub fn is_director_borrows(&self) -> bool {
             self.counter_party_name == "Me Monzo"
-                && self.reference.to_lowercase() == "director's loan"
+                && self.reference.to_lowercase().contains("loan")
                 && self.direction == "OUT"
             // && self.spending_category == "LOAN_PRINCIPAL"
         }
         pub fn is_director_repays(&self) -> bool {
-            dbg!(self.reference.to_lowercase());
             self.counter_party_name == "Me Monzo"
                 && self.reference.to_lowercase().contains("loan repayment")
                 && self.spending_category == "LOAN_PRINCIPAL"
+                && self.direction == "IN"
                 || self.reference == "For corporate tax"
         }
         pub fn is_paye(&self) -> bool {
@@ -322,18 +322,19 @@ pub mod map_starling {
         pub fn is_expense_reimbursement(&self) -> bool {
             self.reference.contains("Exp insur") || self.reference.contains("Exp: nrg")
         }
-        pub fn is_tax(&self) -> bool {
+        pub fn is_corp_tax(&self) -> bool {
             let has_oneof_refs =
                 self.reference == "4396519254A00101A" || self.reference == "4396519254A00102A";
             self.counter_party_name.contains("HMRC") && has_oneof_refs
+            // 31 aug 2025: 4396519254A00103A 4396519254A00103A
         }
     }
     impl HasAssetAmount for StTransaction {
         fn asset_amount_positive(&self) -> Result<AssetAmount2, String> {
-            Ok(AssetAmount2 {
-                asset: Arc::new(Asset2::Id(GBP.clone())), // TODO handle currencies
-                amount: self.amount.minor_units.abs() as u64, // Convert minor units to major units
-            })
+            Ok(AssetAmount2::new(
+                Arc::new(Asset2::Id(GBP.clone())), // TODO handle currencies (though starling is only in GBP)
+                self.amount.minor_units.abs() as u64, // Convert minor units to major units
+            ))
         }
     }
     impl HasDatetime for StTransaction {
@@ -361,8 +362,8 @@ pub mod map_starling {
             if self.is_expense_reimbursement() {
                 return Ok((*BANK, *EXPENSES_PAID));
             }
-            if self.is_tax() {
-                return Ok((*BANK, *TAXES_PAID));
+            if self.is_corp_tax() {
+                return Ok((*BANK, *CORP_TAX_PAID));
             }
             Err(format!(
                 "No matching FROM/TO account for transaction: {:?}",
@@ -370,22 +371,28 @@ pub mod map_starling {
             ))
         }
     }
-
-    pub struct MappedTxns {
-        pub transactions: ListTxns,
-    }
-    impl FileBytes for MappedTxns {
-        fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
-            Ok(serde_json::to_vec_pretty(&self.transactions)?)
-        }
-        fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-            Ok(MappedTxns {
-                transactions: serde_json::from_slice(bytes)?,
+    impl AddTags for StTransaction {
+        fn tags(&self) -> Result<Vec<TxnTag>, AnyErr> {
+            Ok(match self {
+                s if s.is_sale() => vec![TXN_TAGS.refc("Income")?],
+                s if s.is_wage() => vec![TXN_TAGS.refc("PayWagesNet")?],
+                s if s.is_director_borrows() => vec![TXN_TAGS.refc("DirectorBorrows")?],
+                s if s.is_director_repays() => vec![TXN_TAGS.refc("DirectorRepays")?],
+                s if s.is_paye() => vec![TXN_TAGS.refc("PayPaye")?],
+                s if s.is_expense_reimbursement() => vec![TXN_TAGS.refc("ReimburseExpense")?],
+                s if s.is_corp_tax() => vec![TXN_TAGS.refc("PayCorporateTax")?],
+                _ => return Err(format!("No matching tags for transaction: {:?}", self).into()),
             })
         }
     }
+
+    #[derive(Debug, Deserialize, Serialize)]
+    pub struct MappedTxns {
+        pub transactions: ListTxns,
+    }
+    impl JsonFileBytes for MappedTxns {}
     impl Cacheable for MappedTxns {
-        fn static_relative_path_str() -> &'static str {
+        fn uniq_relative_path_str() -> &'static str {
             "starling_mapped_transactions.json"
         }
     }
@@ -413,7 +420,7 @@ pub mod tests {
     #[ignore = "Uses external API call"]
     async fn test_starling_fetch_account() -> anyhow::Result<()> {
         let mut client = StarlingClient::new()?;
-        let accounts = client.list_accounts().await?;
+        let _accounts = client.list_accounts().await?;
 
         let primary_account = client.primary_account().await?;
         dbg!(&primary_account);
@@ -425,19 +432,19 @@ pub mod tests {
     #[ignore = "Uses external API call"]
     async fn test_starling_fetch_transactions() -> anyhow::Result<()> {
         let mut client = StarlingClient::new()?;
-        let transactions = client.refetch_transactions().await?;
-        dbg!(&transactions);
+        let _transactions = client.refetch_transactions().await?;
+        // dbg!(&transactions);
 
-        let cached_transactions = client.transactions().await?;
-        dbg!(&cached_transactions);
+        let _cached_transactions = client.transactions().await?;
+        // dbg!(&cached_transactions);
 
         Ok(())
     }
     #[tokio::test]
     async fn test_starling_cached_transactions() -> anyhow::Result<()> {
         let mut client = StarlingClient::new()?;
-        let transactions = client.transactions().await?;
-        dbg!(&transactions);
+        let _transactions = client.transactions().await?;
+        // dbg!(&transactions);
         Ok(())
     }
 }

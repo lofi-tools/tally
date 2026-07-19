@@ -1,31 +1,33 @@
 use crate::models::profit_and_loss::ProfitAndLoss;
-use crate::models::sheet3::BalanceSheet3;
-use adapters::exchange_rates::RatesApi;
+use crate::models::sheet3::CompanyAccounting;
 use adapters::exchange_rates::models::DayPricePoint;
 use adapters::exchange_rates::{AssetPair, CachedRatesApi, Currency, TimeRange};
+use adapters::exchange_rates::{GBP_EUR_PAIR, RatesApi};
 use adapters::starling_bank::StarlingClient;
 use anyhow::anyhow;
-use chrono::{DateTime, Duration, NaiveDate};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 pub use config::CONFIG;
 use config::Config;
-use file_cache::FileBytes;
+use file_cache::{Cacheable, JsonFileBytes};
+use models::profit_and_loss::Outputs;
 use models::static_data::{DIRECTORS_LOAN, EXPENSES_TO_REPAY, NEXO_EUR};
-use models::tx2::{Transaction2, TxEffect};
-use models::{AssetId, DateAndAmount};
+use models::tx2::{Transaction2, TxEffect, TxnId};
+use models::{AssetId, DateAndAmount, TXN_TAGS};
+use num_traits::FromPrimitive;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use utils::{DateRange, DatetimeUtcExt};
+use utils::{DateRange, DatetimeUtcExt, Loader};
 
 pub mod config;
 pub mod models;
 pub mod utils;
 pub mod adapters {
-    pub mod banks_via_truelayer;
     pub mod exchange_rates;
     pub mod nordigen_banks;
     pub mod plaid_banks;
     pub mod starling_bank;
+    pub mod truelayer_banks;
     pub mod yapily_banks;
 }
 
@@ -53,8 +55,11 @@ async fn main() -> anyhow::Result<()> {
         DateTime::from_naive_date(NaiveDate::from_ymd_opt(2023, 11, 30).unwrap()),
     );
 
-    let balance_sheet = BalanceSheet3::new(accounting_period.end.date_naive(), &state.rates_api)?
+    let balance_sheet = CompanyAccounting::empty(accounting_period.clone(), &state.rates_api)
+        .await?
         .with_transactions(&transactions);
+    let account_balances = balance_sheet.accounts.clone();
+    dbg!(&account_balances);
     println!("{balance_sheet}");
 
     let profit_and_loss = ProfitAndLoss::new(accounting_period, &transactions)?;
@@ -99,7 +104,7 @@ impl AppState {
     // }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ListTxns {
     pub txs: Vec<Transaction2>,
 }
@@ -137,6 +142,15 @@ impl ListTxns {
                 .collect(),
         )
     }
+    pub fn in_time_range(&self, time_range: &TimeRange) -> ListTxns {
+        ListTxns::from_txs(
+            self.txs
+                .iter()
+                .filter(|tx| time_range.contains_datetime(tx.datetime))
+                .cloned()
+                .collect(),
+        )
+    }
     pub fn director_borrows(&self) -> ListTxns {
         let mut borrows = self
             .txs
@@ -147,6 +161,74 @@ impl ListTxns {
         borrows.sort_by(|a, b| a.datetime.cmp(&b.datetime));
         ListTxns::from_txs(borrows)
     }
+
+    pub async fn add_cached_directors_loan_repayments(
+        &mut self,
+        rates_api: &impl RatesApi,
+    ) -> &mut Self {
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct CachedDirectorsLoanRepayments {
+            repayments: Vec<SimpleRepayment>,
+        }
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct SimpleRepayment {
+            pub date: NaiveDate,
+            pub amount_gbp: Decimal,
+        }
+        impl JsonFileBytes for CachedDirectorsLoanRepayments {}
+        impl Cacheable for CachedDirectorsLoanRepayments {}
+
+        let cached = CachedDirectorsLoanRepayments::uniq_from_cache_or(|| async {
+            Ok::<_, anyhow::Error>(CachedDirectorsLoanRepayments {
+                repayments: vec![SimpleRepayment {
+                    date: Utc::now().date_naive(),
+                    amount_gbp: Decimal::from_f64(6141.23).unwrap(),
+                }],
+            })
+        })
+        .await
+        .unwrap();
+
+        for repay in cached.repayments {
+            let rate = rates_api
+                .rate_at(&repay.date, &*GBP_EUR_PAIR)
+                .await
+                .unwrap();
+            let amount_eur = repay.amount_gbp * rate.rate_low;
+            let txn_id = TxnId(format!("CACHED_NEXO_EUR_repayment_{}", repay.date));
+            let txn = Transaction2 {
+                id: TxnId(format!("CACHED_NEXO_EUR_repayment_{}", repay.date)),
+                effects: vec![
+                    TxEffect {
+                        txn_id: txn_id.clone(),
+                        account_id: NEXO_EUR.id.clone(),
+                        amount_diff: amount_eur,
+                        datetime: DateTime::from_naive_date(repay.date),
+                        tags: Loader::Loaded(vec![TXN_TAGS.refc("DirectorRepays").unwrap()]),
+                    },
+                    TxEffect {
+                        txn_id: txn_id.clone(),
+                        account_id: DIRECTORS_LOAN.id.clone(),
+                        amount_diff: -repay.amount_gbp,
+                        datetime: DateTime::from_naive_date(repay.date),
+                        tags: Loader::Loaded(vec![TXN_TAGS.refc("DirectorRepays").unwrap()]),
+                    },
+                ],
+                datetime: DateTime::from_naive_date(repay.date),
+                tags: vec![TXN_TAGS.refc("DirectorRepays").unwrap()],
+            };
+            self.push(txn);
+        }
+
+        self
+    }
+    // pub fn with_cached_directors_loan_repayments(
+    //     mut self,
+    //     rates_api: &impl RatesApi,
+    // ) -> anyhow::Result<Self> {
+    //     self.add_directors_loan_repayments(rates_api);
+    //     Ok(self)
+    // }
 
     pub async fn add_directors_loan_repayments(
         &mut self,
@@ -197,20 +279,30 @@ impl ListTxns {
             }
             let min_repay = min_repay_opt.ok_or(anyhow!("No min repay price point found"))?;
 
+            let txn_id = TxnId(format!(
+                "NEXO_EUR_repayment_{}",
+                min_repay.day_price_point.datetime
+            ));
             let repayment_tx = Transaction2 {
-                outputs: vec![
+                id: txn_id.clone(),
+                effects: vec![
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: NEXO_EUR.id.clone(),
                         amount_diff: min_repay.amount_eur.trunc_with_scale(2),
                         datetime: min_repay.day_price_point.datetime,
+                        tags: Loader::None,
                     },
                     TxEffect {
+                        txn_id: txn_id.clone(),
                         account_id: DIRECTORS_LOAN.id.clone(),
                         amount_diff: -min_repay.amount_plus_interest_gbp,
                         datetime: min_repay.day_price_point.datetime,
+                        tags: Loader::None,
                     },
                 ],
                 datetime: min_repay.day_price_point.datetime,
+                tags: vec![TXN_TAGS.refc("DirectorRepays")?],
             };
             repayments.push(repayment_tx);
         }
@@ -220,6 +312,14 @@ impl ListTxns {
     pub fn add_expenses(&mut self, expenses: Expenses) -> &mut Self {
         self.push_many(&expenses.transactions())
     }
+
+    fn effects_corp_tax_paid(&self) -> Outputs {
+        let effects = self.outputs();
+        dbg!(&effects);
+        let effects = effects.corp_tax_paid();
+        dbg!(&effects);
+        effects
+    }
 }
 impl std::ops::Deref for ListTxns {
     type Target = Vec<Transaction2>;
@@ -227,14 +327,7 @@ impl std::ops::Deref for ListTxns {
         &self.txs
     }
 }
-impl FileBytes for ListTxns {
-    fn as_file_bytes(&self) -> anyhow::Result<Vec<u8>> {
-        Ok(serde_json::to_vec_pretty(self)?)
-    }
-    fn from_file_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-        Ok(serde_json::from_slice(bytes)?)
-    }
-}
+impl JsonFileBytes for ListTxns {}
 
 #[derive(Debug, Clone)]
 pub struct Expense {
@@ -247,12 +340,16 @@ impl Expense {
         Expense {
             desc: "Professional insurance".to_string(),
             tx: Transaction2 {
-                outputs: vec![TxEffect {
+                id: TxnId(format!("Professional-Insurance_{}", date)),
+                effects: vec![TxEffect {
+                    txn_id: TxnId(format!("Professional-Insurance_{}", date)),
                     account_id: EXPENSES_TO_REPAY.id.clone(),
                     amount_diff: amount,
                     datetime: DateTime::from_naive_date(date),
+                    tags: Loader::None,
                 }],
                 datetime: DateTime::from_naive_date(date),
+                tags: vec![TXN_TAGS.refc("ExpenseToReimburse").unwrap()],
             },
         }
     }
@@ -279,15 +376,20 @@ impl Expense {
     pub fn energy(dam: impl Into<DateAndAmount>) -> Self {
         let DateAndAmount { date, amount } = dam.into();
         let amount_repayable = amount / Decimal::from(4);
+        let txn_id = TxnId(format!("Energy-Bill_{}", date));
         Expense {
             desc: "Energy bill".to_string(),
             tx: Transaction2 {
-                outputs: vec![TxEffect {
+                id: txn_id.clone(),
+                effects: vec![TxEffect {
+                    txn_id: txn_id.clone(),
                     account_id: EXPENSES_TO_REPAY.id.clone(),
                     amount_diff: amount_repayable,
                     datetime: DateTime::from_naive_date(date),
+                    tags: Loader::None,
                 }],
                 datetime: DateTime::from_naive_date(date),
+                tags: vec![TXN_TAGS.refc("ExpenseToReimburse").unwrap()],
             },
         }
     }
@@ -308,16 +410,23 @@ impl Expenses {
         let loaded_expenses: Vec<StoredExpense> = serde_json::from_str(&file_str)?;
         let mut expenses = loaded_expenses
             .into_iter()
-            .map(|e| Expense {
-                desc: e.description,
-                tx: Transaction2 {
-                    outputs: vec![TxEffect {
-                        account_id: EXPENSES_TO_REPAY.id.clone(),
-                        amount_diff: e.amount,
+            .map(|e| {
+                let txn_id = TxnId(format!("Expense_{}", e.date));
+                Expense {
+                    desc: e.description,
+                    tx: Transaction2 {
+                        id: txn_id.clone(),
+                        effects: vec![TxEffect {
+                            txn_id: txn_id.clone(),
+                            account_id: EXPENSES_TO_REPAY.id.clone(),
+                            amount_diff: e.amount,
+                            datetime: DateTime::from_naive_date(e.date),
+                            tags: Loader::None,
+                        }],
                         datetime: DateTime::from_naive_date(e.date),
-                    }],
-                    datetime: DateTime::from_naive_date(e.date),
-                },
+                        tags: vec![TXN_TAGS.refc("ReimburseExpense").unwrap()],
+                    },
+                }
             })
             .collect::<Vec<_>>();
 
@@ -331,7 +440,7 @@ impl Expenses {
                 .iter()
                 .filter(|ex| {
                     ex.tx
-                        .outputs
+                        .effects
                         .iter()
                         .any(|o| o.account_id == EXPENSES_TO_REPAY.id)
                 })
@@ -343,9 +452,16 @@ impl Expenses {
         self.0.iter().map(|exp| exp.tx.clone()).collect()
     }
     pub fn total(&self) -> Decimal {
-        self.0.iter().map(|exp| exp.tx.outputs[0].amount_diff).sum()
+        self.0.iter().map(|exp| exp.tx.effects[0].amount_diff).sum()
     }
 }
+
+// #[derive(Debug)]
+// pub struct LoanRepayment {
+//     pub amount_plus_interest_gbp: Decimal,
+//     pub amount_eur: Decimal,
+//     pub day_price_point: DayPricePoint,
+// }
 
 #[cfg(test)]
 pub mod test_expenses {
@@ -353,7 +469,7 @@ pub mod test_expenses {
 
     #[test]
     fn test_energy_bills() -> anyhow::Result<()> {
-        let all_energy_bills = Expense::all_energy_bills()?;
+        let _all_energy_bills = Expense::all_energy_bills()?;
         Ok(())
     }
 }

@@ -36,7 +36,7 @@ pub mod map_starling {
             anyhow::bail!("no match for tx: {starling_tx:?}")
         }
         pub fn is_director_borrows(&self) -> bool {
-            self.outputs.iter().any(|output| {
+            self.effects.iter().any(|output| {
                 output.account_id == DIRECTORS_LOAN.id && output.amount_diff.is_sign_positive()
             })
         }
@@ -257,7 +257,7 @@ pub mod nordigen_client {
 
             Ok(got_requisition)
         }
-        async fn list_requisitions(&self) -> anyhow::Result<Vec<RequisitionFull>> {
+        pub async fn list_requisitions(&self) -> anyhow::Result<Vec<RequisitionFull>> {
             self.expect_login().await?;
 
             let requisitions = self
@@ -484,7 +484,7 @@ pub mod nordigen_client {
         }
     }
     impl Cacheable for RequisitionFull {
-        fn static_relative_path_str() -> &'static str {
+        fn uniq_relative_path_str() -> &'static str {
             STARLING_REQUISITION_CACHE_FILE_NAME
         }
     }
@@ -560,6 +560,7 @@ pub mod nordigen_client {
         use super::*;
 
         #[tokio::test]
+        #[ignore = "Needs manual web login"]
         async fn test_ensure_starling_agreement() -> anyhow::Result<()> {
             let mut nclient = NordigenClient::new();
             nclient.login().await?;
@@ -570,6 +571,7 @@ pub mod nordigen_client {
         }
 
         #[tokio::test]
+        #[ignore = "Needs manual web login"]
         async fn test_ensure_requisition() -> anyhow::Result<()> {
             let mut nclient = NordigenClient::new();
             nclient.login().await?;

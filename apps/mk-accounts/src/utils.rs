@@ -3,8 +3,10 @@ use num_traits::FromPrimitive;
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, fmt::Debug, hash::Hash, str::FromStr};
+
+use crate::adapters::exchange_rates::TimeRange;
 
 pub mod api_client_utils {
     use reqwest::{RequestBuilder, StatusCode};
@@ -241,10 +243,23 @@ impl DatetimeUtcExt for DateTime<Utc> {
     }
 }
 
-pub struct DateRange(pub NaiveDate, pub NaiveDate);
+#[derive(Debug, Clone)]
+pub struct DateRange {
+    pub start: NaiveDate,
+    pub end: NaiveDate,
+}
 impl DateRange {
     pub fn new(start: impl DateExt, end: impl DateExt) -> Self {
-        DateRange(start.naive_date(), end.naive_date())
+        DateRange {
+            start: start.naive_date(),
+            end: end.naive_date(),
+        }
+    }
+    pub fn from_timerange(timerange: TimeRange) -> Self {
+        DateRange {
+            start: timerange.start.date_naive(),
+            end: timerange.end.date_naive(),
+        }
     }
 }
 impl<'a> IntoIterator for &'a DateRange {
@@ -253,7 +268,7 @@ impl<'a> IntoIterator for &'a DateRange {
     fn into_iter(self) -> Self::IntoIter {
         DateRangeIter {
             range: &self,
-            curr: self.0,
+            curr: self.start,
         }
     }
 }
@@ -264,7 +279,7 @@ pub struct DateRangeIter<'a> {
 impl<'a> Iterator for DateRangeIter<'a> {
     type Item = NaiveDate;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr <= self.range.1 {
+        if self.curr < self.range.end {
             let next = self.curr + Duration::days(1);
             self.curr = next;
             Some(next)
@@ -284,6 +299,89 @@ pub trait NumExt {
 }
 impl NumExt for Decimal {
     fn is_close_to(&self, other: impl Into<Decimal>) -> bool {
-        Decimal::abs(&(self - other.into())) <= Decimal::from_f64(0.005).unwrap()
+        let other = other.into();
+        let how_close = self - other;
+        Decimal::abs(&how_close) <= Decimal::from_f64(0.01).unwrap()
     }
 }
+
+pub mod errors {
+    // pub trait StringResultExt {
+    //     type Ok;
+    //     fn err_ctx(self, ctx: &str) -> Result<Self::Ok, String>;
+    // }
+    // // impl<Ok> StringResultExt for Result<Ok, String> {
+    // //     fn err_ctx(self, ctx: &str) -> Result<Ok, String> {
+    // //         self.map_err(|e| format!("{ctx}: {e}"))
+    // //     }
+    // // }
+    // impl<Ok, Err> StringResultExt for Result<Ok, Err>
+    // where
+    //     Err: std::fmt::Display,
+    // {
+    //     type Ok = Ok;
+    //     fn err_ctx(self, ctx: &str) -> Result<Ok, String> {
+    //         self.map_err(|e| format!("{ctx}: {e}"))
+    //     }
+    // }
+
+    #[derive(Debug)]
+    pub struct AnyErr(pub String);
+    impl AnyErr {
+        pub fn ctx(self, ctx: &str) -> Self {
+            AnyErr(format!("{ctx}: {self}"))
+        }
+    }
+    impl std::fmt::Display for AnyErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+    impl std::error::Error for AnyErr {}
+    impl From<String> for AnyErr {
+        fn from(s: String) -> Self {
+            AnyErr(s)
+        }
+    }
+    impl From<&str> for AnyErr {
+        fn from(s: &str) -> Self {
+            AnyErr(s.to_string())
+        }
+    }
+
+    pub trait ResultExt<Ok> {
+        fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr>;
+    }
+    impl<Ok, Err> ResultExt<Ok> for Result<Ok, Err>
+    where
+        Err: std::error::Error,
+    {
+        fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr> {
+            self.map_err(|e| AnyErr(format!("{ctx}: {e}")))
+        }
+    }
+
+    pub trait AnyhowResExt<Ok> {
+        fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr>;
+    }
+    impl<Ok> AnyhowResExt<Ok> for anyhow::Result<Ok> {
+        fn err_ctx(self, ctx: &str) -> Result<Ok, AnyErr> {
+            self.map_err(|e| AnyErr(format!("{ctx}: {e}")))
+        }
+    }
+}
+
+// pub struct Loader<T>(pub Option<T>);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Loader<T> {
+    Loaded(T),
+    None,
+}
+// impl<T> Loader<T> {
+//     pub fn load(&mut self) -> Result<&T, AnyErr> {}
+// }
+
+// pub trait Load<T> {
+//     type Args;
+//     fn load(&mut self, args: Self::Args) -> Result<&T, AnyErr>;
+// }
