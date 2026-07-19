@@ -39,6 +39,7 @@
 
         env = {
           RUST_BACKTRACE = "1";
+          CARGO_NET_GIT_FETCH_WITH_CLI = "true";
         };
 
         scripts = mapAttrs (name: value: pkgs.writeShellScriptBin name value) {
@@ -63,7 +64,3 @@
       }
     );
 }
-
-
-
-
