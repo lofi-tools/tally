@@ -1,0 +1,10 @@
+[package]
+name = "ixbrl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rucash = { version = "0.7", features = ["xml", "decimal"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
