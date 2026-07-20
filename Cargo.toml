@@ -3,7 +3,7 @@ members = ["apps/*", "libs/*"]
 resolver = "2"
 
 [workspace.dependencies]
-tokio = { version = "1.53.0", features = ["full"] }
+tokio = { version = "^1.53", features = ["full"] }
 reqwest = { version = "0.13.4", features = ["json", "query"] }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }

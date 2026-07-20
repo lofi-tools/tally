@@ -9,10 +9,10 @@ use std::collections::HashMap;
 #[serde(tag = "standard", content = "data")]
 pub enum Taxonomy {
     #[serde(rename = "FRS-105")]
-    FRS105(FRS105Taxonomy),
+    FRS105(Box<FRS105Taxonomy>),
 
     #[serde(rename = "FRS-102")]
-    FRS102(FRS102Taxonomy),
+    FRS102(Box<FRS102Taxonomy>),
 
     #[serde(rename = "FRS-101")]
     FRS101(FRS101Taxonomy),
@@ -27,7 +27,7 @@ pub enum Taxonomy {
     USGAAP(USGAAPTaxonomy),
 
     #[serde(rename = "other")]
-    Other(GenericTaxonomy),
+    Other(Box<GenericTaxonomy>),
 }
 
 // ============================================================
@@ -871,30 +871,33 @@ pub struct HtmlRoot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HtmlTagged {
+    pub tag: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<Vec<HtmlContent>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ifdef: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worksheet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub element: Option<Box<HtmlContent>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum HtmlContent {
     Simple(String),
-    Tagged {
-        tag: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        attributes: Option<HashMap<String, String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        content: Option<Vec<HtmlContent>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        template: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        ifdef: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        worksheet: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        element: Option<Box<HtmlContent>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        kind: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        level: Option<u8>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
-    },
+    Tagged(Box<HtmlTagged>),
 }
 
 // ============================================================
@@ -1302,7 +1305,7 @@ mod tests {
 
     #[test]
     fn test_taxonomy_enum_serialization() {
-        let tax = Taxonomy::FRS105(create_valid_frs105());
+        let tax = Taxonomy::FRS105(Box::new(create_valid_frs105()));
         let json = tax.to_json().unwrap();
 
         // Should contain the standard tag
@@ -1318,7 +1321,7 @@ mod tests {
 
     #[test]
     fn test_taxonomy_enum_get_metadata() {
-        let tax = Taxonomy::FRS105(create_valid_frs105());
+        let tax = Taxonomy::FRS105(Box::new(create_valid_frs105()));
         let metadata = tax.get_metadata("CompanyName");
         assert!(metadata.is_some());
     }
