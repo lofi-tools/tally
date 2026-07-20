@@ -1,5 +1,7 @@
 use std::fmt;
 
+pub mod taxonomy;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountType {
     Root,
