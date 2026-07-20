@@ -8,3 +8,9 @@ Computes my company's accounts, balance sheet, and profit and loss statements, u
 Setup using `direnv allow` (needs Nix and nix-direnv), then:
 - Run unit tests: `utest`
 - Compute accounts: `run`
+
+
+## Links
+
+- https://www.gov.uk/company-tax-returns
+- https://www.gov.uk/government/collections/corporation-tax-online-support-for-software-developers

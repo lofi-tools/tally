@@ -4,7 +4,8 @@
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha1::{Digest, Sha1};
+use bergshamra_c14n::{canonicalize, C14nMode};
 
 mod error;
 pub use error::{Ct600Error, Result};
@@ -507,15 +508,36 @@ impl GovTalkSubmissionRequest {
     }
 
     pub fn compute_irmark(&self) -> Result<String> {
-        let body_without_irmark = self.get_body_without_irmark()?;
-        let mut hasher = Sha256::new();
-        hasher.update(body_without_irmark.as_bytes());
+        let content = self.params.ir_envelope_content.clone().unwrap_or_default();
+        let irmark = &self.params.irmark;
+
+        let mut w = uppsala::XmlWriter::new();
+        w.start_element(
+            "IRenvelope",
+            &[
+                ("xmlns", ENV_NS),
+                ("xmlns:ct", CT_NS),
+            ],
+        );
+        w.start_element("ct:IRheader", &[]);
+        w.start_element("ct:IRmark", &[("Type", "generic")]);
+        w.text(irmark);
+        w.end_element("ct:IRmark");
+        w.end_element("ct:IRheader");
+        w.start_element("ct:IRmark", &[("Type", "generic")]);
+        w.text(irmark);
+        w.end_element("ct:IRmark");
+        w.raw(&content);
+        w.end_element("IRenvelope");
+
+        let xml = w.into_string();
+        let canonical = canonicalize(&xml, C14nMode::Inclusive, None, &[] as &[String])
+            .map_err(|e| Ct600Error::C14nError(e.to_string()))?;
+
+        let mut hasher = Sha1::new();
+        hasher.update(&canonical);
         let result = hasher.finalize();
         Ok(general_purpose::STANDARD.encode(result))
-    }
-
-    fn get_body_without_irmark(&self) -> Result<String> {
-        Ok(self.params.ir_envelope_content.clone().unwrap_or_default())
     }
 }
 
