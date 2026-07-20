@@ -2,7 +2,6 @@ use std::fmt;
 
 pub struct AccountNode {
     name: String,
-    #[allow(dead_code)]
     account_type: String,
     balance: rucash::Num,
     children: Vec<AccountNode>,
@@ -17,21 +16,28 @@ impl AccountNode {
     fn is_zero(&self) -> bool {
         self.balance == rucash::Num::from(0)
     }
+
+    fn has_nonzero_descendant(&self) -> bool {
+        !self.children.is_empty()
+            && self.children.iter().any(|c| !c.is_zero() || c.has_nonzero_descendant())
+    }
 }
 
 fn write_tree(f: &mut fmt::Formatter<'_>, nodes: &[AccountNode], depth: usize) -> fmt::Result {
-    let mut visible: Vec<&AccountNode> = nodes.iter().filter(|n| !n.is_zero()).collect();
-    visible.sort_by(|a, b| a.name.cmp(&b.name));
-    let mut hidden: Vec<&AccountNode> = nodes.iter().filter(|n| n.is_zero()).collect();
-    hidden.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut sorted: Vec<&AccountNode> = nodes.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
 
-    for node in &visible {
+    for node in &sorted {
+        if node.account_type == "ROOT" {
+            write_tree(f, &node.children, depth)?;
+            continue;
+        }
+        if node.is_zero() && !node.has_nonzero_descendant() {
+            continue;
+        }
         let prefix = "  ".repeat(depth);
         writeln!(f, "{prefix}{}: {}", node.name, node.balance)?;
         write_tree(f, &node.children, depth + 1)?;
-    }
-    for node in &hidden {
-        write_tree(f, &node.children, depth)?;
     }
     Ok(())
 }
