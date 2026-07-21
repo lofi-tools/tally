@@ -1,6 +1,9 @@
 use std::fmt;
 
 pub mod taxonomy;
+pub mod taxonomy_mappings {
+    pub mod frs105;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountType {
@@ -34,7 +37,6 @@ impl AccountType {
 
 impl TryFrom<&str> for AccountType {
     type Error = String;
-
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
             "ROOT" => Ok(Self::Root),
