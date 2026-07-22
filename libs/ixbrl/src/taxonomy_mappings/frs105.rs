@@ -163,7 +163,8 @@ impl FRS105Mapper {
 
         // Profit
         report.profit = Some(
-            report.turnover.unwrap_or(0.0) + report.other_operating_income.unwrap_or(0.0)
+            report.turnover.unwrap_or(0.0)
+                + report.other_operating_income.unwrap_or(0.0)
                 + report.raw_materials.unwrap_or(0.0)
                 + report.staff_costs.unwrap_or(0.0)
                 + report.depreciation.unwrap_or(0.0)
@@ -204,7 +205,8 @@ impl FRS105Mapper {
 
         // Total Assets Less Liabilities
         report.total_assets_less_liabilities = Some(
-            report.fixed_assets.unwrap_or(0.0) + report.current_assets.unwrap_or(0.0)
+            report.fixed_assets.unwrap_or(0.0)
+                + report.current_assets.unwrap_or(0.0)
                 + report.creditors_within_one_year.unwrap_or(0.0),
         );
 
@@ -231,7 +233,8 @@ impl FRS105Mapper {
         report.corporation_tax = Some(self.get_balance("Equity:Corporation Tax"));
 
         report.total_equity = Some(
-            report.share_capital.unwrap_or(0.0) + report.retained_profit.unwrap_or(0.0)
+            report.share_capital.unwrap_or(0.0)
+                + report.retained_profit.unwrap_or(0.0)
                 + report.dividends.unwrap_or(0.0)
                 + report.corporation_tax.unwrap_or(0.0),
         );
@@ -390,7 +393,7 @@ mod tests {
         mapper.set_account_balance("Expenses:Emoluments:Employees", -20000.0);
         mapper.set_account_balance("Bank Accounts", 10000.0);
 
-        let report = mapper.map();
+        let report: FRS105Report = mapper.map();
 
         assert_eq!(report.turnover, Some(50000.0));
         assert_eq!(report.staff_costs, Some(-20000.0));
