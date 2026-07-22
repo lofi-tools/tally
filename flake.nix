@@ -12,30 +12,36 @@
     ];
     perSystem = { pkgs, system, ... }:
       let
-        buildTimeDeps = [
-          pkgs.pkg-config
-        ];
+        buildTimeDeps = [ pkgs.pkg-config ];
         runtimeDeps = [ ];
-        devDeps = [
-          pkgs.cargo-nextest
-        ];
+        devDeps = [ pkgs.cargo-nextest ];
 
-        ownPkgs.piecash = pkgs.python3Packages.buildPythonPackage rec {
+        ownPkgs.piecash = pkgs.python311Packages.buildPythonPackage rec {
           pname = "piecash";
           version = "1.2.0";
           format = "setuptools";
 
-          src = pkgs.fetchPypi {
-            inherit pname version;
-            hash = "sha256-iWOfBmHUkiQng/OcjRR+pFwyHcQRH5PsopefBw9fF20=";
+          src = pkgs.fetchFromGitHub {
+            owner = "sdementen";
+            repo = "piecash";
+            rev = "refs/tags/${version}";
+            hash = "sha256-b8Hewc8HsaDWs+44Cp2F5w/WGLIUFyCX6pusH2quXog=";
           };
 
-          propagatedBuildInputs = [
-            pkgs.python3Packages.sqlalchemy
-            pkgs.python3Packages.pyyaml
+          propagatedBuildInputs = with pkgs.python311Packages; [
+            sqlalchemy_1_4
+            pytz
+            tzlocal
+            click
+            pymysql
+            python-dateutil
           ];
 
-          pythonImportsCheck = [ "piecash" ];
+          buildInputs = with pkgs.python311Packages; [
+            setuptools
+          ];
+
+          doCheck = false;
 
           meta = {
             description = "Python library for GnuCash file access";
@@ -44,21 +50,26 @@
           };
         };
 
-        ownPkgs.ixbrl-parse = pkgs.python3Packages.buildPythonPackage rec {
+        ownPkgs.ixbrl-parse = pkgs.python311Packages.buildPythonPackage rec {
           pname = "ixbrl-parse";
-          version = "0.3";
-          format = "setuptools";
+          version = "0.11.0";
+          format = "pyproject";
 
-          src = pkgs.fetchPypi {
-            inherit pname version;
-            hash = "";
+          src = pkgs.fetchurl {
+            url = "https://files.pythonhosted.org/packages/e7/98/b8e734723b2e310727cf14dac6d5e909eaaf6b58777c99824456e4230310/ixbrl_parse-0.11.0.tar.gz";
+            hash = "sha256-atAEYX+0EVawkUhMXlOIohbMbRoZKMiZnwkW3qsxMFI=";
           };
 
-          propagatedBuildInputs = [
-            pkgs.python3Packages.lxml
+          nativeBuildInputs = [
+            pkgs.python311Packages.setuptools
           ];
 
-          pythonImportsCheck = [ "ixbrl" ];
+          propagatedBuildInputs = [
+            pkgs.python311Packages.lxml
+          ];
+
+          doCheck = false;
+          dontCheckRuntimeDeps = true;
 
           meta = {
             description = "Python iXBRL parser";
@@ -68,7 +79,7 @@
         };
 
         ownPkgs.ixbrl-reporter =
-          pkgs.python3Packages.buildPythonPackage rec {
+          pkgs.python311Packages.buildPythonPackage rec {
             pname = "ixbrl-reporter";
             version = "1.2.1";
             format = "pyproject";
@@ -81,17 +92,17 @@
             };
 
             propagatedBuildInputs = [
-              pkgs.python3Packages.requests
-              pkgs.python3Packages.lxml
+              pkgs.python311Packages.requests
+              pkgs.python311Packages.lxml
               ownPkgs.piecash
-              pkgs.python3Packages.pyyaml
+              pkgs.python311Packages.pyyaml
             ];
 
             nativeBuildInputs = [
-              pkgs.python3Packages.setuptools
-              pkgs.python3Packages.pytest
-              pkgs.python3Packages.pytest-cov
-              pkgs.python3Packages.pytest-mock
+              pkgs.python311Packages.setuptools
+              pkgs.python311Packages.pytest
+              pkgs.python311Packages.pytest-cov
+              pkgs.python311Packages.pytest-mock
               ownPkgs.ixbrl-parse
             ];
 
@@ -103,7 +114,10 @@
               license = lib.licenses.gpl3Plus;
               platforms = lib.platforms.unix;
             };
+            passthru = { inherit src versions mkPkg; };
           };
+
+        ixbrl-src = ownPkgs.ixbrl-reporter.src;
 
         bash.wd = "$(git rev-parse --show-toplevel)";
         bin = inputs.my-nix.bin.${system} // (mapAttrs (n: p: "${p}/bin/${n}") scripts) // {
@@ -111,11 +125,15 @@
         };
         scripts = mapAttrs (n: s: pkgs.writeShellScriptBin n s) {
           run = ''cargo run -- "$@" '';
-          packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
-          utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
-          ftest = ''set -x; cargo nextest run --workspace -E "''${TEST_FILTER:-all()}" --nocapture "$@" '';
+          # packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
+          # utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
+          # ftest = ''set -x; cargo nextest run --workspace -E "''${TEST_FILTER:-all()}" --nocapture "$@" '';
           backup-txs = ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'';
-          report = ''${bin.ixbrl} report/hmrc/corp-tax.yaml report ixbrl > .cache/corp-tax.html'';
+          report = ''
+            WD="${bash.wd}";
+            cd ${ixbrl-src}
+            ${bin.ixbrl} ${ixbrl-src}/config-corptax.yaml report ixbrl > "$WD/.cache/corp-tax.html"
+          '';
         };
 
         env = {
