@@ -2,6 +2,7 @@ use std::fmt;
 
 pub mod taxonomy;
 pub mod taxonomy_mappings {
+    pub mod ct_return;
     pub mod frs105;
 }
 
