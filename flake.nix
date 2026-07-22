@@ -18,7 +18,7 @@
 
         pythonVers = pkgs.python312Packages;
 
-        ownPkgs.sqlalchemy-utils = pythonVers.buildPythonPackage rec {
+        ownPkgs.sqlalchemy-utils = pythonVers.buildPythonPackage {
           pname = "SQLAlchemy-Utils";
           version = "0.37.9";
           format = "setuptools";
