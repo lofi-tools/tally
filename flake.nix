@@ -16,20 +16,47 @@
         runtimeDeps = [ ];
         devDeps = [ pkgs.cargo-nextest ];
 
-        ownPkgs.piecash = pkgs.python311Packages.buildPythonPackage rec {
+        pythonVers = pkgs.python312Packages;
+
+        ownPkgs.sqlalchemy-utils = pythonVers.buildPythonPackage rec {
+          pname = "SQLAlchemy-Utils";
+          version = "0.37.9";
+          format = "setuptools";
+
+          src = pkgs.fetchurl {
+            url = "https://files.pythonhosted.org/packages/6b/71/8da8a230490126ac94efdbab7d78a0248a9b5e51e0c1fda1f134b5ecb4c9/SQLAlchemy-Utils-0.37.9.tar.gz";
+            hash = "sha256-RmftvcsezgEQdraXcu9SS/uxfMl+A/Ee5rhdmOd0HWE=";
+          };
+
+          propagatedBuildInputs = with pythonVers; [
+            sqlalchemy_1_4
+          ];
+
+          doCheck = false;
+
+          meta = {
+            description = "Various utility functions for SQLAlchemy";
+            homepage = "https://github.com/kvesterod/sqlalchemy-utils";
+            license = lib.licenses.bsd3;
+          };
+        };
+
+        ownPkgs.piecash = pythonVers.buildPythonPackage rec {
           pname = "piecash";
-          version = "1.2.0";
+          version = "1.2.1";
           format = "setuptools";
 
           src = pkgs.fetchFromGitHub {
             owner = "sdementen";
             repo = "piecash";
             rev = "refs/tags/${version}";
-            hash = "sha256-b8Hewc8HsaDWs+44Cp2F5w/WGLIUFyCX6pusH2quXog=";
+            hash = "sha256-h+F3EAWQ1UQv7znCeoWwaIUXjuA9FLXiAbbbbefydp4=";
           };
 
-          propagatedBuildInputs = with pkgs.python311Packages; [
+          propagatedBuildInputs = with pythonVers; [
             sqlalchemy_1_4
+          ] ++ [
+            ownPkgs.sqlalchemy-utils
             pytz
             tzlocal
             click
@@ -37,7 +64,7 @@
             python-dateutil
           ];
 
-          buildInputs = with pkgs.python311Packages; [
+          buildInputs = with pythonVers; [
             setuptools
           ];
 
@@ -50,7 +77,7 @@
           };
         };
 
-        ownPkgs.ixbrl-parse = pkgs.python311Packages.buildPythonPackage rec {
+        ownPkgs.ixbrl-parse = pythonVers.buildPythonPackage rec {
           pname = "ixbrl-parse";
           version = "0.11.0";
           format = "pyproject";
@@ -61,11 +88,11 @@
           };
 
           nativeBuildInputs = [
-            pkgs.python311Packages.setuptools
+            pythonVers.setuptools
           ];
 
           propagatedBuildInputs = [
-            pkgs.python311Packages.lxml
+            pythonVers.lxml
           ];
 
           doCheck = false;
@@ -79,7 +106,7 @@
         };
 
         ownPkgs.ixbrl-reporter =
-          pkgs.python311Packages.buildPythonPackage rec {
+          pythonVers.buildPythonPackage rec {
             pname = "ixbrl-reporter";
             version = "1.2.1";
             format = "pyproject";
@@ -92,17 +119,17 @@
             };
 
             propagatedBuildInputs = [
-              pkgs.python311Packages.requests
-              pkgs.python311Packages.lxml
+              pythonVers.requests
+              pythonVers.lxml
               ownPkgs.piecash
-              pkgs.python311Packages.pyyaml
+              pythonVers.pyyaml
             ];
 
             nativeBuildInputs = [
-              pkgs.python311Packages.setuptools
-              pkgs.python311Packages.pytest
-              pkgs.python311Packages.pytest-cov
-              pkgs.python311Packages.pytest-mock
+              pythonVers.setuptools
+              pythonVers.pytest
+              pythonVers.pytest-cov
+              pythonVers.pytest-mock
               ownPkgs.ixbrl-parse
             ];
 
