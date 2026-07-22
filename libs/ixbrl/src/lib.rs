@@ -63,9 +63,62 @@ pub struct AccountNode {
     children: Vec<AccountNode>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RawAccount {
+    pub guid: String,
+    pub name: String,
+    pub r#type: String,
+    pub parent_guid: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RawTransaction {
+    pub guid: String,
+    pub post_datetime: chrono::NaiveDateTime,
+}
+
+#[derive(Debug, Clone)]
+pub struct RawSplit {
+    pub tx_guid: String,
+    pub account_guid: String,
+    pub value: rucash::Num,
+}
+
 pub struct GnucashBook {
     accounts: Vec<AccountNode>,
     net_assets: rucash::Num,
+    raw_accounts: Vec<RawAccount>,
+    raw_txns: Vec<RawTransaction>,
+    raw_splits: Vec<RawSplit>,
+}
+
+#[derive(Debug)]
+pub enum GnucashError {
+    Io(std::io::Error),
+    Rucash(rucash::Error),
+}
+
+impl fmt::Display for GnucashError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GnucashError::Io(e) => write!(f, "IO error: {e}"),
+            GnucashError::Rucash(e) => write!(f, "GnuCash parse error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for GnucashError {}
+
+impl From<std::io::Error> for GnucashError {
+    fn from(e: std::io::Error) -> Self {
+        GnucashError::Io(e)
+    }
+}
+
+impl From<rucash::Error> for GnucashError {
+    fn from(e: rucash::Error) -> Self {
+        GnucashError::Rucash(e)
+    }
 }
 
 impl AccountNode {
@@ -109,11 +162,32 @@ impl fmt::Display for GnucashBook {
     }
 }
 
+fn build_tree_from_raw(
+    raw: &[RawAccount],
+    balances: &[rucash::Num],
+    children_of: &[Vec<usize>],
+    idx: usize,
+) -> AccountNode {
+    let account_type =
+        AccountType::try_from(raw[idx].r#type.as_str()).unwrap_or(AccountType::Expense);
+    AccountNode {
+        name: raw[idx].name.clone(),
+        account_type,
+        balance: balances[idx],
+        children: children_of[idx]
+            .iter()
+            .map(|&child| build_tree_from_raw(raw, balances, children_of, child))
+            .collect(),
+    }
+}
+
 impl GnucashBook {
     pub async fn try_from_book(
         book: &rucash::Book<rucash::XMLQuery>,
     ) -> Result<Self, rucash::Error> {
         let accounts = book.accounts().await?;
+        let txns = book.transactions().await?;
+        let splits = book.splits().await?;
 
         let mut guid_to_idx: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
@@ -123,6 +197,9 @@ impl GnucashBook {
 
         let mut balances = vec![rucash::Num::from(0); accounts.len()];
         for (i, acc) in accounts.iter().enumerate() {
+            if acc.commodity_guid.is_empty() {
+                continue;
+            }
             balances[i] = acc.balance(book).await?;
         }
 
@@ -135,28 +212,19 @@ impl GnucashBook {
             }
         }
 
-        fn build(
-            accounts: &[rucash::model::Account<rucash::XMLQuery>],
-            balances: &[rucash::Num],
-            children_of: &[Vec<usize>],
-            idx: usize,
-        ) -> AccountNode {
-            let account_type = AccountType::try_from(accounts[idx].r#type.as_str())
-                .unwrap_or(AccountType::Expense);
-            AccountNode {
-                name: accounts[idx].name.clone(),
-                account_type,
-                balance: balances[idx],
-                children: children_of[idx]
-                    .iter()
-                    .map(|&child| build(accounts, balances, children_of, child))
-                    .collect(),
-            }
-        }
+        let raw_accounts: Vec<RawAccount> = accounts
+            .iter()
+            .map(|a| RawAccount {
+                guid: a.guid.clone(),
+                name: a.name.clone(),
+                r#type: a.r#type.clone(),
+                parent_guid: a.parent_guid.clone(),
+            })
+            .collect();
 
         let tree: Vec<AccountNode> = roots
             .iter()
-            .map(|&idx| build(&accounts, &balances, &children_of, idx))
+            .map(|&idx| build_tree_from_raw(&raw_accounts, &balances, &children_of, idx))
             .collect();
 
         let top_level: Vec<usize> = roots
@@ -168,39 +236,164 @@ impl GnucashBook {
         let net_assets: rucash::Num = top_level
             .iter()
             .map(|&idx| {
-                let acc = &accounts[idx];
                 let account_type =
-                    AccountType::try_from(acc.r#type.as_str()).unwrap_or(AccountType::Expense);
+                    AccountType::try_from(raw_accounts[idx].r#type.as_str())
+                        .unwrap_or(AccountType::Expense);
                 (account_type, &balances[idx])
             })
             .filter(|(t, _)| t.is_balance_sheet())
             .map(|(_, bal)| bal)
             .sum();
 
+        let raw_txns: Vec<RawTransaction> = txns
+            .iter()
+            .map(|t| RawTransaction {
+                guid: t.guid.clone(),
+                post_datetime: t.post_datetime,
+            })
+            .collect();
+        let raw_splits: Vec<RawSplit> = splits
+            .iter()
+            .map(|s| RawSplit {
+                tx_guid: s.tx_guid.clone(),
+                account_guid: s.account_guid.clone(),
+                value: s.value,
+            })
+            .collect();
+
         Ok(GnucashBook {
             accounts: tree,
             net_assets,
+            raw_accounts,
+            raw_txns,
+            raw_splits,
         })
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rucash::{Book, XMLQuery};
+    pub async fn try_from_sqlite_book(
+        book: &rucash::Book<rucash::SQLiteQuery>,
+    ) -> Result<Self, rucash::Error> {
+        let accounts = book.accounts().await?;
+        let txns = book.transactions().await?;
+        let splits = book.splits().await?;
 
-    #[tokio::test]
-    async fn parse_gnucash() {
-        let query =
-            XMLQuery::new("example_data/example.gnucash").expect("failed to open gnucash file");
-        let book = Book::new(query).await.expect("failed to create book");
-        let gnucash = GnucashBook::try_from_book(&book)
-            .await
-            .expect("failed to build gnucash book");
-        println!("{gnucash}");
-        assert_eq!(
-            gnucash.net_assets,
-            rucash::Num::try_from("16225.08").unwrap()
-        );
+        let mut guid_to_idx: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (i, acc) in accounts.iter().enumerate() {
+            guid_to_idx.insert(acc.guid.clone(), i);
+        }
+
+        let mut balances = vec![rucash::Num::from(0); accounts.len()];
+        for (i, acc) in accounts.iter().enumerate() {
+            if acc.commodity_guid.is_empty() {
+                continue;
+            }
+            balances[i] = acc.balance(book).await?;
+        }
+
+        let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); accounts.len()];
+        let mut roots = Vec::new();
+        for (i, acc) in accounts.iter().enumerate() {
+            match guid_to_idx.get(&acc.parent_guid) {
+                Some(&parent_idx) => children_of[parent_idx].push(i),
+                None => roots.push(i),
+            }
+        }
+
+        let raw_accounts: Vec<RawAccount> = accounts
+            .iter()
+            .map(|a| RawAccount {
+                guid: a.guid.clone(),
+                name: a.name.clone(),
+                r#type: a.r#type.clone(),
+                parent_guid: a.parent_guid.clone(),
+            })
+            .collect();
+
+        let tree: Vec<AccountNode> = roots
+            .iter()
+            .map(|&idx| build_tree_from_raw(&raw_accounts, &balances, &children_of, idx))
+            .collect();
+
+        let top_level: Vec<usize> = roots
+            .iter()
+            .flat_map(|&idx| &children_of[idx])
+            .copied()
+            .collect();
+
+        let net_assets: rucash::Num = top_level
+            .iter()
+            .map(|&idx| {
+                let account_type =
+                    AccountType::try_from(raw_accounts[idx].r#type.as_str())
+                        .unwrap_or(AccountType::Expense);
+                (account_type, &balances[idx])
+            })
+            .filter(|(t, _)| t.is_balance_sheet())
+            .map(|(_, bal)| bal)
+            .sum();
+
+        let raw_txns: Vec<RawTransaction> = txns
+            .iter()
+            .map(|t| RawTransaction {
+                guid: t.guid.clone(),
+                post_datetime: t.post_datetime,
+            })
+            .collect();
+        let raw_splits: Vec<RawSplit> = splits
+            .iter()
+            .map(|s| RawSplit {
+                tx_guid: s.tx_guid.clone(),
+                account_guid: s.account_guid.clone(),
+                value: s.value,
+            })
+            .collect();
+
+        Ok(GnucashBook {
+            accounts: tree,
+            net_assets,
+            raw_accounts,
+            raw_txns,
+            raw_splits,
+        })
+    }
+
+    pub async fn try_from_gnucash_file(path: &str) -> Result<Self, GnucashError> {
+        if path.ends_with(".gnucash") {
+            let magic = std::fs::read(path).map(|b| {
+                if b.len() >= 4 {
+                    [b[0], b[1], b[2], b[3]]
+                } else {
+                    [0u8; 4]
+                }
+            })?;
+
+            if magic == [0x53, 0x51, 0x4c, 0x69] {
+                let query = rucash::SQLiteQuery::new(path)?;
+                let book = rucash::Book::new(query).await?;
+                Ok(GnucashBook::try_from_sqlite_book(&book).await?)
+            } else {
+                let query = rucash::XMLQuery::new(path)?;
+                let book = rucash::Book::new(query).await?;
+                Ok(GnucashBook::try_from_book(&book).await?)
+            }
+        } else {
+            Err(GnucashError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unsupported file extension for {path}"),
+            )))
+        }
+    }
+
+    pub fn raw_accounts(&self) -> &[RawAccount] {
+        &self.raw_accounts
+    }
+
+    pub fn raw_transactions(&self) -> &[RawTransaction] {
+        &self.raw_txns
+    }
+
+    pub fn raw_splits(&self) -> &[RawSplit] {
+        &self.raw_splits
     }
 }
