@@ -1032,6 +1032,9 @@ mod tests {
         assert!(ixbrl.contains("ct-comp:TaxPayable"));
         assert!(ixbrl.contains("Example Biz Ltd."));
         assert!(ixbrl.contains("8596148860"));
+
+        std::fs::create_dir_all("../../.cache").unwrap();
+        std::fs::write("../../.cache/ct_return_example2.html", &ixbrl).unwrap();
     }
 
     #[tokio::test]
