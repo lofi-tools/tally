@@ -88,6 +88,35 @@ pub struct CorporationTaxReturn {
     pub expenses_by_fy: HashMap<String, HashMap<i32, f64>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CorporationTaxReturnBuilder<'a> {
+    company: &'a Company,
+    period_splits: Vec<(f64, String)>,
+    prev_splits: Vec<(f64, String)>,
+    rd_project_defs: Vec<(&'a str, Vec<(&'a str, &'a str)>, &'a str)>,
+}
+
+impl<'a> CorporationTaxReturnBuilder<'a> {
+    pub fn add_rd_project(
+        mut self,
+        name: &'a str,
+        items: &[(&'a str, &'a str)],
+        enhanced_path: &'a str,
+    ) -> Self {
+        self.rd_project_defs.push((name, items.to_vec(), enhanced_path));
+        self
+    }
+
+    pub fn build(self) -> CorporationTaxReturn {
+        CorporationTaxReturn::from_splits(
+            self.company,
+            &self.period_splits,
+            &self.prev_splits,
+            &self.rd_project_defs,
+        )
+    }
+}
+
 fn round_down(v: f64) -> f64 {
     v.floor()
 }
@@ -97,7 +126,7 @@ fn round2(v: f64) -> f64 {
 }
 
 impl CorporationTaxReturn {
-    pub fn from_gnucash(gnucash: &GnucashBook, company: &Company) -> Self {
+    pub fn builder<'a>(gnucash: &GnucashBook, company: &'a Company) -> CorporationTaxReturnBuilder<'a> {
         let accounts = gnucash.raw_accounts();
         let txns = gnucash.raw_transactions();
         let splits = gnucash.raw_splits();
@@ -132,13 +161,19 @@ impl CorporationTaxReturn {
             }
         }
 
-        Self::from_splits(company, &period_splits, &prev_splits)
+        CorporationTaxReturnBuilder {
+            company,
+            period_splits,
+            prev_splits,
+            rd_project_defs: Vec::new(),
+        }
     }
 
     fn from_splits(
         company: &Company,
         period_splits: &[(f64, String)],
         prev_splits: &[(f64, String)],
+        rd_project_defs: &[(&str, Vec<(&str, &str)>, &str)],
     ) -> Self {
         let sum = |splits: &[(f64, String)], account: &str| -> f64 {
             splits
@@ -195,20 +230,13 @@ impl CorporationTaxReturn {
             "Assets:Capital Equipment:Computer Equipment",
         ));
 
-        let rnd_enhanced_current = round_down(sum_abs(
-            period_splits,
-            "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
-        ));
+        let rnd_enhanced_current = if !rd_project_defs.is_empty() {
+            round_down(sum_abs(period_splits, rd_project_defs[0].2))
+        } else {
+            0.0
+        };
 
-        let rd_project_defs: Vec<(&str, Vec<(&str, &str)>)> = vec![
-            ("Project Iguana", vec![
-                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
-                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
-                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
-            ]),
-        ];
-
-        let rd_projects: Vec<RdProject> = rd_project_defs.iter().map(|(name, items)| {
+        let rd_projects: Vec<RdProject> = rd_project_defs.iter().map(|(name, items, enhanced_path)| {
             let items: Vec<RdExpenditureItem> = items.iter().map(|(label, path)| {
                 RdExpenditureItem {
                     label: label.to_string(),
@@ -220,8 +248,8 @@ impl CorporationTaxReturn {
                 }
             }).collect();
             let enhanced: HashMap<i32, f64> = HashMap::from([
-                (company.fy1_year, round_down(sum_abs(prev_splits, "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"))),
-                (company.fy2_year, rnd_enhanced_current),
+                (company.fy1_year, round_down(sum_abs(prev_splits, enhanced_path))),
+                (company.fy2_year, round_down(sum_abs(period_splits, enhanced_path))),
             ]);
             RdProject { name: name.to_string(), items, enhanced_by_fy: enhanced }
         }).collect();
@@ -298,10 +326,11 @@ impl CorporationTaxReturn {
             prev_splits,
             "Assets:Capital Equipment:Computer Equipment",
         ));
-        let rnd_enhanced_prev = round_down(sum_abs(
-            prev_splits,
-            "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
-        ));
+        let rnd_enhanced_prev = if !rd_project_defs.is_empty() {
+            round_down(sum_abs(prev_splits, rd_project_defs[0].2))
+        } else {
+            0.0
+        };
         let tax_expense_prev = sum_abs(prev_splits, "Equity:Corporation Tax:Corporation Tax");
 
         let mut expenses_by_fy: HashMap<String, HashMap<i32, f64>> = HashMap::new();
@@ -1260,7 +1289,13 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
         );
-        let ct = CorporationTaxReturn::from_gnucash(&gnucash, &company);
+        let ct = CorporationTaxReturn::builder(&gnucash, &company)
+            .add_rd_project("Project Iguana", &[
+                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
+                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
+                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
+            ], "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs")
+            .build();
 
         assert_eq!(ct.company.name, "Example Biz Ltd.");
         assert_eq!(ct.company.tax_reference, "8596148860");
@@ -1334,7 +1369,13 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
         );
-        let ct = CorporationTaxReturn::from_gnucash(&gnucash, &company);
+        let ct = CorporationTaxReturn::builder(&gnucash, &company)
+            .add_rd_project("Project Iguana", &[
+                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
+                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
+                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
+            ], "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs")
+            .build();
 
         assert!(!ct.rd_projects.is_empty());
         let p = &ct.rd_projects[0];
@@ -1371,7 +1412,13 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
         );
-        let ct = CorporationTaxReturn::from_gnucash(&gnucash, &company);
+        let ct = CorporationTaxReturn::builder(&gnucash, &company)
+            .add_rd_project("Project Iguana", &[
+                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
+                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
+                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
+            ], "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs")
+            .build();
         let ixbrl = ct.to_ixbrl();
 
         // Header structure
