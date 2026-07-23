@@ -1,20 +1,11 @@
 use std::collections::HashMap;
 
+use crate::company::Company;
 use crate::GnucashBook;
 
 #[derive(Debug, Clone)]
 pub struct CorporationTaxReturn {
-    pub company_name: String,
-    pub tax_reference: String,
-    pub company_number: String,
-    pub return_period_start: chrono::NaiveDate,
-    pub return_period_end: chrono::NaiveDate,
-    pub accounting_period_start: chrono::NaiveDate,
-    pub accounting_period_end: chrono::NaiveDate,
-    pub fy1_year: i32,
-    pub fy2_year: i32,
-    pub fy1_rate: f64,
-    pub fy2_rate: f64,
+    pub company: Company,
 
     pub turnover: f64,
     pub total_costs: f64,
@@ -89,14 +80,7 @@ fn round2(v: f64) -> f64 {
 }
 
 impl CorporationTaxReturn {
-    pub fn from_gnucash(
-        gnucash: &GnucashBook,
-        accounting_start: chrono::NaiveDate,
-        accounting_end: chrono::NaiveDate,
-        company_name: &str,
-        tax_reference: &str,
-        company_number: &str,
-    ) -> Self {
+    pub fn from_gnucash(gnucash: &GnucashBook, company: &Company) -> Self {
         let accounts = gnucash.raw_accounts();
         let txns = gnucash.raw_transactions();
         let splits = gnucash.raw_splits();
@@ -104,8 +88,8 @@ impl CorporationTaxReturn {
         let mut period_splits: Vec<(f64, String)> = Vec::new();
         let mut prev_splits: Vec<(f64, String)> = Vec::new();
 
-        let prev_start = accounting_start - chrono::Duration::days(365);
-        let prev_end = accounting_end - chrono::Duration::days(365);
+        let prev_start = company.prev_period_start();
+        let prev_end = company.prev_period_end();
 
         for split in splits {
             let tx = match txns.iter().find(|t| t.guid == split.tx_guid) {
@@ -123,7 +107,7 @@ impl CorporationTaxReturn {
             let path = Self::account_path(accounts, acc);
             let val = split.value.to_string().parse::<f64>().unwrap_or(0.0);
 
-            if tx_date >= accounting_start && tx_date <= accounting_end {
+            if tx_date >= company.accounting_period_start && tx_date <= company.accounting_period_end {
                 period_splits.push((val, path.clone()));
             }
             if tx_date >= prev_start && tx_date <= prev_end {
@@ -131,25 +115,13 @@ impl CorporationTaxReturn {
             }
         }
 
-        Self::from_splits(
-            &period_splits,
-            &prev_splits,
-            accounting_start,
-            accounting_end,
-            company_name,
-            tax_reference,
-            company_number,
-        )
+        Self::from_splits(company, &period_splits, &prev_splits)
     }
 
     fn from_splits(
+        company: &Company,
         period_splits: &[(f64, String)],
         prev_splits: &[(f64, String)],
-        accounting_start: chrono::NaiveDate,
-        accounting_end: chrono::NaiveDate,
-        company_name: &str,
-        tax_reference: &str,
-        company_number: &str,
     ) -> Self {
         let sum = |splits: &[(f64, String)], account: &str| -> f64 {
             splits
@@ -224,21 +196,19 @@ impl CorporationTaxReturn {
         let profits_before_charges = profits_before_deductions;
         let profits_chargeable = profits_before_charges;
 
-        let fy1_end = chrono::NaiveDate::from_ymd_opt(2020, 3, 31).unwrap();
-        let total_days = (accounting_end - accounting_start).num_days() + 1;
+        let fy1_end = chrono::NaiveDate::from_ymd_opt(company.fy2_year, 3, 31).unwrap();
+        let total_days = (company.accounting_period_end - company.accounting_period_start).num_days() + 1;
         let fy1_days = {
-            let s = accounting_start;
-            let e = fy1_end.min(accounting_end);
+            let s = company.accounting_period_start;
+            let e = fy1_end.min(company.accounting_period_end);
             if e >= s { (e - s).num_days() + 1 } else { 0 }
         };
         let fy2_days = total_days - fy1_days;
 
         let fy1_profit = (profits_chargeable * fy1_days as f64 / total_days as f64).round();
         let fy2_profit = (profits_chargeable * fy2_days as f64 / total_days as f64).round();
-        let fy1_rate = 19.0;
-        let fy2_rate = 19.0;
-        let fy1_tax = round2(fy1_profit * fy1_rate / 100.0);
-        let fy2_tax = round2(fy2_profit * fy2_rate / 100.0);
+        let fy1_tax = round2(fy1_profit * company.fy1_rate / 100.0);
+        let fy2_tax = round2(fy2_profit * company.fy2_rate / 100.0);
         let corporation_tax_chargeable = round2(fy1_tax + fy2_tax);
         let marginal_relief = 0.0;
         let corporation_tax_chargeable_payable =
@@ -307,21 +277,11 @@ impl CorporationTaxReturn {
             ("travel", travel_current, travel_prev),
         ];
         for (id, cur, prev) in exp {
-            expenses_by_fy.insert(id.to_string(), HashMap::from([(2020, cur), (2019, prev)]));
+            expenses_by_fy.insert(id.to_string(), HashMap::from([(company.fy2_year, cur), (company.fy1_year, prev)]));
         }
 
         CorporationTaxReturn {
-            company_name: company_name.to_string(),
-            tax_reference: tax_reference.to_string(),
-            company_number: company_number.to_string(),
-            return_period_start: accounting_start,
-            return_period_end: accounting_end,
-            accounting_period_start: accounting_start,
-            accounting_period_end: accounting_end,
-            fy1_year: 2019,
-            fy2_year: 2020,
-            fy1_rate,
-            fy2_rate,
+            company: company.clone(),
 
             turnover: ct_turnover_current,
             total_costs: total_costs_current,
@@ -375,27 +335,27 @@ impl CorporationTaxReturn {
             partner_in_a_firm: false,
 
             profit_per_accounts_by_fy: HashMap::from([
-                (2019, profit_before_tax_prev),
-                (2020, profit_before_tax_current),
+                (company.fy1_year, profit_before_tax_prev),
+                (company.fy2_year, profit_before_tax_current),
             ]),
-            aia_by_fy: HashMap::from([(2019, aia_prev), (2020, aia_current)]),
-            rnd_by_fy: HashMap::from([(2019, rnd_enhanced_prev), (2020, rnd_enhanced_current)]),
-            turnover_by_fy: HashMap::from([(2019, ct_turnover_prev), (2020, ct_turnover_current)]),
-            costs_by_fy: HashMap::from([(2019, total_costs_prev), (2020, total_costs_current)]),
+            aia_by_fy: HashMap::from([(company.fy1_year, aia_prev), (company.fy2_year, aia_current)]),
+            rnd_by_fy: HashMap::from([(company.fy1_year, rnd_enhanced_prev), (company.fy2_year, rnd_enhanced_current)]),
+            turnover_by_fy: HashMap::from([(company.fy1_year, ct_turnover_prev), (company.fy2_year, ct_turnover_current)]),
+            costs_by_fy: HashMap::from([(company.fy1_year, total_costs_prev), (company.fy2_year, total_costs_current)]),
             profit_before_tax_by_fy: HashMap::from([
-                (2019, profit_before_tax_prev),
-                (2020, profit_before_tax_current),
+                (company.fy1_year, profit_before_tax_prev),
+                (company.fy2_year, profit_before_tax_current),
             ]),
             tax_expense_by_fy: HashMap::from([
-                (2019, tax_expense_prev),
-                (2020, tax_expense_current),
+                (company.fy1_year, tax_expense_prev),
+                (company.fy2_year, tax_expense_current),
             ]),
             profit_after_tax_by_fy: HashMap::from([
-                (2019, (profit_before_tax_prev - tax_expense_prev).round()),
-                (2020, profit_after_tax),
+                (company.fy1_year, (profit_before_tax_prev - tax_expense_prev).round()),
+                (company.fy2_year, profit_after_tax),
             ]),
-            wages_by_fy: HashMap::from([(2019, salaries_prev), (2020, salaries_current)]),
-            pensions_by_fy: HashMap::from([(2019, pensions_prev), (2020, pensions_current)]),
+            wages_by_fy: HashMap::from([(company.fy1_year, salaries_prev), (company.fy2_year, salaries_current)]),
+            pensions_by_fy: HashMap::from([(company.fy1_year, pensions_prev), (company.fy2_year, pensions_current)]),
             expenses_by_fy,
         }
     }
@@ -442,13 +402,13 @@ impl CorporationTaxReturn {
             &mut out,
             "ct-comp:CompanyName",
             "ctxt-0",
-            &self.company_name,
+            &self.company.name,
         );
         self.ix_non_numeric(
             &mut out,
             "ct-comp:TaxReference",
             "ctxt-0",
-            &self.tax_reference,
+            &self.company.tax_reference,
         );
         out.push_str("</ix:hidden>");
 
@@ -461,60 +421,60 @@ impl CorporationTaxReturn {
         self.write_context_instant(
             &mut out,
             "ctxt-0",
-            &self.company_number,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_end,
             Some("ct-comp:BusinessTypeDimension"),
             Some("ct-comp:Company"),
         );
         self.write_context_duration(
             &mut out,
             "ctxt-1",
-            &self.company_number,
-            &self.accounting_period_start,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_start,
+            &self.company.accounting_period_end,
             Some("ct-comp:BusinessTypeDimension"),
             Some("ct-comp:Company"),
         );
         self.write_context_duration(
             &mut out,
             "ctxt-2",
-            &self.company_number,
-            &self.accounting_period_start,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_start,
+            &self.company.accounting_period_end,
             Some("ct-comp:BusinessTypeDimension"),
             Some("ct-comp:ManagementExpenses"),
         );
         self.write_context_duration(
             &mut out,
             "ctxt-3",
-            &self.company_number,
-            &self.accounting_period_start,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_start,
+            &self.company.accounting_period_end,
             Some("ct-comp:BusinessTypeDimension"),
             Some("ct-comp:Company"),
         );
         self.write_context_duration(
             &mut out,
             "ctxt-4",
-            &self.company_number,
-            &self.accounting_period_start,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_start,
+            &self.company.accounting_period_end,
             Some("ct-comp:BusinessTypeDimension"),
             Some("ct-comp:Trade"),
         );
         self.write_context_duration(
             &mut out,
             "ctxt-5",
-            &self.company_number,
-            &self.accounting_period_start,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_start,
+            &self.company.accounting_period_end,
             Some("ct-comp:BusinessTypeDimension"),
             Some("ct-comp:Trade"),
         );
         self.write_context_duration(
             &mut out,
             "ctxt-8",
-            &self.company_number,
+            &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
             Some("ct-comp:BusinessTypeDimension"),
@@ -523,16 +483,16 @@ impl CorporationTaxReturn {
         self.write_context_duration(
             &mut out,
             "ctxt-9",
-            &self.company_number,
-            &self.accounting_period_start,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_start,
+            &self.company.accounting_period_end,
             Some("dpl:DetailedAnalysisDimension"),
             Some("dpl:Item1"),
         );
         self.write_context_duration(
             &mut out,
             "ctxt-10",
-            &self.company_number,
+            &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
             Some("dpl:DetailedAnalysisDimension"),
@@ -541,16 +501,16 @@ impl CorporationTaxReturn {
         self.write_context_duration(
             &mut out,
             "ctxt-11",
-            &self.company_number,
-            &self.accounting_period_start,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_start,
+            &self.company.accounting_period_end,
             None,
             None,
         );
         self.write_context_duration(
             &mut out,
             "ctxt-12",
-            &self.company_number,
+            &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
             None,
@@ -559,16 +519,16 @@ impl CorporationTaxReturn {
         self.write_context_duration(
             &mut out,
             "ctxt-13",
-            &self.company_number,
-            &self.accounting_period_start,
-            &self.accounting_period_end,
+            &self.company.company_number,
+            &self.company.accounting_period_start,
+            &self.company.accounting_period_end,
             Some("dpl:ExpenseTypeDimension"),
             Some("dpl:AdministrativeExpenses"),
         );
         self.write_context_duration(
             &mut out,
             "ctxt-14",
-            &self.company_number,
+            &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
             Some("dpl:ExpenseTypeDimension"),
@@ -577,7 +537,7 @@ impl CorporationTaxReturn {
         self.write_context_duration(
             &mut out,
             "ctxt-15",
-            &self.company_number,
+            &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
             Some("ct-comp:BusinessTypeDimension"),
@@ -586,7 +546,7 @@ impl CorporationTaxReturn {
         self.write_context_duration(
             &mut out,
             "ctxt-16",
-            &self.company_number,
+            &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
             Some("ct-comp:BusinessTypeDimension"),
@@ -669,15 +629,15 @@ impl CorporationTaxReturn {
         );
 
         out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Company name</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(out, "ct-comp:CompanyName", "ctxt-0", &self.company_name);
+        self.ix_non_numeric(out, "ct-comp:CompanyName", "ctxt-0", &self.company.name);
         out.push_str("</span></div></div>");
 
         out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Tax reference</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(out, "ct-comp:TaxReference", "ctxt-0", &self.tax_reference);
+        self.ix_non_numeric(out, "ct-comp:TaxReference", "ctxt-0", &self.company.tax_reference);
         out.push_str("</span></div></div>");
 
         out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Company number</span></div><div class=\"cell\"><span class=\"value\">");
-        out.push_str(&self.company_number);
+        out.push_str(&self.company.company_number);
         out.push_str("</span></div></div>");
 
         out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Return period start</span></div><div class=\"cell\"><span class=\"value\">");
@@ -685,7 +645,7 @@ impl CorporationTaxReturn {
             out,
             "ct-comp:StartOfPeriodCoveredByReturn",
             "ctxt-0",
-            &format_date(&self.return_period_start),
+            &format_date(&self.company.return_period_start()),
         );
         out.push_str("</span></div></div>");
 
@@ -694,7 +654,7 @@ impl CorporationTaxReturn {
             out,
             "ct-comp:EndOfPeriodCoveredByReturn",
             "ctxt-0",
-            &format_date(&self.return_period_end),
+            &format_date(&self.company.return_period_end()),
         );
         out.push_str("</span></div></div>");
 
@@ -703,7 +663,7 @@ impl CorporationTaxReturn {
             out,
             "ct-comp:PeriodOfAccountStartDate",
             "ctxt-0",
-            &format_date(&self.accounting_period_start),
+            &format_date(&self.company.accounting_period_start),
         );
         out.push_str("</span></div></div>");
 
@@ -712,7 +672,7 @@ impl CorporationTaxReturn {
             out,
             "ct-comp:PeriodOfAccountEndDate",
             "ctxt-0",
-            &format_date(&self.accounting_period_end),
+            &format_date(&self.company.accounting_period_end),
         );
         out.push_str("</span></div></div>");
 
@@ -843,13 +803,13 @@ impl CorporationTaxReturn {
             out,
             "ct-comp:FinancialYear1CoveredByTheReturn",
             "ctxt-1",
-            &self.fy1_year.to_string(),
+            &self.company.fy1_year.to_string(),
         );
         self.ix_non_numeric(
             out,
             "ct-comp:FinancialYear2CoveredByTheReturn",
             "ctxt-1",
-            &self.fy2_year.to_string(),
+            &self.company.fy2_year.to_string(),
         );
         self.ix_non_fraction(
             out,
@@ -870,14 +830,14 @@ impl CorporationTaxReturn {
             "ct-comp:FY1FirstRateOfTax",
             "ctxt-1",
             "iso4217:GBP",
-            self.fy1_rate,
+            self.company.fy1_rate,
         );
         self.ix_non_fraction(
             out,
             "ct-comp:FY2FirstRateOfTax",
             "ctxt-1",
             "iso4217:GBP",
-            self.fy2_rate,
+            self.company.fy2_rate,
         );
         self.ix_non_fraction(
             out,
@@ -1040,20 +1000,20 @@ mod tests {
             crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
                 .await
                 .expect("open gnucash");
-        let ct = CorporationTaxReturn::from_gnucash(
-            &gnucash,
-            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
+        let company = crate::company::Company::new(
             "Example Biz Ltd.",
             "8596148860",
             "12345678",
+            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
         );
+        let ct = CorporationTaxReturn::from_gnucash(&gnucash, &company);
 
-        assert_eq!(ct.company_name, "Example Biz Ltd.");
-        assert_eq!(ct.tax_reference, "8596148860");
-        assert_eq!(ct.company_number, "12345678");
-        assert_eq!(ct.fy1_year, 2019);
-        assert_eq!(ct.fy2_year, 2020);
+        assert_eq!(ct.company.name, "Example Biz Ltd.");
+        assert_eq!(ct.company.tax_reference, "8596148860");
+        assert_eq!(ct.company.company_number, "12345678");
+        assert_eq!(ct.company.fy1_year, 2019);
+        assert_eq!(ct.company.fy2_year, 2020);
 
         assert_eq!(ct.net_trading_profits, 748.0);
         assert_eq!(ct.fy1_profit, 186.0);
