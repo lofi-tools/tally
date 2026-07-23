@@ -531,52 +531,75 @@ impl CorporationTaxReturn {
             Some("ct-comp:BusinessTypeDimension"),
             Some("ct-comp:Company"),
         );
-        self.write_context_duration(
+        self.write_context_duration_full(
             &mut w,
             "ctxt-4",
             &self.company.company_number,
             &self.company.accounting_period_start,
             &self.company.accounting_period_end,
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:Trade"),
+            Some("ct-comp:BusinessNameDimension"),
+            Some(&self.company.name),
+            &[
+                ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
+                ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
+                ("ct-comp:TerritoryDimension", "ct-comp:UK"),
+            ],
         );
-        self.write_context_duration(
+        self.write_context_duration_full(
             &mut w,
             "ctxt-5",
             &self.company.company_number,
             &self.company.accounting_period_start,
             &self.company.accounting_period_end,
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:Trade"),
+            Some("ct-comp:BusinessNameDimension"),
+            Some(&self.company.name),
+            &[
+                ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
+                ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
+                ("ct-comp:TerritoryDimension", "ct-comp:UK"),
+            ],
         );
-        self.write_context_duration(
+        self.write_context_duration_full(
             &mut w,
             "ctxt-8",
             &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:Trade"),
+            Some("ct-comp:BusinessNameDimension"),
+            Some(&self.company.name),
+            &[
+                ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
+                ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
+                ("ct-comp:TerritoryDimension", "ct-comp:UK"),
+            ],
         );
-        self.write_context_duration(
+        self.write_context_duration_full(
             &mut w,
             "ctxt-9",
             &self.company.company_number,
             &self.company.accounting_period_start,
             &self.company.accounting_period_end,
-            Some("dpl:DetailedAnalysisDimension"),
-            Some("dpl:Item1"),
+            None,
+            None,
+            &[
+                ("dpl:DetailedAnalysisDimension", "dpl:Item1"),
+                ("uk-geo:CountriesRegionsDimension", "uk-geo:UnitedKingdom"),
+            ],
         );
-        self.write_context_duration(
+        self.write_context_duration_full(
             &mut w,
             "ctxt-10",
             &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
-            Some("dpl:DetailedAnalysisDimension"),
-            Some("dpl:Item1"),
+            None,
+            None,
+            &[
+                ("dpl:DetailedAnalysisDimension", "dpl:Item1"),
+                ("uk-geo:CountriesRegionsDimension", "uk-geo:UnitedKingdom"),
+            ],
         );
-        self.write_context_duration(
+        self.write_context_duration_full(
             &mut w,
             "ctxt-11",
             &self.company.company_number,
@@ -584,8 +607,9 @@ impl CorporationTaxReturn {
             &self.company.accounting_period_end,
             None,
             None,
+            &[],
         );
-        self.write_context_duration(
+        self.write_context_duration_full(
             &mut w,
             "ctxt-12",
             &self.company.company_number,
@@ -593,6 +617,7 @@ impl CorporationTaxReturn {
             &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
             None,
             None,
+            &[],
         );
         self.write_context_duration(
             &mut w,
@@ -692,6 +717,24 @@ impl CorporationTaxReturn {
         dim: Option<&str>,
         val: Option<&str>,
     ) {
+        let dims = match (dim, val) {
+            (Some(d), Some(v)) => vec![(d, v)],
+            _ => vec![],
+        };
+        self.write_context_duration_full(w, id, scheme_id, start, end, None, None, &dims);
+    }
+
+    fn write_context_duration_full(
+        &self,
+        w: &mut IxbrlWriter,
+        id: &str,
+        scheme_id: &str,
+        start: &chrono::NaiveDate,
+        end: &chrono::NaiveDate,
+        typed_dim: Option<&str>,
+        typed_val: Option<&str>,
+        explicit_dims: &[(&str, &str)],
+    ) {
         w.open_element("xbrli:context", &[("id", id)]);
         w.open_element("xbrli:entity", &[]);
         w.write_element(
@@ -699,13 +742,20 @@ impl CorporationTaxReturn {
             &[("scheme", "http://www.companieshouse.gov.uk/")],
             scheme_id,
         );
-        if let Some(d) = dim {
+        if typed_dim.is_some() || !explicit_dims.is_empty() {
             w.open_element("xbrli:segment", &[]);
-            w.write_element(
-                "xbrldi:explicitMember",
-                &[("dimension", d)],
-                val.unwrap_or(""),
-            );
+            if let Some(d) = typed_dim {
+                w.open_element("xbrldi:typedMember", &[("dimension", d)]);
+                w.write_element(
+                    "ct-comp:BusinessNameDomain",
+                    &[],
+                    typed_val.unwrap_or(""),
+                );
+                w.close_element("xbrldi:typedMember");
+            }
+            for (dim, val) in explicit_dims {
+                w.write_element("xbrldi:explicitMember", &[("dimension", dim)], val);
+            }
             w.close_element("xbrli:segment");
         }
         w.close_element("xbrli:entity");
