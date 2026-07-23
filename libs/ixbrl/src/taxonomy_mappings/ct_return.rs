@@ -717,7 +717,9 @@ impl CorporationTaxReturn {
     }
 
     fn write_unit(&self, w: &mut IxbrlWriter, measure: &str) {
-        w.write_element("xbrli:unit", &[("id", "iso4217")], measure);
+        w.open_element("xbrli:unit", &[("id", "GBP")]);
+        w.write_element("xbrli:measure", &[], measure);
+        w.close_element("xbrli:unit");
     }
 
     fn ix_non_numeric(
