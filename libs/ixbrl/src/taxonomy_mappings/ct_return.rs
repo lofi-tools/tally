@@ -5,6 +5,20 @@ use crate::ixbrl_writer::IxbrlWriter;
 use crate::GnucashBook;
 
 #[derive(Debug, Clone)]
+pub struct RdExpenditureItem {
+    pub label: String,
+    pub account_path: String,
+    pub values_by_fy: HashMap<i32, f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RdProject {
+    pub name: String,
+    pub items: Vec<RdExpenditureItem>,
+    pub enhanced_by_fy: HashMap<i32, f64>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CorporationTaxReturn {
     pub company: Company,
 
@@ -58,6 +72,8 @@ pub struct CorporationTaxReturn {
     pub rnd_claim_notification: bool,
     pub rnd_additional_information: bool,
     pub partner_in_a_firm: bool,
+
+    pub rd_projects: Vec<RdProject>,
 
     pub profit_per_accounts_by_fy: HashMap<i32, f64>,
     pub aia_by_fy: HashMap<i32, f64>,
@@ -183,6 +199,32 @@ impl CorporationTaxReturn {
             period_splits,
             "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
         ));
+
+        let rd_project_defs: Vec<(&str, Vec<(&str, &str)>)> = vec![
+            ("Project Iguana", vec![
+                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
+                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
+                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
+            ]),
+        ];
+
+        let rd_projects: Vec<RdProject> = rd_project_defs.iter().map(|(name, items)| {
+            let items: Vec<RdExpenditureItem> = items.iter().map(|(label, path)| {
+                RdExpenditureItem {
+                    label: label.to_string(),
+                    account_path: path.to_string(),
+                    values_by_fy: HashMap::from([
+                        (company.fy1_year, round_down(sum_abs(prev_splits, path))),
+                        (company.fy2_year, round_down(sum_abs(period_splits, path))),
+                    ]),
+                }
+            }).collect();
+            let enhanced: HashMap<i32, f64> = HashMap::from([
+                (company.fy1_year, round_down(sum_abs(prev_splits, "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"))),
+                (company.fy2_year, rnd_enhanced_current),
+            ]);
+            RdProject { name: name.to_string(), items, enhanced_by_fy: enhanced }
+        }).collect();
 
         let ct_trading_profits_raw = profit_before_tax_current - aia_current - rnd_enhanced_current;
         let ct_trading_profits = if ct_trading_profits_raw > 0.0 {
@@ -334,6 +376,8 @@ impl CorporationTaxReturn {
             rnd_claim_notification: false,
             rnd_additional_information: false,
             partner_in_a_firm: false,
+
+            rd_projects,
 
             profit_per_accounts_by_fy: HashMap::from([
                 (company.fy1_year, profit_before_tax_prev),
@@ -568,6 +612,9 @@ impl CorporationTaxReturn {
         self.write_losses_page(&mut w);
         self.write_tax_chargeable_page(&mut w);
         self.write_rnd_page(&mut w);
+        if !self.rd_projects.is_empty() {
+            self.write_rnd_worksheet_page(&mut w);
+        }
         w.write_raw("</div>");
 
         w.write_raw("</body></html>");
@@ -954,6 +1001,214 @@ impl CorporationTaxReturn {
 
         self.close_page(w);
     }
+
+    fn write_rnd_worksheet_page(&self, w: &mut IxbrlWriter) {
+        let fy1 = self.company.fy1_year;
+        let fy2 = self.company.fy2_year;
+
+        w.open_element("div", &[("class", "page")]);
+        w.open_element("div", &[("class", "worksheet")]);
+        w.write_element("h2", &[], "SME R&D");
+
+        w.open_element("table", &[("class", "sheet table")]);
+
+        // Header row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.write_element("td", &[("class", "column header cell")], &fy2.to_string());
+        w.write_element("td", &[("class", "column header cell")], &fy1.to_string());
+        w.close_element("tr");
+
+        // Currency row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.open_element("td", &[("class", "column currency cell")]);
+        w.write_raw("&#163;");
+        w.close_element("td");
+        w.open_element("td", &[("class", "column currency cell")]);
+        w.write_raw("&#163;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        for project in &self.rd_projects {
+            // Blank row
+            w.open_element("tr", &[("class", "row")]);
+            w.open_element("td", &[("class", "label cell")]);
+            w.write_raw("&#160;");
+            w.close_element("td");
+            w.close_element("tr");
+
+            // Project heading
+            w.open_element("tr", &[("class", "row")]);
+            w.open_element("td", &[("class", "label breakdown heading cell")]);
+            w.write_element("span", &[], &project.name);
+            w.close_element("td");
+            w.close_element("tr");
+
+            // Item rows
+            for item in &project.items {
+                let v2 = item.values_by_fy.get(&fy2).copied().unwrap_or(0.0);
+                let v1 = item.values_by_fy.get(&fy1).copied().unwrap_or(0.0);
+                w.open_element("tr", &[("class", "row")]);
+                w.open_element("td", &[("class", "label breakdown item cell")]);
+                w.write_element("span", &[], &item.label);
+                w.close_element("td");
+                self.write_data_cell(w, v2);
+                self.write_data_cell(w, v1);
+                w.close_element("tr");
+            }
+
+            // Subtotal
+            let total2: f64 = project.items.iter().map(|i| i.values_by_fy.get(&fy2).copied().unwrap_or(0.0)).sum();
+            let total1: f64 = project.items.iter().map(|i| i.values_by_fy.get(&fy1).copied().unwrap_or(0.0)).sum();
+            w.open_element("tr", &[("class", "row")]);
+            w.write_element("td", &[("class", "label breakdown total cell")], "Total");
+            self.write_data_cell_total(w, total2);
+            self.write_data_cell_total(w, total1);
+            w.close_element("tr");
+
+            // Blank row
+            w.open_element("tr", &[("class", "row")]);
+            w.open_element("td", &[("class", "label cell")]);
+            w.write_raw("&#160;");
+            w.close_element("td");
+            w.close_element("tr");
+
+            // Enhanced heading
+            w.open_element("tr", &[("class", "row")]);
+            w.open_element("td", &[("class", "label breakdown heading cell")]);
+            w.write_element("span", &[], "SME R&D tax relief (130%)");
+            w.close_element("td");
+            w.close_element("tr");
+
+            // Enhanced project row
+            let enh2 = project.enhanced_by_fy.get(&fy2).copied().unwrap_or(0.0);
+            let enh1 = project.enhanced_by_fy.get(&fy1).copied().unwrap_or(0.0);
+            w.open_element("tr", &[("class", "row")]);
+            w.open_element("td", &[("class", "label breakdown item cell")]);
+            w.write_element("span", &[], &project.name);
+            w.close_element("td");
+            self.write_data_cell(w, enh2);
+            self.write_data_cell(w, enh1);
+            w.close_element("tr");
+
+            // Enhanced total with ix:nonFraction
+            w.open_element("tr", &[("class", "row")]);
+            w.write_element("td", &[("class", "label breakdown total cell")], "Total");
+            self.write_data_cell_total_ix(w, "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", enh2);
+            self.write_data_cell_total_ix(w, "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", enh1);
+            w.close_element("tr");
+        }
+
+        w.close_element("table");
+        w.close_element("div");
+        w.close_element("div");
+    }
+
+    fn write_data_cell(&self, w: &mut IxbrlWriter, value: f64) {
+        if value == 0.0 {
+            w.open_element("td", &[("class", "data value nil cell")]);
+            w.open_element("span", &[]);
+            w.write_raw("0.00&#160;&#160;");
+            w.close_element("span");
+            w.close_element("td");
+        } else if value < 0.0 {
+            w.open_element("td", &[("class", "data value negative cell")]);
+            w.open_element("span", &[]);
+            w.write_raw("<span>( </span>");
+            w.write_element("span", &[], &format!("{:.2}", value.abs()));
+            w.write_raw("<span> )</span>");
+            w.close_element("span");
+            w.close_element("td");
+        } else {
+            w.open_element("td", &[("class", "data value cell")]);
+            w.write_element("span", &[], &format!("{:.2}", value));
+            w.close_element("td");
+        }
+    }
+
+    fn write_data_cell_total(&self, w: &mut IxbrlWriter, value: f64) {
+        if value == 0.0 {
+            w.open_element("td", &[("class", "data value breakdown total nil cell")]);
+            w.open_element("span", &[]);
+            w.write_raw("0.00&#160;&#160;");
+            w.close_element("span");
+            w.close_element("td");
+        } else if value < 0.0 {
+            w.open_element("td", &[("class", "data value breakdown total negative cell")]);
+            w.open_element("span", &[]);
+            w.write_raw("<span>( </span>");
+            w.write_element("span", &[], &format!("{:.2}", value.abs()));
+            w.write_raw("<span> )</span>");
+            w.close_element("span");
+            w.close_element("td");
+        } else {
+            w.open_element("td", &[("class", "data value breakdown total cell")]);
+            w.write_element("span", &[], &format!("{:.2}", value));
+            w.close_element("td");
+        }
+    }
+
+    fn write_data_cell_total_ix(&self, w: &mut IxbrlWriter, name: &str, ctx: &str, value: f64) {
+        if value < 0.0 {
+            w.open_element("td", &[("class", "data value breakdown total negative cell")]);
+            w.open_element("span", &[]);
+            w.write_raw("<span>( </span>");
+            w.open_element("ix:nonFraction", &[
+                ("name", name),
+                ("contextRef", ctx),
+                ("unitRef", "iso4217:GBP"),
+                ("format", "ixt2:numdotdecimal"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ]);
+            w.write_raw(&format!("{:.2}", value.abs()));
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span> )</span>");
+            w.close_element("span");
+            w.close_element("td");
+        } else if value == 0.0 {
+            w.open_element("td", &[("class", "data value breakdown total nil cell")]);
+            w.open_element("span", &[]);
+            w.open_element("ix:nonFraction", &[
+                ("name", name),
+                ("contextRef", ctx),
+                ("unitRef", "iso4217:GBP"),
+                ("format", "ixt2:numdotdecimal"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ]);
+            w.write_raw("0.00");
+            w.close_element("ix:nonFraction");
+            w.open_element("span", &[]);
+            w.write_raw("&#160;&#160;");
+            w.close_element("span");
+            w.close_element("span");
+            w.close_element("td");
+        } else {
+            w.open_element("td", &[("class", "data value breakdown total cell")]);
+            w.open_element("span", &[]);
+            w.open_element("ix:nonFraction", &[
+                ("name", name),
+                ("contextRef", ctx),
+                ("unitRef", "iso4217:GBP"),
+                ("format", "ixt2:numdotdecimal"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ]);
+            w.write_raw(&format!("{:.2}", value));
+            w.close_element("ix:nonFraction");
+            w.open_element("span", &[]);
+            w.write_raw("&#160;&#160;");
+            w.close_element("span");
+            w.close_element("span");
+            w.close_element("td");
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -1064,5 +1319,104 @@ mod tests {
     fn test_format_date() {
         let d = chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
         assert_eq!(format_date(&d), "1&#160;January&#160;2020");
+    }
+
+    #[tokio::test]
+    async fn test_rnd_worksheet_output() {
+        let gnucash =
+            crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
+                .await
+                .expect("open gnucash");
+        let company = crate::company::Company::new(
+            "Example Biz Ltd.",
+            "8596148860",
+            "12345678",
+            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
+        );
+        let ct = CorporationTaxReturn::from_gnucash(&gnucash, &company);
+
+        assert!(!ct.rd_projects.is_empty());
+        let p = &ct.rd_projects[0];
+        assert_eq!(p.name, "Project Iguana");
+        assert_eq!(p.items.len(), 3);
+        assert_eq!(p.items[0].label, "Staffing Costs");
+        assert_eq!(p.items[0].values_by_fy[&2020], 465.0);
+        assert_eq!(p.items[1].label, "Software/Consumables");
+        assert_eq!(p.items[1].values_by_fy[&2020], 0.0);
+        assert_eq!(p.items[2].label, "External Workers");
+        assert_eq!(p.items[2].values_by_fy[&2020], 0.0);
+
+        let ixbrl = ct.to_ixbrl();
+        assert!(ixbrl.contains("SME R&amp;D</h2>"));
+        assert!(ixbrl.contains("Staffing Costs"));
+        assert!(ixbrl.contains("Software/Consumables"));
+        assert!(ixbrl.contains("External Workers"));
+        assert!(ixbrl.contains("SME R&amp;D tax relief (130%)"));
+        assert!(ixbrl.contains("Project Iguana"));
+        assert!(ixbrl.contains("ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME"));
+        assert!(ixbrl.contains("sheet table"));
+    }
+
+    #[tokio::test]
+    async fn test_ixbrl_tag_structure_matches_reference() {
+        let gnucash =
+            crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
+                .await
+                .expect("open gnucash");
+        let company = crate::company::Company::new(
+            "Example Biz Ltd.",
+            "8596148860",
+            "12345678",
+            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
+        );
+        let ct = CorporationTaxReturn::from_gnucash(&gnucash, &company);
+        let ixbrl = ct.to_ixbrl();
+
+        // Header structure
+        assert!(ixbrl.contains("<ix:header>"));
+        assert!(ixbrl.contains("<ix:hidden>"));
+        assert!(ixbrl.contains("<ix:references>"));
+        assert!(ixbrl.contains("<ix:resources>"));
+
+        // Context structure
+        assert!(ixbrl.contains("xbrli:context id=\"ctxt-0\""));
+        assert!(ixbrl.contains("<xbrli:instant>"));
+        assert!(ixbrl.contains("<xbrli:startDate>"));
+        assert!(ixbrl.contains("<xbrli:endDate>"));
+
+        // Report wrapper
+        assert!(ixbrl.contains("id=\"report\" class=\"report\""));
+
+        // Page structure - each page has div.page > div.facts > h2
+        assert!(ixbrl.contains("<h2>Corporation Tax Return</h2>"));
+        assert!(ixbrl.contains("<h2>Capital allowances and balancing charges</h2>"));
+        assert!(ixbrl.contains("<h2>Profits and gains</h2>"));
+        assert!(ixbrl.contains("<h2>Losses</h2>"));
+        assert!(ixbrl.contains("<h2>Tax chargeable</h2>"));
+        assert!(ixbrl.contains("<h2>R&amp;D / Creative enhanced expenditure</h2>"));
+
+        // Fact structure
+        assert!(ixbrl.contains("class=\"fact\""));
+        assert!(ixbrl.contains("class=\"ref\""));
+        assert!(ixbrl.contains("class=\"description\""));
+        assert!(ixbrl.contains("class=\"factvalue\""));
+
+        // XBRL tags with correct attributes
+        assert!(ixbrl.contains("ix:nonNumeric name=\"ct-comp:CompanyName\""));
+        assert!(ixbrl.contains("ix:nonFraction name=\"ct-comp:NetTradingProfits\""));
+        assert!(ixbrl.contains("unitRef=\"iso4217:GBP\""));
+        assert!(ixbrl.contains("format=\"ixt2:numdotdecimal\""));
+        assert!(ixbrl.contains("scale=\"0\""));
+        assert!(ixbrl.contains("format=\"ixt2:datedaymonthyearen\""));
+
+        // SME R&D worksheet
+        assert!(ixbrl.contains("<h2>SME R&amp;D</h2>"));
+        assert!(ixbrl.contains("class=\"sheet table\""));
+        assert!(ixbrl.contains("class=\"column header cell\""));
+        assert!(ixbrl.contains("breakdown heading cell"));
+        assert!(ixbrl.contains("breakdown item cell"));
+        assert!(ixbrl.contains("breakdown total cell"));
     }
 }
