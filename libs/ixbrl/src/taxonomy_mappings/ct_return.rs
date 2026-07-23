@@ -1057,8 +1057,8 @@ impl CorporationTaxReturn {
                 w.open_element("td", &[("class", "label breakdown item cell")]);
                 w.write_element("span", &[], &item.label);
                 w.close_element("td");
-                self.write_data_cell(w, v2);
-                self.write_data_cell(w, v1);
+                self.write_data_cell(w, -v2);
+                self.write_data_cell(w, -v1);
                 w.close_element("tr");
             }
 
@@ -1067,8 +1067,8 @@ impl CorporationTaxReturn {
             let total1: f64 = project.items.iter().map(|i| i.values_by_fy.get(&fy1).copied().unwrap_or(0.0)).sum();
             w.open_element("tr", &[("class", "row")]);
             w.write_element("td", &[("class", "label breakdown total cell")], "Total");
-            self.write_data_cell_total(w, total2);
-            self.write_data_cell_total(w, total1);
+            self.write_data_cell_total(w, -total2);
+            self.write_data_cell_total(w, -total1);
             w.close_element("tr");
 
             // Blank row
@@ -1092,15 +1092,15 @@ impl CorporationTaxReturn {
             w.open_element("td", &[("class", "label breakdown item cell")]);
             w.write_element("span", &[], &project.name);
             w.close_element("td");
-            self.write_data_cell(w, enh2);
-            self.write_data_cell(w, enh1);
+            self.write_data_cell(w, -enh2);
+            self.write_data_cell(w, -enh1);
             w.close_element("tr");
 
             // Enhanced total with ix:nonFraction
             w.open_element("tr", &[("class", "row")]);
             w.write_element("td", &[("class", "label breakdown total cell")], "Total");
-            self.write_data_cell_total_ix(w, "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", enh2);
-            self.write_data_cell_total_ix(w, "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", enh1);
+            self.write_data_cell_total_ix(w, "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", -enh2);
+            self.write_data_cell_total_ix(w, "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", -enh1);
             w.close_element("tr");
         }
 
