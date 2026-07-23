@@ -14,7 +14,7 @@
       let
         buildTimeDeps = [ pkgs.pkg-config ];
         runtimeDeps = [ ];
-        devDeps = [ pkgs.cargo-nextest ];
+        devDeps = [ pkgs.cargo-nextest pkgs.arelle ];
 
         pythonVers = pkgs.python312Packages;
 
@@ -150,7 +150,7 @@
         bin = inputs.my-nix.bin.${system} // (mapAttrs (n: p: "${p}/bin/${n}") scripts) // {
           ixbrl = "${ownPkgs.ixbrl-reporter}/bin/ixbrl-reporter";
         };
-        scripts = mapAttrs (n: s: pkgs.writeShellScriptBin n s) {
+        scripts = with bash; mapAttrs (n: s: pkgs.writeShellScriptBin n s) {
           run = ''cargo run -- "$@" '';
           # packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
           # utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
@@ -161,6 +161,7 @@
             cd ${ixbrl-src}
             ${bin.ixbrl} ${ixbrl-src}/config-corptax.yaml report ixbrl > "$WD/.cache/corp-tax.html"
           '';
+          validate = ''arelleCmdLine -f "${wd}/.cache/ct_return_example2.html" -v'';
         };
 
         env = {
