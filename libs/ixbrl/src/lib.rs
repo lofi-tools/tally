@@ -1,6 +1,7 @@
 use std::fmt;
 
 pub mod company;
+pub mod ixbrl_writer;
 pub mod taxonomy;
 pub mod taxonomy_mappings {
     pub mod ct_return;

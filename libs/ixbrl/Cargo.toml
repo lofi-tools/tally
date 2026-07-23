@@ -10,6 +10,7 @@ serde_json.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+quick-xml = "0.37"
 
 [dev-dependencies]
 tokio = { workspace = true }

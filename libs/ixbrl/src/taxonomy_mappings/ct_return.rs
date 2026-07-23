@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::company::Company;
+use crate::ixbrl_writer::IxbrlWriter;
 use crate::GnucashBook;
 
 #[derive(Debug, Clone)]
@@ -375,51 +376,55 @@ impl CorporationTaxReturn {
     }
 
     pub fn to_ixbrl(&self) -> String {
-        let mut out = String::new();
+        let mut w = IxbrlWriter::new();
 
-        out.push_str("<?xml version='1.0' encoding='ASCII'?>\n");
-        out.push_str("<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:ix=\"http://www.xbrl.org/2013/inlineXBRL\" xmlns:link=\"http://www.xbrl.org/2003/linkbase\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:xbrli=\"http://www.xbrl.org/2003/instance\" xmlns:xbrldi=\"http://xbrl.org/2006/xbrldi\" xmlns:ixt2=\"http://www.xbrl.org/inlineXBRL/transformation/2011-07-31\" xmlns:iso4217=\"http://www.xbrl.org/2003/iso4217\" xmlns:ct-comp=\"http://www.hmrc.gov.uk/schemas/ct/comp/2023-01-01\" xmlns:dpl=\"http://xbrl.frc.org.uk/dpl/2023-01-01\" xmlns:uk-bus=\"http://xbrl.frc.org.uk/cd/2023-01-01/business\" xmlns:uk-core=\"http://xbrl.frc.org.uk/fr/2023-01-01/core\" xmlns:uk-geo=\"http://xbrl.frc.org.uk/cd/2023-01-01/countries\">");
+        w.write_raw("<?xml version='1.0' encoding='ASCII'?>\n");
+        w.write_raw("<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:ix=\"http://www.xbrl.org/2013/inlineXBRL\" xmlns:link=\"http://www.xbrl.org/2003/linkbase\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:xbrli=\"http://www.xbrl.org/2003/instance\" xmlns:xbrldi=\"http://xbrl.org/2006/xbrldi\" xmlns:ixt2=\"http://www.xbrl.org/inlineXBRL/transformation/2011-07-31\" xmlns:iso4217=\"http://www.xbrl.org/2003/iso4217\" xmlns:ct-comp=\"http://www.hmrc.gov.uk/schemas/ct/comp/2023-01-01\" xmlns:dpl=\"http://xbrl.frc.org.uk/dpl/2023-01-01\" xmlns:uk-bus=\"http://xbrl.frc.org.uk/cd/2023-01-01/business\" xmlns:uk-core=\"http://xbrl.frc.org.uk/fr/2023-01-01/core\" xmlns:uk-geo=\"http://xbrl.frc.org.uk/cd/2023-01-01/countries\">");
 
-        out.push_str("<head><title>Corporation Tax Statement</title><style type=\"text/css\">\n");
-        out.push_str(include_str!("ct_return_style.css"));
-        out.push_str("</style></head><body>");
+        w.write_raw("<head><title>Corporation Tax Statement</title><style type=\"text/css\">\n");
+        w.write_raw(include_str!("ct_return_style.css"));
+        w.write_raw("</style></head><body>");
 
-        out.push_str("<div class=\"hidden\"><ix:header>");
-        out.push_str("<ix:hidden>");
+        w.write_raw("<div class=\"hidden\"><ix:header>");
+        w.write_raw("<ix:hidden>");
         self.ix_non_numeric(
-            &mut out,
+            &mut w,
             "ct-comp:NameOfProductionSoftware",
             "ctxt-0",
             "ixbrl-reporter",
+            None,
         );
         self.ix_non_numeric(
-            &mut out,
+            &mut w,
             "ct-comp:VersionOfProductionSoftware",
             "ctxt-0",
             "1.2.1",
+            None,
         );
         self.ix_non_numeric(
-            &mut out,
+            &mut w,
             "ct-comp:CompanyName",
             "ctxt-0",
             &self.company.name,
+            None,
         );
         self.ix_non_numeric(
-            &mut out,
+            &mut w,
             "ct-comp:TaxReference",
             "ctxt-0",
             &self.company.tax_reference,
+            None,
         );
-        out.push_str("</ix:hidden>");
+        w.write_raw("</ix:hidden>");
 
-        out.push_str("<ix:references>");
-        out.push_str("<link:schemaRef xlink:type=\"simple\" xlink:href=\"http://www.hmrc.gov.uk/schemas/ct/comp/2023-01-01/ct-comp-2023.xsd\"></link:schemaRef>");
-        out.push_str("<link:schemaRef xlink:type=\"simple\" xlink:href=\"https://xbrl.frc.org.uk/dpl/2023-01-01/dpl-2023-01-01.xsd\"></link:schemaRef>");
-        out.push_str("</ix:references>");
+        w.write_raw("<ix:references>");
+        w.write_raw("<link:schemaRef xlink:type=\"simple\" xlink:href=\"http://www.hmrc.gov.uk/schemas/ct/comp/2023-01-01/ct-comp-2023.xsd\"></link:schemaRef>");
+        w.write_raw("<link:schemaRef xlink:type=\"simple\" xlink:href=\"https://xbrl.frc.org.uk/dpl/2023-01-01/dpl-2023-01-01.xsd\"></link:schemaRef>");
+        w.write_raw("</ix:references>");
 
-        out.push_str("<ix:resources>");
+        w.write_raw("<ix:resources>");
         self.write_context_instant(
-            &mut out,
+            &mut w,
             "ctxt-0",
             &self.company.company_number,
             &self.company.accounting_period_end,
@@ -427,7 +432,7 @@ impl CorporationTaxReturn {
             Some("ct-comp:Company"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-1",
             &self.company.company_number,
             &self.company.accounting_period_start,
@@ -436,7 +441,7 @@ impl CorporationTaxReturn {
             Some("ct-comp:Company"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-2",
             &self.company.company_number,
             &self.company.accounting_period_start,
@@ -445,7 +450,7 @@ impl CorporationTaxReturn {
             Some("ct-comp:ManagementExpenses"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-3",
             &self.company.company_number,
             &self.company.accounting_period_start,
@@ -454,7 +459,7 @@ impl CorporationTaxReturn {
             Some("ct-comp:Company"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-4",
             &self.company.company_number,
             &self.company.accounting_period_start,
@@ -463,7 +468,7 @@ impl CorporationTaxReturn {
             Some("ct-comp:Trade"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-5",
             &self.company.company_number,
             &self.company.accounting_period_start,
@@ -472,7 +477,7 @@ impl CorporationTaxReturn {
             Some("ct-comp:Trade"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-8",
             &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
@@ -481,7 +486,7 @@ impl CorporationTaxReturn {
             Some("ct-comp:Trade"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-9",
             &self.company.company_number,
             &self.company.accounting_period_start,
@@ -490,7 +495,7 @@ impl CorporationTaxReturn {
             Some("dpl:Item1"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-10",
             &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
@@ -499,7 +504,7 @@ impl CorporationTaxReturn {
             Some("dpl:Item1"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-11",
             &self.company.company_number,
             &self.company.accounting_period_start,
@@ -508,7 +513,7 @@ impl CorporationTaxReturn {
             None,
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-12",
             &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
@@ -517,7 +522,7 @@ impl CorporationTaxReturn {
             None,
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-13",
             &self.company.company_number,
             &self.company.accounting_period_start,
@@ -526,7 +531,7 @@ impl CorporationTaxReturn {
             Some("dpl:AdministrativeExpenses"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-14",
             &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
@@ -535,7 +540,7 @@ impl CorporationTaxReturn {
             Some("dpl:AdministrativeExpenses"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-15",
             &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
@@ -544,7 +549,7 @@ impl CorporationTaxReturn {
             Some("ct-comp:ManagementExpenses"),
         );
         self.write_context_duration(
-            &mut out,
+            &mut w,
             "ctxt-16",
             &self.company.company_number,
             &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
@@ -553,43 +558,57 @@ impl CorporationTaxReturn {
             Some("ct-comp:Company"),
         );
 
-        self.write_unit(&mut out, "iso4217:GBP");
-        out.push_str("</ix:resources></ix:header></div>");
+        self.write_unit(&mut w, "GBP");
+        w.write_raw("</ix:resources></ix:header></div>");
 
-        self.write_corporation_tax_return_page(&mut out);
-        self.write_capital_allowances_page(&mut out);
-        self.write_profits_and_gains_page(&mut out);
-        self.write_losses_page(&mut out);
-        self.write_tax_chargeable_page(&mut out);
-        self.write_rnd_page(&mut out);
+        w.write_raw("<div id=\"report\" class=\"report\">");
+        self.write_corporation_tax_return_page(&mut w);
+        self.write_capital_allowances_page(&mut w);
+        self.write_profits_and_gains_page(&mut w);
+        self.write_losses_page(&mut w);
+        self.write_tax_chargeable_page(&mut w);
+        self.write_rnd_page(&mut w);
+        w.write_raw("</div>");
 
-        out.push_str("</body></html>");
-        out
+        w.write_raw("</body></html>");
+        w.into_string()
     }
 
     fn write_context_instant(
         &self,
-        out: &mut String,
+        w: &mut IxbrlWriter,
         id: &str,
         scheme_id: &str,
         date: &chrono::NaiveDate,
         dim: Option<&str>,
         val: Option<&str>,
     ) {
-        out.push_str(&format!("<xbrli:context id=\"{}\"><xbrli:entity><xbrli:identifier scheme=\"http://www.companieshouse.gov.uk/\">{}</xbrli:identifier>", id, scheme_id));
+        w.open_element("xbrli:context", &[("id", id)]);
+        w.open_element("xbrli:entity", &[]);
+        w.write_element(
+            "xbrli:identifier",
+            &[("scheme", "http://www.companieshouse.gov.uk/")],
+            scheme_id,
+        );
         if let Some(d) = dim {
-            out.push_str(&format!("<xbrli:segment><xbrldi:explicitMember dimension=\"{}\">{}</xbrldi:explicitMember></xbrli:segment>", d, val.unwrap_or("")));
+            w.open_element("xbrli:segment", &[]);
+            w.write_element(
+                "xbrldi:explicitMember",
+                &[("dimension", d)],
+                val.unwrap_or(""),
+            );
+            w.close_element("xbrli:segment");
         }
-        out.push_str("</xbrli:entity>");
-        out.push_str(&format!(
-            "<xbrli:period><xbrli:instant>{}</xbrli:instant></xbrli:period></xbrli:context>",
-            date
-        ));
+        w.close_element("xbrli:entity");
+        w.open_element("xbrli:period", &[]);
+        w.write_element("xbrli:instant", &[], &date.to_string());
+        w.close_element("xbrli:period");
+        w.close_element("xbrli:context");
     }
 
     fn write_context_duration(
         &self,
-        out: &mut String,
+        w: &mut IxbrlWriter,
         id: &str,
         scheme_id: &str,
         start: &chrono::NaiveDate,
@@ -597,368 +616,347 @@ impl CorporationTaxReturn {
         dim: Option<&str>,
         val: Option<&str>,
     ) {
-        out.push_str(&format!("<xbrli:context id=\"{}\"><xbrli:entity><xbrli:identifier scheme=\"http://www.companieshouse.gov.uk/\">{}</xbrli:identifier>", id, scheme_id));
+        w.open_element("xbrli:context", &[("id", id)]);
+        w.open_element("xbrli:entity", &[]);
+        w.write_element(
+            "xbrli:identifier",
+            &[("scheme", "http://www.companieshouse.gov.uk/")],
+            scheme_id,
+        );
         if let Some(d) = dim {
-            out.push_str(&format!("<xbrli:segment><xbrldi:explicitMember dimension=\"{}\">{}</xbrldi:explicitMember></xbrli:segment>", d, val.unwrap_or("")));
+            w.open_element("xbrli:segment", &[]);
+            w.write_element(
+                "xbrldi:explicitMember",
+                &[("dimension", d)],
+                val.unwrap_or(""),
+            );
+            w.close_element("xbrli:segment");
         }
-        out.push_str("</xbrli:entity>");
-        out.push_str(&format!("<xbrli:period><xbrli:startDate>{}</xbrli:startDate><xbrli:endDate>{}</xbrli:endDate></xbrli:period></xbrli:context>", start, end));
+        w.close_element("xbrli:entity");
+        w.open_element("xbrli:period", &[]);
+        w.write_element("xbrli:startDate", &[], &start.to_string());
+        w.write_element("xbrli:endDate", &[], &end.to_string());
+        w.close_element("xbrli:period");
+        w.close_element("xbrli:context");
     }
 
-    fn write_unit(&self, out: &mut String, unit: &str) {
-        out.push_str(&format!(
-            "<xbrli:unit id=\"iso4217\"><xbrli:measure>{}</xbrli:measure></xbrli:unit>",
-            unit
-        ));
+    fn write_unit(&self, w: &mut IxbrlWriter, measure: &str) {
+        w.write_element("xbrli:unit", &[("id", "iso4217")], measure);
     }
 
-    fn ix_non_numeric(&self, out: &mut String, name: &str, ctx: &str, value: &str) {
-        out.push_str(&format!(
-            "<ix:nonNumeric name=\"{}\" contextRef=\"{}\">{}</ix:nonNumeric>",
-            name, ctx, value
-        ));
+    fn ix_non_numeric(
+        &self,
+        w: &mut IxbrlWriter,
+        name: &str,
+        ctx: &str,
+        value: &str,
+        format: Option<&str>,
+    ) {
+        let mut attrs = vec![("name", name), ("contextRef", ctx)];
+        let fmt_str;
+        if let Some(f) = format {
+            fmt_str = f.to_string();
+            attrs.push(("format", &fmt_str));
+        }
+        w.open_element("ix:nonNumeric", &attrs);
+        w.write_raw(value);
+        w.close_element("ix:nonNumeric");
     }
 
-    fn ix_non_fraction(&self, out: &mut String, name: &str, ctx: &str, unit: &str, value: f64) {
-        out.push_str(&format!("<ix:nonFraction name=\"{}\" contextRef=\"{}\" unitRef=\"{}\" decimals=\"2\" format=\"ixt2:numcomma-decimals\">{}</ix:nonFraction>", name, ctx, unit, format_f64(value)));
+    fn write_fact(&self, w: &mut IxbrlWriter, ref_num: &str, label: &str, value: &str) {
+        w.open_element("div", &[("class", "fact")]);
+        w.write_element("div", &[("class", "ref")], ref_num);
+        let desc = format!("{}:", label);
+        w.write_element("div", &[("class", "description")], &desc);
+        w.open_element("div", &[("class", "factvalue")]);
+        w.write_raw(value);
+        w.close_element("div");
+        w.close_element("div");
     }
 
-    fn write_corporation_tax_return_page(&self, out: &mut String) {
-        out.push_str(
-            "<div class=\"page\"><div class=\"page .header\"><h2>Corporation Tax Return</h2></div>",
+    fn write_fact_numeric(
+        &self,
+        w: &mut IxbrlWriter,
+        ref_num: &str,
+        label: &str,
+        name: &str,
+        ctx: &str,
+        unit: &str,
+        value: f64,
+    ) {
+        let formatted = format!("{:.2}", value);
+        w.open_element("div", &[("class", "fact")]);
+        w.write_element("div", &[("class", "ref")], ref_num);
+        let desc = format!("{}:", label);
+        w.write_element("div", &[("class", "description")], &desc);
+        w.open_element("div", &[("class", "factvalue")]);
+        w.open_element(
+            "ix:nonFraction",
+            &[
+                ("name", name),
+                ("contextRef", ctx),
+                ("unitRef", unit),
+                ("format", "ixt2:numdotdecimal"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ],
         );
-
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Company name</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(out, "ct-comp:CompanyName", "ctxt-0", &self.company.name);
-        out.push_str("</span></div></div>");
-
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Tax reference</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(out, "ct-comp:TaxReference", "ctxt-0", &self.company.tax_reference);
-        out.push_str("</span></div></div>");
-
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Company number</span></div><div class=\"cell\"><span class=\"value\">");
-        out.push_str(&self.company.company_number);
-        out.push_str("</span></div></div>");
-
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Return period start</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(
-            out,
-            "ct-comp:StartOfPeriodCoveredByReturn",
-            "ctxt-0",
-            &format_date(&self.company.return_period_start()),
-        );
-        out.push_str("</span></div></div>");
-
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Return period end</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(
-            out,
-            "ct-comp:EndOfPeriodCoveredByReturn",
-            "ctxt-0",
-            &format_date(&self.company.return_period_end()),
-        );
-        out.push_str("</span></div></div>");
-
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Period of account start</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(
-            out,
-            "ct-comp:PeriodOfAccountStartDate",
-            "ctxt-0",
-            &format_date(&self.company.accounting_period_start),
-        );
-        out.push_str("</span></div></div>");
-
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Period of account end</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(
-            out,
-            "ct-comp:PeriodOfAccountEndDate",
-            "ctxt-0",
-            &format_date(&self.company.accounting_period_end),
-        );
-        out.push_str("</span></div></div>");
-
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Partner in a firm</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_numeric(
-            out,
-            "ct-comp:CompanyIsAPartnerInAFirm",
-            "ctxt-1",
-            &self.partner_in_a_firm.to_string(),
-        );
-        out.push_str("</span></div></div></div>");
+        w.write_raw(&formatted);
+        w.close_element("ix:nonFraction");
+        w.close_element("div");
+        w.close_element("div");
     }
 
-    fn write_capital_allowances_page(&self, out: &mut String) {
-        out.push_str("<div class=\"page\"><div class=\"page .header\"><h2>Capital allowances and balancing charges</h2></div>");
-        out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">Annual investment allowance</span></div><div class=\"cell\"><span class=\"value\">");
-        self.ix_non_fraction(
-            out,
-            "ct-comp:MainPoolAnnualInvestmentAllowance",
-            "ctxt-2",
-            "iso4217:GBP",
+    fn write_fact_non_numeric(
+        &self,
+        w: &mut IxbrlWriter,
+        ref_num: &str,
+        label: &str,
+        name: &str,
+        ctx: &str,
+        value: &str,
+        format: Option<&str>,
+    ) {
+        w.open_element("div", &[("class", "fact")]);
+        w.write_element("div", &[("class", "ref")], ref_num);
+        let desc = format!("{}:", label);
+        w.write_element("div", &[("class", "description")], &desc);
+        w.open_element("div", &[("class", "factvalue")]);
+        let mut attrs = vec![("name", name), ("contextRef", ctx)];
+        let fmt_str;
+        if let Some(f) = format {
+            fmt_str = f.to_string();
+            attrs.push(("format", &fmt_str));
+        }
+        w.open_element("ix:nonNumeric", &attrs);
+        w.write_raw(value);
+        w.close_element("ix:nonNumeric");
+        w.close_element("div");
+        w.close_element("div");
+    }
+
+    fn open_page(&self, w: &mut IxbrlWriter, id: &str, facts_id: &str, title: &str) {
+        w.open_element("div", &[("class", "page"), ("id", id)]);
+        w.open_element("div", &[("class", "facts"), ("id", facts_id)]);
+        w.write_element("h2", &[], title);
+    }
+
+    fn close_page(&self, w: &mut IxbrlWriter) {
+        w.close_element("div");
+        w.close_element("div");
+    }
+
+    fn write_corporation_tax_return_page(&self, w: &mut IxbrlWriter) {
+        self.open_page(w, "elt-001", "elt-002", "Corporation Tax Return");
+
+        self.write_fact_non_numeric(
+            w, "1", "Company name", "ct-comp:CompanyName", "ctxt-0",
+            &self.company.name, None,
+        );
+        self.write_fact_non_numeric(
+            w, "3", "Tax reference", "ct-comp:TaxReference", "ctxt-0",
+            &self.company.tax_reference, None,
+        );
+        self.write_fact(w, "-", "Company number", &self.company.company_number);
+        self.write_fact_non_numeric(
+            w, "30", "Return period start", "ct-comp:StartOfPeriodCoveredByReturn", "ctxt-0",
+            &format_date(&self.company.return_period_start()), Some("ixt2:datedaymonthyearen"),
+        );
+        self.write_fact_non_numeric(
+            w, "35", "Return period end", "ct-comp:EndOfPeriodCoveredByReturn", "ctxt-0",
+            &format_date(&self.company.return_period_end()), Some("ixt2:datedaymonthyearen"),
+        );
+        self.write_fact_non_numeric(
+            w, "-", "Period of account start", "ct-comp:PeriodOfAccountStartDate", "ctxt-0",
+            &format_date(&self.company.accounting_period_start), Some("ixt2:datedaymonthyearen"),
+        );
+        self.write_fact_non_numeric(
+            w, "-", "Period of account end", "ct-comp:PeriodOfAccountEndDate", "ctxt-0",
+            &format_date(&self.company.accounting_period_end), Some("ixt2:datedaymonthyearen"),
+        );
+        self.write_fact_non_numeric(
+            w, "-", "Partner in a firm", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1",
+            &self.partner_in_a_firm.to_string(), None,
+        );
+
+        self.close_page(w);
+    }
+
+    fn write_capital_allowances_page(&self, w: &mut IxbrlWriter) {
+        self.open_page(w, "elt-010", "elt-011", "Capital allowances and balancing charges");
+
+        self.write_fact_numeric(
+            w, "690", "Annual investment allowance",
+            "ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", "iso4217:GBP",
             self.annual_investment_allowance,
         );
-        out.push_str("</span></div></div></div>");
+
+        self.close_page(w);
     }
 
-    fn write_profits_and_gains_page(&self, out: &mut String) {
-        out.push_str(
-            "<div class=\"page\"><div class=\"page .header\"><h2>Profits and gains</h2></div>",
-        );
-        let fields: &[(&str, &str, &str, f64)] = &[
-            (
-                "Trading profits",
-                "ct-comp:AdjustedTradingProfitOfThisPeriod",
-                "ctxt-3",
-                self.adjusted_trading_profit,
-            ),
-            (
-                "Trading losses brought forward",
-                "ct-comp:TradingLossesBroughtForward",
-                "ctxt-3",
-                self.trading_losses_brought_forward,
-            ),
-            (
-                "Net trading profits",
-                "ct-comp:NetTradingProfits",
-                "ctxt-3",
-                self.net_trading_profits,
-            ),
-            (
-                "Net chargeable gains",
-                "ct-comp:NetChargeableGains",
-                "ctxt-1",
-                self.net_chargeable_gains,
-            ),
-            (
-                "Profits before other deductions and reliefs",
-                "ct-comp:ProfitsBeforeOtherDeductionsAndReliefs",
-                "ctxt-3",
-                self.profits_before_deductions,
-            ),
-            (
-                "Profits before donations and group relief",
-                "ct-comp:ProfitsBeforeChargesAndGroupRelief",
-                "ctxt-3",
-                self.profits_before_charges,
-            ),
-            (
-                "Qualifying donations",
-                "ct-comp:QualifyingDonations",
-                "ctxt-1",
-                self.qualifying_donations,
-            ),
-            (
-                "Group relief claimed",
-                "ct-comp:GroupReliefClaimed",
-                "ctxt-1",
-                self.group_relief,
-            ),
-            (
-                "Group relief for carried forward losses",
-                "ct-comp:GroupReliefClaimedForCarriedForwardLosses",
-                "ctxt-1",
-                self.group_relief_carried_forward,
-            ),
-            (
-                "Profits chargeable to Corporation Tax",
-                "ct-comp:TotalProfitsChargeableToCorporationTax",
-                "ctxt-3",
-                self.profits_chargeable_to_corporation_tax,
-            ),
+    fn write_profits_and_gains_page(&self, w: &mut IxbrlWriter) {
+        self.open_page(w, "elt-020", "elt-021", "Profits and gains");
+
+        let fields: &[(&str, &str, &str, &str, f64)] = &[
+            ("155", "Trading profits", "ct-comp:AdjustedTradingProfitOfThisPeriod", "ctxt-3", self.adjusted_trading_profit),
+            ("160", "Trading losses brought forward", "ct-comp:TradingLossesBroughtForward", "ctxt-3", self.trading_losses_brought_forward),
+            ("165", "Net trading profits", "ct-comp:NetTradingProfits", "ctxt-3", self.net_trading_profits),
+            ("220", "Net chargeable gains", "ct-comp:NetChargeableGains", "ctxt-1", self.net_chargeable_gains),
+            ("235", "Profits before other deductions and reliefs", "ct-comp:ProfitsBeforeOtherDeductionsAndReliefs", "ctxt-3", self.profits_before_deductions),
+            ("300", "Profits before donations and group relief", "ct-comp:ProfitsBeforeChargesAndGroupRelief", "ctxt-3", self.profits_before_charges),
+            ("305", "Qualifying donations", "ct-comp:QualifyingDonations", "ctxt-1", self.qualifying_donations),
+            ("310", "Group relief claimed", "ct-comp:GroupReliefClaimed", "ctxt-1", self.group_relief),
+            ("320", "Group relief for carried forward losses", "ct-comp:GroupReliefClaimedForCarriedForwardLosses", "ctxt-1", self.group_relief_carried_forward),
+            ("335", "Profits chargeable to Corporation Tax", "ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3", self.profits_chargeable_to_corporation_tax),
         ];
-        for (label, tag, ctx, val) in fields {
-            out.push_str("<div class=\"row\"><div class=\"cell\"><span class=\"label\">");
-            out.push_str(label);
-            out.push_str("</span></div><div class=\"cell\"><span class=\"value\">");
-            self.ix_non_fraction(out, tag, ctx, "iso4217:GBP", *val);
-            out.push_str("</span></div></div>");
+        for (ref_num, label, tag, ctx, val) in fields {
+            self.write_fact_numeric(w, ref_num, label, tag, ctx, "iso4217:GBP", *val);
         }
-        out.push_str("</div>");
+
+        self.close_page(w);
     }
 
-    fn write_losses_page(&self, out: &mut String) {
-        out.push_str("<div class=\"page\"><div class=\"page .header\"><h2>Losses</h2></div>");
-        self.ix_non_fraction(
-            out,
-            "ct-comp:TradingLossesOfThisOrLaterAP",
-            "ctxt-3",
-            "iso4217:GBP",
+    fn write_losses_page(&self, w: &mut IxbrlWriter) {
+        self.open_page(w, "elt-030", "elt-031", "Losses");
+
+        self.write_fact_numeric(
+            w, "-", "Trading losses of this or later AP",
+            "ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3", "iso4217:GBP",
             self.losses_of_trades_uk,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:LossesFromMiscellaneousTransactions",
-            "ctxt-1",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "-", "Losses from miscellaneous transactions",
+            "ct-comp:LossesFromMiscellaneousTransactions", "ctxt-1", "iso4217:GBP",
             self.losses_from_miscellaneous,
         );
-        out.push_str("</div>");
+
+        self.close_page(w);
     }
 
-    fn write_tax_chargeable_page(&self, out: &mut String) {
-        out.push_str(
-            "<div class=\"page\"><div class=\"page .header\"><h2>Tax chargeable</h2></div>",
-        );
+    fn write_tax_chargeable_page(&self, w: &mut IxbrlWriter) {
+        self.open_page(w, "elt-040", "elt-041", "Tax chargeable");
 
-        self.ix_non_numeric(
-            out,
-            "ct-comp:FinancialYear1CoveredByTheReturn",
-            "ctxt-1",
-            &self.company.fy1_year.to_string(),
+        self.write_fact_non_numeric(
+            w, "400", "Financial year 1 covered by the return",
+            "ct-comp:FinancialYear1CoveredByTheReturn", "ctxt-1",
+            &self.company.fy1_year.to_string(), None,
         );
-        self.ix_non_numeric(
-            out,
-            "ct-comp:FinancialYear2CoveredByTheReturn",
-            "ctxt-1",
-            &self.company.fy2_year.to_string(),
+        self.write_fact_non_numeric(
+            w, "405", "Financial year 2 covered by the return",
+            "ct-comp:FinancialYear2CoveredByTheReturn", "ctxt-1",
+            &self.company.fy2_year.to_string(), None,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "410", "FY1 profit chargeable at first rate",
+            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", "iso4217:GBP",
             self.fy1_profit,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "415", "FY2 profit chargeable at first rate",
+            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", "iso4217:GBP",
             self.fy2_profit,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:FY1FirstRateOfTax",
-            "ctxt-1",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "420", "FY1 first rate of tax",
+            "ct-comp:FY1FirstRateOfTax", "ctxt-1", "iso4217:GBP",
             self.company.fy1_rate,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:FY2FirstRateOfTax",
-            "ctxt-1",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "425", "FY2 first rate of tax",
+            "ct-comp:FY2FirstRateOfTax", "ctxt-1", "iso4217:GBP",
             self.company.fy2_rate,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:FY1TaxAtFirstRate",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "430", "FY1 tax at first rate",
+            "ct-comp:FY1TaxAtFirstRate", "ctxt-3", "iso4217:GBP",
             self.fy1_tax,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:FY2TaxAtFirstRate",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "435", "FY2 tax at first rate",
+            "ct-comp:FY2TaxAtFirstRate", "ctxt-3", "iso4217:GBP",
             self.fy2_tax,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:CorporationTaxChargeable",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "440", "Corporation tax chargeable",
+            "ct-comp:CorporationTaxChargeable", "ctxt-3", "iso4217:GBP",
             self.corporation_tax_chargeable,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:MarginalRateReliefForRingFenceTradesPayable",
-            "ctxt-1",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "445", "Marginal rate relief",
+            "ct-comp:MarginalRateReliefForRingFenceTradesPayable", "ctxt-1", "iso4217:GBP",
             self.marginal_relief,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:CorporationTaxChargeablePayable",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "450", "Corporation tax chargeable payable",
+            "ct-comp:CorporationTaxChargeablePayable", "ctxt-3", "iso4217:GBP",
             self.corporation_tax_chargeable_payable,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable",
-            "ctxt-1",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "455", "Total reliefs and deductions",
+            "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable", "ctxt-1", "iso4217:GBP",
             self.total_reliefs_deductions_tax,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:NetCorporationTaxPayable",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "460", "Net corporation tax payable",
+            "ct-comp:NetCorporationTaxPayable", "ctxt-3", "iso4217:GBP",
             self.net_corporation_tax_payable,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:TaxChargeable",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "465", "Tax chargeable",
+            "ct-comp:TaxChargeable", "ctxt-3", "iso4217:GBP",
             self.tax_chargeable,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:TaxPayable",
-            "ctxt-3",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "470", "Tax payable",
+            "ct-comp:TaxPayable", "ctxt-3", "iso4217:GBP",
             self.tax_payable,
         );
 
-        out.push_str("</div>");
+        self.close_page(w);
     }
 
-    fn write_rnd_page(&self, out: &mut String) {
-        out.push_str("<div class=\"page\"><div class=\"page .header\"><h2>R&D / Creative enhanced expenditure</h2></div>");
-        self.ix_non_numeric(
-            out,
-            "ct-comp:CompanyIsAPartnerInAFirm",
-            "ctxt-1",
-            &self.is_sme.to_string(),
+    fn write_rnd_page(&self, w: &mut IxbrlWriter) {
+        self.open_page(w, "elt-050", "elt-051", "R&D / Creative enhanced expenditure");
+
+        self.write_fact_non_numeric(
+            w, "560", "SME company", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1",
+            &self.is_sme.to_string(), None,
         );
-        self.ix_non_numeric(
-            out,
-            "ct-comp:CompanyIsAPartnerInAFirm",
-            "ctxt-1",
-            &self.is_large_company.to_string(),
+        self.write_fact_non_numeric(
+            w, "565", "Large company", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1",
+            &self.is_large_company.to_string(), None,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD",
-            "ctxt-4",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "575", "Qualifying expenditure",
+            "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD", "ctxt-4", "iso4217:GBP",
             self.rnd_qualifying_expenditure,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-            "ctxt-4",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "580", "Enhanced expenditure",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "iso4217:GBP",
             self.rnd_enhanced_expenditure,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment",
-            "ctxt-5",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "585", "Creative enhanced expenditure",
+            "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment", "ctxt-5", "iso4217:GBP",
             self.creative_enhanced_expenditure,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-            "ctxt-4",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "590", "R&D and creative total",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "iso4217:GBP",
             self.rnd_creative_enhanced_total,
         );
-        self.ix_non_fraction(
-            out,
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-            "ctxt-8",
-            "iso4217:GBP",
+        self.write_fact_numeric(
+            w, "-", "Subcontracted large",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", "iso4217:GBP",
             self.rnd_subcontracted_large,
         );
-        out.push_str("</div>");
+
+        self.close_page(w);
     }
 }
 
+#[allow(dead_code)]
 fn format_f64(v: f64) -> String {
     let formatted = format!("{:.2}", v);
     let parts: Vec<&str> = formatted.split('.').collect();
