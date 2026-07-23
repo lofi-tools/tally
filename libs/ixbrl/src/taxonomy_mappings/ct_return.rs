@@ -865,7 +865,7 @@ impl CorporationTaxReturn {
 
         self.write_fact_numeric(
             w, "690", "Annual investment allowance",
-            "ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", "iso4217:GBP",
+            "ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", "GBP",
             self.annual_investment_allowance,
         );
 
@@ -888,7 +888,7 @@ impl CorporationTaxReturn {
             ("335", "Profits chargeable to Corporation Tax", "ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3", self.profits_chargeable_to_corporation_tax),
         ];
         for (ref_num, label, tag, ctx, val) in fields {
-            self.write_fact_numeric(w, ref_num, label, tag, ctx, "iso4217:GBP", *val);
+            self.write_fact_numeric(w, ref_num, label, tag, ctx, "GBP", *val);
         }
 
         self.close_page(w);
@@ -899,12 +899,12 @@ impl CorporationTaxReturn {
 
         self.write_fact_numeric(
             w, "-", "Trading losses of this or later AP",
-            "ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3", "iso4217:GBP",
+            "ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3", "GBP",
             self.losses_of_trades_uk,
         );
         self.write_fact_numeric(
             w, "-", "Losses from miscellaneous transactions",
-            "ct-comp:LossesFromMiscellaneousTransactions", "ctxt-1", "iso4217:GBP",
+            "ct-comp:LossesFromMiscellaneousTransactions", "ctxt-1", "GBP",
             self.losses_from_miscellaneous,
         );
 
@@ -926,67 +926,67 @@ impl CorporationTaxReturn {
         );
         self.write_fact_numeric(
             w, "410", "FY1 profit chargeable at first rate",
-            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", "iso4217:GBP",
+            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", "GBP",
             self.fy1_profit,
         );
         self.write_fact_numeric(
             w, "415", "FY2 profit chargeable at first rate",
-            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", "iso4217:GBP",
+            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", "GBP",
             self.fy2_profit,
         );
         self.write_fact_numeric(
             w, "420", "FY1 first rate of tax",
-            "ct-comp:FY1FirstRateOfTax", "ctxt-1", "iso4217:GBP",
+            "ct-comp:FY1FirstRateOfTax", "ctxt-1", "GBP",
             self.company.fy1_rate,
         );
         self.write_fact_numeric(
             w, "425", "FY2 first rate of tax",
-            "ct-comp:FY2FirstRateOfTax", "ctxt-1", "iso4217:GBP",
+            "ct-comp:FY2FirstRateOfTax", "ctxt-1", "GBP",
             self.company.fy2_rate,
         );
         self.write_fact_numeric(
             w, "430", "FY1 tax at first rate",
-            "ct-comp:FY1TaxAtFirstRate", "ctxt-3", "iso4217:GBP",
+            "ct-comp:FY1TaxAtFirstRate", "ctxt-3", "GBP",
             self.fy1_tax,
         );
         self.write_fact_numeric(
             w, "435", "FY2 tax at first rate",
-            "ct-comp:FY2TaxAtFirstRate", "ctxt-3", "iso4217:GBP",
+            "ct-comp:FY2TaxAtFirstRate", "ctxt-3", "GBP",
             self.fy2_tax,
         );
         self.write_fact_numeric(
             w, "440", "Corporation tax chargeable",
-            "ct-comp:CorporationTaxChargeable", "ctxt-3", "iso4217:GBP",
+            "ct-comp:CorporationTaxChargeable", "ctxt-3", "GBP",
             self.corporation_tax_chargeable,
         );
         self.write_fact_numeric(
             w, "445", "Marginal rate relief",
-            "ct-comp:MarginalRateReliefForRingFenceTradesPayable", "ctxt-1", "iso4217:GBP",
+            "ct-comp:MarginalRateReliefForRingFenceTradesPayable", "ctxt-1", "GBP",
             self.marginal_relief,
         );
         self.write_fact_numeric(
             w, "450", "Corporation tax chargeable payable",
-            "ct-comp:CorporationTaxChargeablePayable", "ctxt-3", "iso4217:GBP",
+            "ct-comp:CorporationTaxChargeablePayable", "ctxt-3", "GBP",
             self.corporation_tax_chargeable_payable,
         );
         self.write_fact_numeric(
             w, "455", "Total reliefs and deductions",
-            "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable", "ctxt-1", "iso4217:GBP",
+            "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable", "ctxt-1", "GBP",
             self.total_reliefs_deductions_tax,
         );
         self.write_fact_numeric(
             w, "460", "Net corporation tax payable",
-            "ct-comp:NetCorporationTaxPayable", "ctxt-3", "iso4217:GBP",
+            "ct-comp:NetCorporationTaxPayable", "ctxt-3", "GBP",
             self.net_corporation_tax_payable,
         );
         self.write_fact_numeric(
             w, "465", "Tax chargeable",
-            "ct-comp:TaxChargeable", "ctxt-3", "iso4217:GBP",
+            "ct-comp:TaxChargeable", "ctxt-3", "GBP",
             self.tax_chargeable,
         );
         self.write_fact_numeric(
             w, "470", "Tax payable",
-            "ct-comp:TaxPayable", "ctxt-3", "iso4217:GBP",
+            "ct-comp:TaxPayable", "ctxt-3", "GBP",
             self.tax_payable,
         );
 
@@ -1006,27 +1006,27 @@ impl CorporationTaxReturn {
         );
         self.write_fact_numeric(
             w, "575", "Qualifying expenditure",
-            "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD", "ctxt-4", "iso4217:GBP",
+            "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD", "ctxt-4", "GBP",
             self.rnd_qualifying_expenditure,
         );
         self.write_fact_numeric(
             w, "580", "Enhanced expenditure",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "iso4217:GBP",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "GBP",
             self.rnd_enhanced_expenditure,
         );
         self.write_fact_numeric(
             w, "585", "Creative enhanced expenditure",
-            "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment", "ctxt-5", "iso4217:GBP",
+            "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment", "ctxt-5", "GBP",
             self.creative_enhanced_expenditure,
         );
         self.write_fact_numeric(
             w, "590", "R&D and creative total",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "iso4217:GBP",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "GBP",
             self.rnd_creative_enhanced_total,
         );
         self.write_fact_numeric(
             w, "-", "Subcontracted large",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", "iso4217:GBP",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", "GBP",
             self.rnd_subcontracted_large,
         );
 
@@ -1192,7 +1192,7 @@ impl CorporationTaxReturn {
             w.open_element("ix:nonFraction", &[
                 ("name", name),
                 ("contextRef", ctx),
-                ("unitRef", "iso4217:GBP"),
+                ("unitRef", "GBP"),
                 ("format", "ixt2:numdotdecimal"),
                 ("decimals", "2"),
                 ("scale", "0"),
@@ -1208,7 +1208,7 @@ impl CorporationTaxReturn {
             w.open_element("ix:nonFraction", &[
                 ("name", name),
                 ("contextRef", ctx),
-                ("unitRef", "iso4217:GBP"),
+                ("unitRef", "GBP"),
                 ("format", "ixt2:numdotdecimal"),
                 ("decimals", "2"),
                 ("scale", "0"),
@@ -1226,7 +1226,7 @@ impl CorporationTaxReturn {
             w.open_element("ix:nonFraction", &[
                 ("name", name),
                 ("contextRef", ctx),
-                ("unitRef", "iso4217:GBP"),
+                ("unitRef", "GBP"),
                 ("format", "ixt2:numdotdecimal"),
                 ("decimals", "2"),
                 ("scale", "0"),
@@ -1455,7 +1455,7 @@ mod tests {
         // XBRL tags with correct attributes
         assert!(ixbrl.contains("ix:nonNumeric name=\"ct-comp:CompanyName\""));
         assert!(ixbrl.contains("ix:nonFraction name=\"ct-comp:NetTradingProfits\""));
-        assert!(ixbrl.contains("unitRef=\"iso4217:GBP\""));
+        assert!(ixbrl.contains("unitRef=\"GBP\""));
         assert!(ixbrl.contains("format=\"ixt2:numdotdecimal\""));
         assert!(ixbrl.contains("scale=\"0\""));
         assert!(ixbrl.contains("format=\"ixt2:datedaymonthyearen\""));
