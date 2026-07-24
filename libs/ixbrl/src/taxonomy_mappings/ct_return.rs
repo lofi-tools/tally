@@ -458,7 +458,7 @@ impl CorporationTaxReturn {
         w.write_raw(include_str!("ct_return_style.css"));
         w.write_raw("</style></head><body>");
 
-        w.write_raw("<div class=\"hidden\"><ix:header>");
+        w.write_raw("<div style=\"display:none\"><ix:header>");
         w.write_raw("<ix:hidden>");
         self.ix_non_numeric(
             &mut w,
