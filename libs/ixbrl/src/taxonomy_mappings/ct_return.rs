@@ -47,6 +47,12 @@ pub struct CorporationTaxReturn {
     pub fy1_tax: f64,
     pub fy2_tax: f64,
     pub corporation_tax_chargeable: f64,
+    pub prev_fy1_profit: f64,
+    pub prev_fy2_profit: f64,
+    pub prev_fy1_tax: f64,
+    pub prev_fy2_tax: f64,
+    pub prev_corporation_tax_chargeable: f64,
+    pub prev_profit_chargeable: f64,
     pub marginal_relief: f64,
     pub corporation_tax_chargeable_payable: f64,
     pub total_reliefs_deductions_tax: f64,
@@ -281,6 +287,7 @@ impl CorporationTaxReturn {
         let fy1_tax = round2(fy1_profit * company.fy1_rate / 100.0);
         let fy2_tax = round2(fy2_profit * company.fy2_rate / 100.0);
         let corporation_tax_chargeable = round2(fy1_tax + fy2_tax);
+
         let marginal_relief = 0.0;
         let corporation_tax_chargeable_payable =
             round2(corporation_tax_chargeable + marginal_relief);
@@ -333,6 +340,29 @@ impl CorporationTaxReturn {
         };
         let tax_expense_prev = sum_abs(prev_splits, "Equity:Corporation Tax:Corporation Tax");
 
+        let prev_ct_trading_profits_raw = profit_before_tax_prev - aia_prev - rnd_enhanced_prev;
+        let prev_ct_trading_profits = if prev_ct_trading_profits_raw > 0.0 {
+            round_down(prev_ct_trading_profits_raw)
+        } else {
+            0.0
+        };
+        let prev_profit_chargeable = prev_ct_trading_profits;
+        let prev_period_start = company.prev_period_start();
+        let prev_period_end = company.prev_period_end();
+        let prev_total_days = (prev_period_end - prev_period_start).num_days() + 1;
+        let prev_fy1_end = chrono::NaiveDate::from_ymd_opt(company.fy2_year - 1, 3, 31).unwrap();
+        let prev_fy1_days = {
+            let s = prev_period_start;
+            let e = prev_fy1_end.min(prev_period_end);
+            if e >= s { (e - s).num_days() + 1 } else { 0 }
+        };
+        let prev_fy2_days = prev_total_days - prev_fy1_days;
+        let prev_fy1_profit = (prev_profit_chargeable * prev_fy1_days as f64 / prev_total_days as f64).round();
+        let prev_fy2_profit = (prev_profit_chargeable * prev_fy2_days as f64 / prev_total_days as f64).round();
+        let prev_fy1_tax = round2(prev_fy1_profit * company.fy1_rate / 100.0);
+        let prev_fy2_tax = round2(prev_fy2_profit * company.fy2_rate / 100.0);
+        let prev_corporation_tax_chargeable = round2(prev_fy1_tax + prev_fy2_tax);
+
         let mut expenses_by_fy: HashMap<String, HashMap<i32, f64>> = HashMap::new();
         let exp = [
             ("accountancy", accountancy_current, accountancy_prev),
@@ -380,6 +410,12 @@ impl CorporationTaxReturn {
             fy1_tax,
             fy2_tax,
             corporation_tax_chargeable,
+            prev_fy1_profit,
+            prev_fy2_profit,
+            prev_fy1_tax,
+            prev_fy2_tax,
+            prev_corporation_tax_chargeable,
+            prev_profit_chargeable,
             marginal_relief,
             corporation_tax_chargeable_payable,
             total_reliefs_deductions_tax,
@@ -1282,7 +1318,7 @@ impl CorporationTaxReturn {
         // Profits chargeable
         self.write_table_row_with_ix(w, "Profits chargeable to corporation tax",
             "ct-comp:NetTradingProfits", "ctxt-3", "ctxt-16",
-            self.net_trading_profits, self.net_trading_profits);
+            self.net_trading_profits, self.prev_profit_chargeable);
 
         // Blank row
         w.open_element("tr", &[("class", "row")]);
@@ -1313,17 +1349,17 @@ impl CorporationTaxReturn {
         // FY1 profit
         self.write_table_row_with_ix(w, "FY1",
             "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", "ctxt-16",
-            self.fy1_profit, self.fy1_profit);
+            self.fy1_profit, self.prev_fy1_profit);
 
         // FY2 profit
         self.write_table_row_with_ix(w, "FY2",
             "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", "ctxt-16",
-            self.fy2_profit, self.fy2_profit);
+            self.fy2_profit, self.prev_fy2_profit);
 
         // Profits total
         self.write_table_row_with_ix(w, "Total",
             "ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3", "ctxt-16",
-            self.profits_chargeable_to_corporation_tax, self.profits_chargeable_to_corporation_tax);
+            self.profits_chargeable_to_corporation_tax, self.prev_profit_chargeable);
 
         // Blank row
         w.open_element("tr", &[("class", "row")]);
@@ -1342,17 +1378,17 @@ impl CorporationTaxReturn {
         // FY1 tax (negative)
         self.write_table_row_with_ix_neg(w, "FY1 (19%)",
             "ct-comp:FY1TaxAtFirstRate", "ctxt-3", "ctxt-16",
-            self.fy1_tax, self.fy1_tax);
+            self.fy1_tax, self.prev_fy1_tax);
 
         // FY2 tax (negative)
         self.write_table_row_with_ix_neg(w, "FY2 (19%)",
             "ct-comp:FY2TaxAtFirstRate", "ctxt-3", "ctxt-16",
-            self.fy2_tax, self.fy2_tax);
+            self.fy2_tax, self.prev_fy2_tax);
 
         // CT chargeable total (negative)
         self.write_table_row_with_ix_neg(w, "Total",
             "ct-comp:CorporationTaxChargeable", "ctxt-3", "ctxt-16",
-            self.corporation_tax_chargeable, self.corporation_tax_chargeable);
+            self.corporation_tax_chargeable, self.prev_corporation_tax_chargeable);
 
         w.close_element("table");
         w.close_element("div");
