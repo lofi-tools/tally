@@ -131,6 +131,67 @@ fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CorporationTaxCalculation {
+    pub taxable_profit: f64,
+    pub tax_at_main_rate: f64,
+    pub marginal_relief: f64,
+    pub corporation_tax: f64,
+    pub effective_rate: f64,
+}
+
+/// Calculate Corporation Tax for UK 2025/26 tax year using marginal relief formula.
+///
+/// Rates and thresholds:
+/// - Up to £50,000: 19% (Small Profits Rate)
+/// - £50,001 to £250,000: Marginal Relief (gradual transition from 19% to 25%)
+/// - £250,000 and above: 25% (Main Rate)
+///
+/// Formula: Corporation Tax = (Profits × 25%) - Marginal Relief
+/// Marginal Relief = (Upper Limit - Profits) × 3/200
+pub fn calculate_corporation_tax_2025(taxable_profit: f64) -> CorporationTaxCalculation {
+    const SMALL_PROFITS_LIMIT: f64 = 50_000.0;
+    const UPPER_LIMIT: f64 = 250_000.0;
+    const MAIN_RATE: f64 = 0.25;
+    const MARGINAL_RELIEF_FRACTION: f64 = 3.0 / 200.0;
+
+    let tax_at_main_rate = round2(taxable_profit * MAIN_RATE);
+
+    let marginal_relief = if taxable_profit <= SMALL_PROFITS_LIMIT {
+        // Below small profits limit - no marginal relief needed
+        // Tax is simply profit × 19%
+        0.0
+    } else if taxable_profit <= UPPER_LIMIT {
+        // In marginal relief band
+        round2((UPPER_LIMIT - taxable_profit) * MARGINAL_RELIEF_FRACTION)
+    } else {
+        // Above upper limit - no marginal relief
+        0.0
+    };
+
+    let corporation_tax = if taxable_profit <= SMALL_PROFITS_LIMIT {
+        // Use small profits rate directly
+        round2(taxable_profit * 0.19)
+    } else {
+        // Use main rate minus marginal relief
+        round2(tax_at_main_rate - marginal_relief)
+    };
+
+    let effective_rate = if taxable_profit > 0.0 {
+        round2((corporation_tax / taxable_profit) * 100.0)
+    } else {
+        0.0
+    };
+
+    CorporationTaxCalculation {
+        taxable_profit,
+        tax_at_main_rate,
+        marginal_relief,
+        corporation_tax,
+        effective_rate,
+    }
+}
+
 impl CorporationTaxReturn {
     pub fn builder<'a>(gnucash: &GnucashBook, company: &'a Company) -> CorporationTaxReturnBuilder<'a> {
         let accounts = gnucash.raw_accounts();
@@ -1856,5 +1917,124 @@ mod tests {
         assert!(ixbrl.contains("breakdown heading cell"));
         assert!(ixbrl.contains("breakdown item cell"));
         assert!(ixbrl.contains("breakdown total cell"));
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_example_from_spec() {
+        let calc = calculate_corporation_tax_2025(150_000.0);
+        assert_eq!(calc.taxable_profit, 150_000.0);
+        assert_eq!(calc.tax_at_main_rate, 37_500.0);
+        assert_eq!(calc.marginal_relief, 1_500.0);
+        assert_eq!(calc.corporation_tax, 36_000.0);
+        assert_eq!(calc.effective_rate, 24.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_below_small_profits_limit() {
+        let calc = calculate_corporation_tax_2025(50_000.0);
+        assert_eq!(calc.taxable_profit, 50_000.0);
+        assert_eq!(calc.tax_at_main_rate, 12_500.0);
+        assert_eq!(calc.marginal_relief, 0.0);
+        assert_eq!(calc.corporation_tax, 9_500.0);
+        assert_eq!(calc.effective_rate, 19.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_just_above_small_profits_limit() {
+        let calc = calculate_corporation_tax_2025(50_001.0);
+        assert_eq!(calc.taxable_profit, 50_001.0);
+        assert_eq!(calc.tax_at_main_rate, 12_500.25);
+        assert_eq!(calc.marginal_relief, 2_999.98);
+        assert_eq!(calc.corporation_tax, 9_500.27);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_at_upper_limit() {
+        let calc = calculate_corporation_tax_2025(250_000.0);
+        assert_eq!(calc.taxable_profit, 250_000.0);
+        assert_eq!(calc.tax_at_main_rate, 62_500.0);
+        assert_eq!(calc.marginal_relief, 0.0);
+        assert_eq!(calc.corporation_tax, 62_500.0);
+        assert_eq!(calc.effective_rate, 25.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_just_above_upper_limit() {
+        let calc = calculate_corporation_tax_2025(250_001.0);
+        assert_eq!(calc.taxable_profit, 250_001.0);
+        assert_eq!(calc.tax_at_main_rate, 62_500.25);
+        assert_eq!(calc.marginal_relief, 0.0);
+        assert_eq!(calc.corporation_tax, 62_500.25);
+        assert_eq!(calc.effective_rate, 25.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_zero_profit() {
+        let calc = calculate_corporation_tax_2025(0.0);
+        assert_eq!(calc.taxable_profit, 0.0);
+        assert_eq!(calc.tax_at_main_rate, 0.0);
+        assert_eq!(calc.marginal_relief, 0.0);
+        assert_eq!(calc.corporation_tax, 0.0);
+        assert_eq!(calc.effective_rate, 0.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_small_profit() {
+        let calc = calculate_corporation_tax_2025(10_000.0);
+        assert_eq!(calc.taxable_profit, 10_000.0);
+        assert_eq!(calc.tax_at_main_rate, 2_500.0);
+        assert_eq!(calc.marginal_relief, 0.0);
+        assert_eq!(calc.corporation_tax, 1_900.0);
+        assert_eq!(calc.effective_rate, 19.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_mid_marginal_band() {
+        let calc = calculate_corporation_tax_2025(100_000.0);
+        assert_eq!(calc.taxable_profit, 100_000.0);
+        assert_eq!(calc.tax_at_main_rate, 25_000.0);
+        assert_eq!(calc.marginal_relief, 2_250.0);
+        assert_eq!(calc.corporation_tax, 22_750.0);
+        assert_eq!(calc.effective_rate, 22.75);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_large_profit() {
+        let calc = calculate_corporation_tax_2025(1_000_000.0);
+        assert_eq!(calc.taxable_profit, 1_000_000.0);
+        assert_eq!(calc.tax_at_main_rate, 250_000.0);
+        assert_eq!(calc.marginal_relief, 0.0);
+        assert_eq!(calc.corporation_tax, 250_000.0);
+        assert_eq!(calc.effective_rate, 25.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_midpoint_of_marginal_band() {
+        let calc = calculate_corporation_tax_2025(150_000.0);
+        assert_eq!(calc.taxable_profit, 150_000.0);
+        assert_eq!(calc.tax_at_main_rate, 37_500.0);
+        assert_eq!(calc.marginal_relief, 1_500.0);
+        assert_eq!(calc.corporation_tax, 36_000.0);
+        assert_eq!(calc.effective_rate, 24.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_near_small_profits_limit() {
+        let calc = calculate_corporation_tax_2025(49_999.0);
+        assert_eq!(calc.taxable_profit, 49_999.0);
+        assert_eq!(calc.tax_at_main_rate, 12_499.75);
+        assert_eq!(calc.marginal_relief, 0.0);
+        assert_eq!(calc.corporation_tax, 9_499.81);
+        assert_eq!(calc.effective_rate, 19.0);
+    }
+
+    #[test]
+    fn test_corporation_tax_2025_near_upper_limit() {
+        let calc = calculate_corporation_tax_2025(249_999.0);
+        assert_eq!(calc.taxable_profit, 249_999.0);
+        assert_eq!(calc.tax_at_main_rate, 62_499.75);
+        assert_eq!(calc.marginal_relief, 0.02);
+        assert_eq!(calc.corporation_tax, 62_499.73);
+        assert_eq!(calc.effective_rate, 25.0);
     }
 }
