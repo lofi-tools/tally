@@ -669,6 +669,7 @@ impl CorporationTaxReturn {
         if !self.rd_projects.is_empty() {
             self.write_rnd_worksheet_page(&mut w);
         }
+        self.write_tax_calculation_worksheet(&mut w);
         w.write_raw("</div>");
 
         w.write_raw("</body></html>");
@@ -1188,6 +1189,308 @@ impl CorporationTaxReturn {
         w.close_element("table");
         w.close_element("div");
         w.close_element("div");
+    }
+
+    fn write_tax_calculation_worksheet(&self, w: &mut IxbrlWriter) {
+        let fy1 = self.company.fy1_year;
+        let fy2 = self.company.fy2_year;
+
+        w.open_element("div", &[("class", "page")]);
+        w.open_element("div", &[("class", "worksheet")]);
+        w.write_element("h2", &[], "Tax calculation");
+
+        w.open_element("table", &[("class", "sheet table")]);
+
+        // Header row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.write_element("td", &[("class", "column header cell")], &fy2.to_string());
+        w.write_element("td", &[("class", "column header cell")], &fy1.to_string());
+        w.close_element("tr");
+
+        // Currency row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.open_element("td", &[("class", "column currency cell")]);
+        w.write_raw("&#163;");
+        w.close_element("td");
+        w.open_element("td", &[("class", "column currency cell")]);
+        w.write_raw("&#163;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // "Taxable profits" heading
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown heading cell")]);
+        w.write_element("span", &[], "Taxable profits");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Profit per accounts
+        let ppa2 = *self.profit_per_accounts_by_fy.get(&fy2).unwrap_or(&0.0);
+        let ppa1 = *self.profit_per_accounts_by_fy.get(&fy1).unwrap_or(&0.0);
+        self.write_table_row_with_ix(w, "Profit (loss) per accounts",
+            "ct-comp:ProfitLossPerAccounts", "ctxt-4", "ctxt-8", ppa2, ppa1);
+
+        // AIA (negative)
+        let aia2 = *self.aia_by_fy.get(&fy2).unwrap_or(&0.0);
+        let aia1 = *self.aia_by_fy.get(&fy1).unwrap_or(&0.0);
+        self.write_table_row_with_ix_neg(w, "Annual investment allowance",
+            "ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", "ctxt-15", aia2, aia1);
+
+        // SME R&D tax relief (negative)
+        let rnd2 = *self.rnd_by_fy.get(&fy2).unwrap_or(&0.0);
+        let rnd1 = *self.rnd_by_fy.get(&fy1).unwrap_or(&0.0);
+        self.write_table_row_with_ix_neg(w, "SME R&D tax relief (130%)",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "ctxt-8", rnd2, rnd1);
+
+        // Taxable profits total (plain value, no ix tag)
+        let total2 = ppa2 - aia2 - rnd2;
+        let total1 = ppa1 - aia1 - rnd1;
+        self.write_table_row_total(w, "Total", total2, total1);
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Trading losses brought forward
+        self.write_table_row_with_ix(w, "Trading losses brought forward",
+            "ct-comp:TradingLossesBroughtForward", "ctxt-3", "ctxt-16",
+            self.trading_losses_brought_forward, self.trading_losses_brought_forward);
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Profits chargeable
+        self.write_table_row_with_ix(w, "Profits chargeable to corporation tax",
+            "ct-comp:NetTradingProfits", "ctxt-3", "ctxt-16",
+            self.net_trading_profits, self.net_trading_profits);
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Trading losses
+        self.write_table_row_with_ix(w, "Trading losses",
+            "ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3", "ctxt-16",
+            self.losses_of_trades_uk, self.losses_of_trades_uk);
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // "Profits, by financial year" heading
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown heading cell")]);
+        w.write_element("span", &[], "Profits, by financial year");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // FY1 profit
+        self.write_table_row_with_ix(w, "FY1",
+            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", "ctxt-16",
+            self.fy1_profit, self.fy1_profit);
+
+        // FY2 profit
+        self.write_table_row_with_ix(w, "FY2",
+            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", "ctxt-16",
+            self.fy2_profit, self.fy2_profit);
+
+        // Profits total
+        self.write_table_row_with_ix(w, "Total",
+            "ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3", "ctxt-16",
+            self.profits_chargeable_to_corporation_tax, self.profits_chargeable_to_corporation_tax);
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // "Corporation tax chargeable" heading
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown heading cell")]);
+        w.write_element("span", &[], "Corporation tax chargeable");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // FY1 tax (negative)
+        self.write_table_row_with_ix_neg(w, "FY1 (19%)",
+            "ct-comp:FY1TaxAtFirstRate", "ctxt-3", "ctxt-16",
+            self.fy1_tax, self.fy1_tax);
+
+        // FY2 tax (negative)
+        self.write_table_row_with_ix_neg(w, "FY2 (19%)",
+            "ct-comp:FY2TaxAtFirstRate", "ctxt-3", "ctxt-16",
+            self.fy2_tax, self.fy2_tax);
+
+        // CT chargeable total (negative)
+        self.write_table_row_with_ix_neg(w, "Total",
+            "ct-comp:CorporationTaxChargeable", "ctxt-3", "ctxt-16",
+            self.corporation_tax_chargeable, self.corporation_tax_chargeable);
+
+        w.close_element("table");
+        w.close_element("div");
+        w.close_element("div");
+    }
+
+    fn write_table_row_with_ix(&self, w: &mut IxbrlWriter, label: &str, name: &str, ctx_cur: &str, ctx_prev: &str, val_cur: f64, val_prev: f64) {
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown item cell")]);
+        w.write_element("span", &[], label);
+        w.close_element("td");
+        // Current year
+        w.open_element("td", &[("class", "data value cell")]);
+        w.open_element("span", &[]);
+        w.open_element("span", &[]);
+        w.write_raw("</span>");
+        w.open_element("ix:nonFraction", &[
+            ("name", name),
+            ("contextRef", ctx_cur),
+            ("format", "ixt2:numdotdecimal"),
+            ("unitRef", "U-GBP"),
+            ("decimals", "2"),
+            ("scale", "0"),
+        ]);
+        w.write_raw(&format!("{:.2}", val_cur));
+        w.close_element("ix:nonFraction");
+        w.write_raw("<span>&#160;&#160;</span>");
+        w.close_element("span");
+        w.close_element("td");
+        // Previous year
+        w.open_element("td", &[("class", "data value cell")]);
+        w.open_element("span", &[]);
+        w.open_element("span", &[]);
+        w.write_raw("</span>");
+        w.open_element("ix:nonFraction", &[
+            ("name", name),
+            ("contextRef", ctx_prev),
+            ("format", "ixt2:numdotdecimal"),
+            ("unitRef", "U-GBP"),
+            ("decimals", "2"),
+            ("scale", "0"),
+        ]);
+        w.write_raw(&format!("{:.2}", val_prev));
+        w.close_element("ix:nonFraction");
+        w.write_raw("<span>&#160;&#160;</span>");
+        w.close_element("span");
+        w.close_element("td");
+        w.close_element("tr");
+    }
+
+    fn write_table_row_with_ix_neg(&self, w: &mut IxbrlWriter, label: &str, name: &str, ctx_cur: &str, ctx_prev: &str, val_cur: f64, val_prev: f64) {
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown item cell")]);
+        w.write_element("span", &[], label);
+        w.close_element("td");
+        // Current year (negative)
+        if val_cur != 0.0 {
+            w.open_element("td", &[("class", "data value negative cell")]);
+            w.open_element("span", &[]);
+            w.write_raw("<span>( </span>");
+            w.open_element("ix:nonFraction", &[
+                ("name", name),
+                ("contextRef", ctx_cur),
+                ("format", "ixt2:numdotdecimal"),
+                ("unitRef", "U-GBP"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ]);
+            w.write_raw(&format!("{:.2}", val_cur));
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span> )</span>");
+            w.close_element("span");
+            w.close_element("td");
+        } else {
+            w.open_element("td", &[("class", "data value nil cell")]);
+            w.open_element("span", &[]);
+            w.open_element("span", &[]);
+            w.write_raw("</span>");
+            w.open_element("ix:nonFraction", &[
+                ("name", name),
+                ("contextRef", ctx_cur),
+                ("format", "ixt2:numdotdecimal"),
+                ("unitRef", "U-GBP"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ]);
+            w.write_raw("0.00");
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
+            w.close_element("span");
+            w.close_element("td");
+        }
+        // Previous year (negative)
+        if val_prev != 0.0 {
+            w.open_element("td", &[("class", "data value negative cell")]);
+            w.open_element("span", &[]);
+            w.write_raw("<span>( </span>");
+            w.open_element("ix:nonFraction", &[
+                ("name", name),
+                ("contextRef", ctx_prev),
+                ("format", "ixt2:numdotdecimal"),
+                ("unitRef", "U-GBP"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ]);
+            w.write_raw(&format!("{:.2}", val_prev));
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span> )</span>");
+            w.close_element("span");
+            w.close_element("td");
+        } else {
+            w.open_element("td", &[("class", "data value nil cell")]);
+            w.open_element("span", &[]);
+            w.open_element("span", &[]);
+            w.write_raw("</span>");
+            w.open_element("ix:nonFraction", &[
+                ("name", name),
+                ("contextRef", ctx_prev),
+                ("format", "ixt2:numdotdecimal"),
+                ("unitRef", "U-GBP"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ]);
+            w.write_raw("0.00");
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
+            w.close_element("span");
+            w.close_element("td");
+        }
+        w.close_element("tr");
+    }
+
+    fn write_table_row_total(&self, w: &mut IxbrlWriter, label: &str, val_cur: f64, val_prev: f64) {
+        w.open_element("tr", &[("class", "row")]);
+        w.write_element("td", &[("class", "label breakdown total cell")], label);
+        self.write_data_cell_total(w, val_cur);
+        self.write_data_cell_total(w, val_prev);
+        w.close_element("tr");
     }
 
     fn write_data_cell(&self, w: &mut IxbrlWriter, value: f64) {
