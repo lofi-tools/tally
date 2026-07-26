@@ -4,6 +4,14 @@ use crate::company::Company;
 use crate::ixbrl_writer::IxbrlWriter;
 use crate::GnucashBook;
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ParsedIxBrlFacts {
+    pub numeric: HashMap<String, f64>,
+    pub non_numeric: HashMap<String, String>,
+    pub numeric_by_ctx: HashMap<(String, String), f64>,
+    pub non_numeric_by_ctx: HashMap<(String, String), String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct RdExpenditureItem {
     pub label: String,
@@ -771,6 +779,62 @@ impl CorporationTaxReturn {
 
         w.write_raw("</body></html>");
         w.into_string()
+    }
+
+    pub fn from_ixbrl(html: &str) -> ParsedIxBrlFacts {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut facts = ParsedIxBrlFacts::default();
+        let mut reader = Reader::from_str(html);
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    let attrs: HashMap<String, String> = e
+                        .attributes()
+                        .filter_map(|a| a.ok())
+                        .map(|a| {
+                            (
+                                String::from_utf8_lossy(a.key.as_ref()).to_string(),
+                                String::from_utf8_lossy(&a.value).to_string(),
+                            )
+                        })
+                        .collect();
+
+                    let name = attrs.get("name").cloned();
+                    let ctx = attrs.get("contextRef").cloned();
+
+                    if let (Some(name), Some(ctx)) = (name, ctx) {
+                        if tag == "ix:nonFraction" || tag == "ix:nonNumeric" {
+                            let mut text_buf = Vec::new();
+                            if let Ok(Event::Text(text)) = reader.read_event_into(&mut text_buf) {
+                                let raw = text.unescape().unwrap_or_default().to_string();
+                                let val = raw.trim();
+                                if tag == "ix:nonFraction" {
+                                    if let Ok(v) = val.parse::<f64>() {
+                                        facts.numeric.insert(name.clone(), v);
+                                        facts.numeric_by_ctx.insert((name, ctx), v);
+                                    }
+                                } else {
+                                    facts.non_numeric.insert(name.clone(), val.to_string());
+                                    facts.non_numeric_by_ctx
+                                        .insert((name, ctx), val.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        facts
     }
 
     fn write_context_instant(
@@ -2036,5 +2100,205 @@ mod tests {
         assert_eq!(calc.marginal_relief, 0.02);
         assert_eq!(calc.corporation_tax, 62_499.73);
         assert_eq!(calc.effective_rate, 25.0);
+    }
+
+    async fn build_example2_ct() -> CorporationTaxReturn {
+        let gnucash =
+            crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
+                .await
+                .expect("open gnucash");
+        let company = crate::company::Company::new(
+            "Example Biz Ltd.",
+            "8596148860",
+            "12345678",
+            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
+        );
+        CorporationTaxReturn::builder(&gnucash, &company)
+            .add_rd_project("Project Iguana", &[
+                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
+                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
+                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
+            ], "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs")
+            .build()
+    }
+
+    #[tokio::test]
+    async fn test_invariant_gross_profit() {
+        let ct = build_example2_ct().await;
+        assert_eq!(ct.gross_profit, (ct.turnover).floor());
+        assert_eq!(ct.profit_before_tax, ct.gross_profit - ct.total_costs);
+    }
+
+    #[tokio::test]
+    async fn test_invariant_net_trading_profits() {
+        let ct = build_example2_ct().await;
+        assert_eq!(
+            ct.net_trading_profits,
+            ct.adjusted_trading_profit + ct.trading_losses_brought_forward
+        );
+        assert_eq!(ct.profits_before_deductions, ct.net_trading_profits);
+        assert_eq!(ct.profits_before_charges, ct.profits_before_deductions);
+    }
+
+    #[tokio::test]
+    async fn test_invariant_profit_chargeable() {
+        let ct = build_example2_ct().await;
+        let expected = ct.profits_before_charges
+            - ct.qualifying_donations
+            - ct.group_relief
+            - ct.group_relief_carried_forward;
+        assert_eq!(ct.profits_chargeable_to_corporation_tax, expected);
+    }
+
+    #[tokio::test]
+    async fn test_invariant_tax_chargeable() {
+        let ct = build_example2_ct().await;
+        let expected_tax = (ct.fy1_tax * 100.0).round() / 100.0
+            + (ct.fy2_tax * 100.0).round() / 100.0;
+        assert_eq!(ct.corporation_tax_chargeable, expected_tax);
+        assert_eq!(
+            ct.corporation_tax_chargeable_payable,
+            ct.corporation_tax_chargeable + ct.marginal_relief
+        );
+    }
+
+    #[tokio::test]
+    async fn test_invariant_net_payable() {
+        let ct = build_example2_ct().await;
+        assert_eq!(
+            ct.net_corporation_tax_payable,
+            ct.corporation_tax_chargeable_payable - ct.total_reliefs_deductions_tax
+        );
+        assert_eq!(ct.tax_chargeable, ct.net_corporation_tax_payable);
+        assert_eq!(ct.tax_payable, ct.tax_chargeable);
+    }
+
+    #[tokio::test]
+    async fn test_invariant_profit_split() {
+        let ct = build_example2_ct().await;
+        let total = ct.fy1_profit + ct.fy2_profit;
+        assert_eq!(total, ct.profits_chargeable_to_corporation_tax);
+    }
+
+    #[tokio::test]
+    async fn test_invariant_rnd_totals() {
+        let ct = build_example2_ct().await;
+        assert_eq!(
+            ct.rnd_creative_enhanced_total,
+            ct.rnd_enhanced_expenditure + ct.creative_enhanced_expenditure
+        );
+    }
+
+    #[tokio::test]
+    async fn test_invariant_prev_tax_chargeable() {
+        let ct = build_example2_ct().await;
+        let expected_prev_tax =
+            (ct.prev_fy1_tax * 100.0).round() / 100.0 + (ct.prev_fy2_tax * 100.0).round() / 100.0;
+        assert_eq!(ct.prev_corporation_tax_chargeable, expected_prev_tax);
+    }
+
+    #[tokio::test]
+    async fn test_invariant_profit_after_tax() {
+        let ct = build_example2_ct().await;
+        assert_eq!(
+            ct.profit_after_tax,
+            (ct.profit_before_tax - ct.tax_expense).round()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_invariant_by_fy_consistency() {
+        let ct = build_example2_ct().await;
+        let fy2 = ct.company.fy2_year;
+        assert_eq!(
+            *ct.turnover_by_fy.get(&fy2).unwrap_or(&0.0),
+            ct.turnover
+        );
+        assert_eq!(
+            *ct.costs_by_fy.get(&fy2).unwrap_or(&0.0),
+            ct.total_costs
+        );
+        assert_eq!(
+            *ct.profit_per_accounts_by_fy.get(&fy2).unwrap_or(&0.0),
+            ct.profit_before_tax
+        );
+    }
+
+    #[test]
+    fn test_from_ixbrl_round_trip() {
+        let html = std::fs::read_to_string("../../.cache/ct_return_example2.html")
+            .expect("read cached ixbrl");
+        let facts = CorporationTaxReturn::from_ixbrl(&html);
+
+        assert_eq!(
+            facts.non_numeric.get("ct-comp:CompanyName").unwrap(),
+            "Example Biz Ltd."
+        );
+        assert_eq!(
+            facts.non_numeric.get("ct-comp:TaxReference").unwrap(),
+            "8596148860"
+        );
+
+        assert_eq!(
+            facts.numeric_by_ctx.get(&("ct-comp:NetTradingProfits".into(), "ctxt-3".into())),
+            Some(&748.0)
+        );
+        assert_eq!(
+            facts.numeric_by_ctx.get(&(
+                "ct-comp:CorporationTaxChargeable".into(),
+                "ctxt-3".into()
+            )),
+            Some(&142.12)
+        );
+        assert_eq!(
+            facts.numeric_by_ctx.get(&(
+                "ct-comp:NetCorporationTaxPayable".into(),
+                "ctxt-3".into()
+            )),
+            Some(&142.12)
+        );
+        assert_eq!(
+            facts
+                .numeric_by_ctx
+                .get(&("ct-comp:TaxPayable".into(), "ctxt-3".into())),
+            Some(&142.12)
+        );
+        assert_eq!(
+            facts.numeric_by_ctx.get(&(
+                "ct-comp:MainPoolAnnualInvestmentAllowance".into(),
+                "ctxt-2".into()
+            )),
+            Some(&591.0)
+        );
+        assert_eq!(
+            facts.numeric_by_ctx.get(&(
+                "ct-comp:AdjustedTradingProfitOfThisPeriod".into(),
+                "ctxt-3".into()
+            )),
+            Some(&748.0)
+        );
+    }
+
+    #[test]
+    fn test_from_ixbrl_worksheet_fy_split() {
+        let html = std::fs::read_to_string("../../.cache/ct_return_example2.html")
+            .expect("read cached ixbrl");
+        let facts = CorporationTaxReturn::from_ixbrl(&html);
+
+        let fy1_cur = facts
+            .numeric_by_ctx
+            .get(&(
+                "ct-comp:FY1AmountOfProfitChargeableAtFirstRate".into(),
+                "ctxt-3".into(),
+            ));
+        let fy1_prev = facts
+            .numeric_by_ctx
+            .get(&(
+                "ct-comp:FY1AmountOfProfitChargeableAtFirstRate".into(),
+                "ctxt-16".into(),
+            ));
+        assert_eq!(fy1_cur, Some(&186.0));
+        assert!(fy1_prev.is_some());
     }
 }
