@@ -1,16 +1,8 @@
 use std::collections::HashMap;
 
-use crate::company::Company;
-use crate::ixbrl_writer::IxbrlWriter;
 use crate::GnucashBook;
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ParsedIxBrlFacts {
-    pub numeric: HashMap<String, f64>,
-    pub non_numeric: HashMap<String, String>,
-    pub numeric_by_ctx: HashMap<(String, String), f64>,
-    pub non_numeric_by_ctx: HashMap<(String, String), String>,
-}
+use crate::company::Company;
+use crate::ixbrl_fmt::{IxbrlWriter, ParsedIxBrlFacts};
 
 #[derive(Debug, Clone)]
 pub struct RdExpenditureItem {
@@ -117,7 +109,8 @@ impl<'a> CorporationTaxReturnBuilder<'a> {
         items: &[(&'a str, &'a str)],
         enhanced_path: &'a str,
     ) -> Self {
-        self.rd_project_defs.push((name, items.to_vec(), enhanced_path));
+        self.rd_project_defs
+            .push((name, items.to_vec(), enhanced_path));
         self
     }
 
@@ -201,7 +194,10 @@ pub fn calculate_corporation_tax_2025(taxable_profit: f64) -> CorporationTaxCalc
 }
 
 impl CorporationTaxReturn {
-    pub fn builder<'a>(gnucash: &GnucashBook, company: &'a Company) -> CorporationTaxReturnBuilder<'a> {
+    pub fn builder<'a>(
+        gnucash: &GnucashBook,
+        company: &'a Company,
+    ) -> CorporationTaxReturnBuilder<'a> {
         let accounts = gnucash.raw_accounts();
         let txns = gnucash.raw_transactions();
         let splits = gnucash.raw_splits();
@@ -228,7 +224,9 @@ impl CorporationTaxReturn {
             let path = Self::account_path(accounts, acc);
             let val = split.value.to_string().parse::<f64>().unwrap_or(0.0);
 
-            if tx_date >= company.accounting_period_start && tx_date <= company.accounting_period_end {
+            if tx_date >= company.accounting_period_start
+                && tx_date <= company.accounting_period_end
+            {
                 period_splits.push((val, path.clone()));
             }
             if tx_date >= prev_start && tx_date <= prev_end {
@@ -311,23 +309,37 @@ impl CorporationTaxReturn {
             0.0
         };
 
-        let rd_projects: Vec<RdProject> = rd_project_defs.iter().map(|(name, items, enhanced_path)| {
-            let items: Vec<RdExpenditureItem> = items.iter().map(|(label, path)| {
-                RdExpenditureItem {
-                    label: label.to_string(),
-                    account_path: path.to_string(),
-                    values_by_fy: HashMap::from([
-                        (company.fy1_year, round_down(sum_abs(prev_splits, path))),
-                        (company.fy2_year, round_down(sum_abs(period_splits, path))),
-                    ]),
+        let rd_projects: Vec<RdProject> = rd_project_defs
+            .iter()
+            .map(|(name, items, enhanced_path)| {
+                let items: Vec<RdExpenditureItem> = items
+                    .iter()
+                    .map(|(label, path)| RdExpenditureItem {
+                        label: label.to_string(),
+                        account_path: path.to_string(),
+                        values_by_fy: HashMap::from([
+                            (company.fy1_year, round_down(sum_abs(prev_splits, path))),
+                            (company.fy2_year, round_down(sum_abs(period_splits, path))),
+                        ]),
+                    })
+                    .collect();
+                let enhanced: HashMap<i32, f64> = HashMap::from([
+                    (
+                        company.fy1_year,
+                        round_down(sum_abs(prev_splits, enhanced_path)),
+                    ),
+                    (
+                        company.fy2_year,
+                        round_down(sum_abs(period_splits, enhanced_path)),
+                    ),
+                ]);
+                RdProject {
+                    name: name.to_string(),
+                    items,
+                    enhanced_by_fy: enhanced,
                 }
-            }).collect();
-            let enhanced: HashMap<i32, f64> = HashMap::from([
-                (company.fy1_year, round_down(sum_abs(prev_splits, enhanced_path))),
-                (company.fy2_year, round_down(sum_abs(period_splits, enhanced_path))),
-            ]);
-            RdProject { name: name.to_string(), items, enhanced_by_fy: enhanced }
-        }).collect();
+            })
+            .collect();
 
         let ct_trading_profits_raw = profit_before_tax_current - aia_current - rnd_enhanced_current;
         let ct_trading_profits = if ct_trading_profits_raw > 0.0 {
@@ -343,7 +355,8 @@ impl CorporationTaxReturn {
         let profits_chargeable = profits_before_charges;
 
         let fy1_end = chrono::NaiveDate::from_ymd_opt(company.fy2_year, 3, 31).unwrap();
-        let total_days = (company.accounting_period_end - company.accounting_period_start).num_days() + 1;
+        let total_days =
+            (company.accounting_period_end - company.accounting_period_start).num_days() + 1;
         let fy1_days = {
             let s = company.accounting_period_start;
             let e = fy1_end.min(company.accounting_period_end);
@@ -426,8 +439,10 @@ impl CorporationTaxReturn {
             if e >= s { (e - s).num_days() + 1 } else { 0 }
         };
         let prev_fy2_days = prev_total_days - prev_fy1_days;
-        let prev_fy1_profit = (prev_profit_chargeable * prev_fy1_days as f64 / prev_total_days as f64).round();
-        let prev_fy2_profit = (prev_profit_chargeable * prev_fy2_days as f64 / prev_total_days as f64).round();
+        let prev_fy1_profit =
+            (prev_profit_chargeable * prev_fy1_days as f64 / prev_total_days as f64).round();
+        let prev_fy2_profit =
+            (prev_profit_chargeable * prev_fy2_days as f64 / prev_total_days as f64).round();
         let prev_fy1_tax = round2(prev_fy1_profit * company.fy1_rate / 100.0);
         let prev_fy2_tax = round2(prev_fy2_profit * company.fy2_rate / 100.0);
         let prev_corporation_tax_chargeable = round2(prev_fy1_tax + prev_fy2_tax);
@@ -448,7 +463,10 @@ impl CorporationTaxReturn {
             ("travel", travel_current, travel_prev),
         ];
         for (id, cur, prev) in exp {
-            expenses_by_fy.insert(id.to_string(), HashMap::from([(company.fy2_year, cur), (company.fy1_year, prev)]));
+            expenses_by_fy.insert(
+                id.to_string(),
+                HashMap::from([(company.fy2_year, cur), (company.fy1_year, prev)]),
+            );
         }
 
         CorporationTaxReturn {
@@ -517,10 +535,22 @@ impl CorporationTaxReturn {
                 (company.fy1_year, profit_before_tax_prev),
                 (company.fy2_year, profit_before_tax_current),
             ]),
-            aia_by_fy: HashMap::from([(company.fy1_year, aia_prev), (company.fy2_year, aia_current)]),
-            rnd_by_fy: HashMap::from([(company.fy1_year, rnd_enhanced_prev), (company.fy2_year, rnd_enhanced_current)]),
-            turnover_by_fy: HashMap::from([(company.fy1_year, ct_turnover_prev), (company.fy2_year, ct_turnover_current)]),
-            costs_by_fy: HashMap::from([(company.fy1_year, total_costs_prev), (company.fy2_year, total_costs_current)]),
+            aia_by_fy: HashMap::from([
+                (company.fy1_year, aia_prev),
+                (company.fy2_year, aia_current),
+            ]),
+            rnd_by_fy: HashMap::from([
+                (company.fy1_year, rnd_enhanced_prev),
+                (company.fy2_year, rnd_enhanced_current),
+            ]),
+            turnover_by_fy: HashMap::from([
+                (company.fy1_year, ct_turnover_prev),
+                (company.fy2_year, ct_turnover_current),
+            ]),
+            costs_by_fy: HashMap::from([
+                (company.fy1_year, total_costs_prev),
+                (company.fy2_year, total_costs_current),
+            ]),
             profit_before_tax_by_fy: HashMap::from([
                 (company.fy1_year, profit_before_tax_prev),
                 (company.fy2_year, profit_before_tax_current),
@@ -530,11 +560,20 @@ impl CorporationTaxReturn {
                 (company.fy2_year, tax_expense_current),
             ]),
             profit_after_tax_by_fy: HashMap::from([
-                (company.fy1_year, (profit_before_tax_prev - tax_expense_prev).round()),
+                (
+                    company.fy1_year,
+                    (profit_before_tax_prev - tax_expense_prev).round(),
+                ),
                 (company.fy2_year, profit_after_tax),
             ]),
-            wages_by_fy: HashMap::from([(company.fy1_year, salaries_prev), (company.fy2_year, salaries_current)]),
-            pensions_by_fy: HashMap::from([(company.fy1_year, pensions_prev), (company.fy2_year, pensions_current)]),
+            wages_by_fy: HashMap::from([
+                (company.fy1_year, salaries_prev),
+                (company.fy2_year, salaries_current),
+            ]),
+            pensions_by_fy: HashMap::from([
+                (company.fy1_year, pensions_prev),
+                (company.fy2_year, pensions_current),
+            ]),
             expenses_by_fy,
         }
     }
@@ -781,60 +820,263 @@ impl CorporationTaxReturn {
         w.into_string()
     }
 
-    pub fn from_ixbrl(html: &str) -> ParsedIxBrlFacts {
-        use quick_xml::events::Event;
-        use quick_xml::Reader;
+    /// Parse a [`ParsedIxBrlFacts`] into a [`CorporationTaxReturn`].
+    ///
+    /// The `company` parameter supplies fields that are not represented in the
+    /// iXBRL output (such as `company_number` and `registration_date`).  Any
+    /// company-level data that *is* present in the facts (name, tax reference,
+    /// accounting-period dates, financial-year numbers, tax rates) overrides the
+    /// corresponding fields on the supplied `company`.
+    ///
+    /// Numeric fields that have no corresponding iXBRL fact (e.g. `turnover`,
+    /// `total_costs`, `gross_profit`, `tax_expense`, `profit_after_tax`) are set
+    /// to `0.0`.  Similarly, the `rd_projects` vector and several per-year
+    /// `HashMap`s that are not serialised to iXBRL are left empty.
+    pub fn from_parsed_facts(facts: &ParsedIxBrlFacts, company: &Company) -> CorporationTaxReturn {
+        // -- helpers -----------------------------------------------------------
 
-        let mut facts = ParsedIxBrlFacts::default();
-        let mut reader = Reader::from_str(html);
-        let mut buf = Vec::new();
+        // Look up a numeric fact by (name, context).
+        let num = |name: &str, ctx: &str| -> f64 {
+            facts
+                .numeric_by_ctx
+                .get(&(name.to_string(), ctx.to_string()))
+                .copied()
+                .unwrap_or(0.0)
+        };
 
-        loop {
-            match reader.read_event_into(&mut buf) {
-                Ok(Event::Start(e)) => {
-                    let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                    let attrs: HashMap<String, String> = e
-                        .attributes()
-                        .filter_map(|a| a.ok())
-                        .map(|a| {
-                            (
-                                String::from_utf8_lossy(a.key.as_ref()).to_string(),
-                                String::from_utf8_lossy(&a.value).to_string(),
-                            )
-                        })
-                        .collect();
+        // Look up a non-numeric fact by name (last value wins).
+        let text =
+            |name: &str| -> String { facts.non_numeric.get(name).cloned().unwrap_or_default() };
 
-                    let name = attrs.get("name").cloned();
-                    let ctx = attrs.get("contextRef").cloned();
+        // Parse a date from a non-numeric fact whose value is formatted as
+        // `"1 January 2020"` (with non-breaking spaces after `unescape`).
+        let parse_date = |name: &str| -> chrono::NaiveDate {
+            let raw = text(name);
+            let cleaned = raw.replace('\u{00A0}', " ");
+            chrono::NaiveDate::parse_from_str(&cleaned, "%d %B %Y")
+                .unwrap_or(company.accounting_period_start)
+        };
 
-                    if let (Some(name), Some(ctx)) = (name, ctx) {
-                        if tag == "ix:nonFraction" || tag == "ix:nonNumeric" {
-                            let mut text_buf = Vec::new();
-                            if let Ok(Event::Text(text)) = reader.read_event_into(&mut text_buf) {
-                                let raw = text.unescape().unwrap_or_default().to_string();
-                                let val = raw.trim();
-                                if tag == "ix:nonFraction" {
-                                    if let Ok(v) = val.parse::<f64>() {
-                                        facts.numeric.insert(name.clone(), v);
-                                        facts.numeric_by_ctx.insert((name, ctx), v);
-                                    }
-                                } else {
-                                    facts.non_numeric.insert(name.clone(), val.to_string());
-                                    facts.non_numeric_by_ctx
-                                        .insert((name, ctx), val.to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(Event::Eof) => break,
-                Err(_) => break,
-                _ => {}
-            }
-            buf.clear();
+        // -- company ----------------------------------------------------------
+
+        let fy1_year = text("ct-comp:FinancialYear1CoveredByTheReturn")
+            .parse::<i32>()
+            .unwrap_or(company.fy1_year);
+        let fy2_year = text("ct-comp:FinancialYear2CoveredByTheReturn")
+            .parse::<i32>()
+            .unwrap_or(company.fy2_year);
+
+        let company = Company {
+            name: text("ct-comp:CompanyName"),
+            tax_reference: text("ct-comp:TaxReference"),
+            company_number: company.company_number.clone(),
+            registration_date: company.registration_date,
+            accounting_period_start: parse_date("ct-comp:PeriodOfAccountStartDate"),
+            accounting_period_end: parse_date("ct-comp:PeriodOfAccountEndDate"),
+            fy1_year,
+            fy2_year,
+            fy1_rate: num("ct-comp:FY1FirstRateOfTax", "ctxt-1"),
+            fy2_rate: num("ct-comp:FY2FirstRateOfTax", "ctxt-1"),
+        };
+
+        let fy1 = company.fy1_year;
+        let fy2 = company.fy2_year;
+
+        // -- per-year hash maps ----------------------------------------------
+
+        let profit_per_accounts_by_fy: HashMap<i32, f64> = HashMap::from([
+            (fy1, num("ct-comp:ProfitLossPerAccounts", "ctxt-8")),
+            (fy2, num("ct-comp:ProfitLossPerAccounts", "ctxt-4")),
+        ]);
+
+        let aia_by_fy: HashMap<i32, f64> = HashMap::from([
+            (
+                fy1,
+                num("ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-15"),
+            ),
+            (
+                fy2,
+                num("ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2"),
+            ),
+        ]);
+
+        let rnd_by_fy: HashMap<i32, f64> = HashMap::from([
+            (
+                fy1,
+                num(
+                    "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+                    "ctxt-8",
+                ),
+            ),
+            (
+                fy2,
+                num(
+                    "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+                    "ctxt-4",
+                ),
+            ),
+        ]);
+
+        // -- scalar fields ----------------------------------------------------
+
+        let annual_investment_allowance =
+            num("ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2");
+        let adjusted_trading_profit = num("ct-comp:AdjustedTradingProfitOfThisPeriod", "ctxt-3");
+        let trading_losses_brought_forward = num("ct-comp:TradingLossesBroughtForward", "ctxt-3");
+        let net_trading_profits = num("ct-comp:NetTradingProfits", "ctxt-3");
+        let net_chargeable_gains = num("ct-comp:NetChargeableGains", "ctxt-1");
+        let profits_before_deductions =
+            num("ct-comp:ProfitsBeforeOtherDeductionsAndReliefs", "ctxt-3");
+        let profits_before_charges = num("ct-comp:ProfitsBeforeChargesAndGroupRelief", "ctxt-3");
+        let qualifying_donations = num("ct-comp:QualifyingDonations", "ctxt-1");
+        let group_relief = num("ct-comp:GroupReliefClaimed", "ctxt-1");
+        let group_relief_carried_forward = num(
+            "ct-comp:GroupReliefClaimedForCarriedForwardLosses",
+            "ctxt-1",
+        );
+        let profits_chargeable_to_corporation_tax =
+            num("ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3");
+
+        let fy1_profit = num("ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3");
+        let fy2_profit = num("ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3");
+        let fy1_tax = num("ct-comp:FY1TaxAtFirstRate", "ctxt-3");
+        let fy2_tax = num("ct-comp:FY2TaxAtFirstRate", "ctxt-3");
+        let corporation_tax_chargeable = num("ct-comp:CorporationTaxChargeable", "ctxt-3");
+
+        let prev_fy1_profit = num("ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-16");
+        let prev_fy2_profit = num("ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-16");
+        let prev_fy1_tax = num("ct-comp:FY1TaxAtFirstRate", "ctxt-16");
+        let prev_fy2_tax = num("ct-comp:FY2TaxAtFirstRate", "ctxt-16");
+        let prev_corporation_tax_chargeable = num("ct-comp:CorporationTaxChargeable", "ctxt-16");
+        let prev_profit_chargeable = num("ct-comp:NetTradingProfits", "ctxt-16");
+
+        let marginal_relief = num(
+            "ct-comp:MarginalRateReliefForRingFenceTradesPayable",
+            "ctxt-1",
+        );
+        let corporation_tax_chargeable_payable =
+            num("ct-comp:CorporationTaxChargeablePayable", "ctxt-3");
+        let total_reliefs_deductions_tax = num(
+            "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable",
+            "ctxt-1",
+        );
+        let net_corporation_tax_payable = num("ct-comp:NetCorporationTaxPayable", "ctxt-3");
+        let tax_chargeable = num("ct-comp:TaxChargeable", "ctxt-3");
+        let tax_payable = num("ct-comp:TaxPayable", "ctxt-3");
+
+        let losses_of_trades_uk = num("ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3");
+        let losses_from_miscellaneous =
+            num("ct-comp:LossesFromMiscellaneousTransactions", "ctxt-1");
+
+        let rnd_qualifying_expenditure = num(
+            "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD",
+            "ctxt-4",
+        );
+        let rnd_enhanced_expenditure = num(
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+            "ctxt-4",
+        );
+        let creative_enhanced_expenditure = num(
+            "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment",
+            "ctxt-5",
+        );
+        let rnd_creative_enhanced_total = num(
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+            "ctxt-4",
+        );
+        let rnd_subcontracted_large = num(
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+            "ctxt-8",
+        );
+
+        // `ct-comp:CompanyIsAPartnerInAFirm` is written three times with the
+        // same context (ctxt-1) — for `partner_in_a_firm`, `is_sme`, and
+        // `is_large_company`.  The parser only retains the last value, so we
+        // cannot distinguish the three.  We use it for `partner_in_a_firm`
+        // and default the SME / large-company flags.
+        let partner_in_a_firm = text("ct-comp:CompanyIsAPartnerInAFirm")
+            .parse::<bool>()
+            .unwrap_or(false);
+
+        // `profit_before_tax` is not serialised to iXBRL, but the invariant
+        // `profit_per_accounts_by_fy[fy2] == profit_before_tax` must hold.
+        let profit_before_tax = profit_per_accounts_by_fy.get(&fy2).copied().unwrap_or(0.0);
+
+        CorporationTaxReturn {
+            company,
+
+            // Not represented in the iXBRL output.
+            turnover: 0.0,
+            total_costs: 0.0,
+            gross_profit: 0.0,
+            profit_before_tax,
+            tax_expense: 0.0,
+            profit_after_tax: 0.0,
+
+            annual_investment_allowance,
+
+            adjusted_trading_profit,
+            trading_losses_brought_forward,
+            net_trading_profits,
+            net_chargeable_gains,
+            profits_before_deductions,
+            profits_before_charges,
+            qualifying_donations,
+            group_relief,
+            group_relief_carried_forward,
+            profits_chargeable_to_corporation_tax,
+
+            fy1_profit,
+            fy2_profit,
+            fy1_tax,
+            fy2_tax,
+            corporation_tax_chargeable,
+            prev_fy1_profit,
+            prev_fy2_profit,
+            prev_fy1_tax,
+            prev_fy2_tax,
+            prev_corporation_tax_chargeable,
+            prev_profit_chargeable,
+            marginal_relief,
+            corporation_tax_chargeable_payable,
+            total_reliefs_deductions_tax,
+            net_corporation_tax_payable,
+            tax_chargeable,
+            tax_payable,
+
+            losses_of_trades_uk,
+            losses_of_trades_overseas: 0.0,
+            uk_property_business_losses: 0.0,
+            overseas_property_business_losses: 0.0,
+            losses_from_miscellaneous,
+            capital_losses: 0.0,
+            losses_on_intangible_fixed_assets: 0.0,
+
+            rnd_qualifying_expenditure,
+            rnd_enhanced_expenditure,
+            creative_enhanced_expenditure,
+            rnd_creative_enhanced_total,
+            rnd_subcontracted_large,
+            is_sme: true,
+            is_large_company: false,
+            rnd_claim_notification: false,
+            rnd_additional_information: false,
+            partner_in_a_firm,
+
+            rd_projects: Vec::new(),
+
+            profit_per_accounts_by_fy,
+            aia_by_fy,
+            rnd_by_fy,
+            turnover_by_fy: HashMap::new(),
+            costs_by_fy: HashMap::new(),
+            profit_before_tax_by_fy: HashMap::new(),
+            tax_expense_by_fy: HashMap::new(),
+            profit_after_tax_by_fy: HashMap::new(),
+            wages_by_fy: HashMap::new(),
+            pensions_by_fy: HashMap::new(),
+            expenses_by_fy: HashMap::new(),
         }
-
-        facts
     }
 
     fn write_context_instant(
@@ -908,11 +1150,7 @@ impl CorporationTaxReturn {
             w.open_element("xbrli:segment", &[]);
             if let Some(d) = typed_dim {
                 w.open_element("xbrldi:typedMember", &[("dimension", d)]);
-                w.write_element(
-                    "ct-comp:BusinessNameDomain",
-                    &[],
-                    typed_val.unwrap_or(""),
-                );
+                w.write_element("ct-comp:BusinessNameDomain", &[], typed_val.unwrap_or(""));
                 w.close_element("xbrldi:typedMember");
             }
             for (dim, val) in explicit_dims {
@@ -1040,44 +1278,88 @@ impl CorporationTaxReturn {
         self.open_page(w, "elt-001", "elt-002", "Corporation Tax Return");
 
         self.write_fact_non_numeric(
-            w, "1", "Company name", "ct-comp:CompanyName", "ctxt-0",
-            &self.company.name, None,
+            w,
+            "1",
+            "Company name",
+            "ct-comp:CompanyName",
+            "ctxt-0",
+            &self.company.name,
+            None,
         );
         self.write_fact_non_numeric(
-            w, "3", "Tax reference", "ct-comp:TaxReference", "ctxt-0",
-            &self.company.tax_reference, None,
+            w,
+            "3",
+            "Tax reference",
+            "ct-comp:TaxReference",
+            "ctxt-0",
+            &self.company.tax_reference,
+            None,
         );
         self.write_fact(w, "-", "Company number", &self.company.company_number);
         self.write_fact_non_numeric(
-            w, "30", "Return period start", "ct-comp:StartOfPeriodCoveredByReturn", "ctxt-0",
-            &format_date(&self.company.return_period_start()), Some("ixt2:datedaymonthyearen"),
+            w,
+            "30",
+            "Return period start",
+            "ct-comp:StartOfPeriodCoveredByReturn",
+            "ctxt-0",
+            &format_date(&self.company.return_period_start()),
+            Some("ixt2:datedaymonthyearen"),
         );
         self.write_fact_non_numeric(
-            w, "35", "Return period end", "ct-comp:EndOfPeriodCoveredByReturn", "ctxt-0",
-            &format_date(&self.company.return_period_end()), Some("ixt2:datedaymonthyearen"),
+            w,
+            "35",
+            "Return period end",
+            "ct-comp:EndOfPeriodCoveredByReturn",
+            "ctxt-0",
+            &format_date(&self.company.return_period_end()),
+            Some("ixt2:datedaymonthyearen"),
         );
         self.write_fact_non_numeric(
-            w, "-", "Period of account start", "ct-comp:PeriodOfAccountStartDate", "ctxt-0",
-            &format_date(&self.company.accounting_period_start), Some("ixt2:datedaymonthyearen"),
+            w,
+            "-",
+            "Period of account start",
+            "ct-comp:PeriodOfAccountStartDate",
+            "ctxt-0",
+            &format_date(&self.company.accounting_period_start),
+            Some("ixt2:datedaymonthyearen"),
         );
         self.write_fact_non_numeric(
-            w, "-", "Period of account end", "ct-comp:PeriodOfAccountEndDate", "ctxt-0",
-            &format_date(&self.company.accounting_period_end), Some("ixt2:datedaymonthyearen"),
+            w,
+            "-",
+            "Period of account end",
+            "ct-comp:PeriodOfAccountEndDate",
+            "ctxt-0",
+            &format_date(&self.company.accounting_period_end),
+            Some("ixt2:datedaymonthyearen"),
         );
         self.write_fact_non_numeric(
-            w, "-", "Partner in a firm", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1",
-            &self.partner_in_a_firm.to_string(), None,
+            w,
+            "-",
+            "Partner in a firm",
+            "ct-comp:CompanyIsAPartnerInAFirm",
+            "ctxt-1",
+            &self.partner_in_a_firm.to_string(),
+            None,
         );
 
         self.close_page(w);
     }
 
     fn write_capital_allowances_page(&self, w: &mut IxbrlWriter) {
-        self.open_page(w, "elt-010", "elt-011", "Capital allowances and balancing charges");
+        self.open_page(
+            w,
+            "elt-010",
+            "elt-011",
+            "Capital allowances and balancing charges",
+        );
 
         self.write_fact_numeric(
-            w, "690", "Annual investment allowance",
-            "ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", "U-GBP",
+            w,
+            "690",
+            "Annual investment allowance",
+            "ct-comp:MainPoolAnnualInvestmentAllowance",
+            "ctxt-2",
+            "U-GBP",
             self.annual_investment_allowance,
         );
 
@@ -1088,16 +1370,76 @@ impl CorporationTaxReturn {
         self.open_page(w, "elt-020", "elt-021", "Profits and gains");
 
         let fields: &[(&str, &str, &str, &str, f64)] = &[
-            ("155", "Trading profits", "ct-comp:AdjustedTradingProfitOfThisPeriod", "ctxt-3", self.adjusted_trading_profit),
-            ("160", "Trading losses brought forward", "ct-comp:TradingLossesBroughtForward", "ctxt-3", self.trading_losses_brought_forward),
-            ("165", "Net trading profits", "ct-comp:NetTradingProfits", "ctxt-3", self.net_trading_profits),
-            ("220", "Net chargeable gains", "ct-comp:NetChargeableGains", "ctxt-1", self.net_chargeable_gains),
-            ("235", "Profits before other deductions and reliefs", "ct-comp:ProfitsBeforeOtherDeductionsAndReliefs", "ctxt-3", self.profits_before_deductions),
-            ("300", "Profits before donations and group relief", "ct-comp:ProfitsBeforeChargesAndGroupRelief", "ctxt-3", self.profits_before_charges),
-            ("305", "Qualifying donations", "ct-comp:QualifyingDonations", "ctxt-1", self.qualifying_donations),
-            ("310", "Group relief claimed", "ct-comp:GroupReliefClaimed", "ctxt-1", self.group_relief),
-            ("320", "Group relief for carried forward losses", "ct-comp:GroupReliefClaimedForCarriedForwardLosses", "ctxt-1", self.group_relief_carried_forward),
-            ("335", "Profits chargeable to Corporation Tax", "ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3", self.profits_chargeable_to_corporation_tax),
+            (
+                "155",
+                "Trading profits",
+                "ct-comp:AdjustedTradingProfitOfThisPeriod",
+                "ctxt-3",
+                self.adjusted_trading_profit,
+            ),
+            (
+                "160",
+                "Trading losses brought forward",
+                "ct-comp:TradingLossesBroughtForward",
+                "ctxt-3",
+                self.trading_losses_brought_forward,
+            ),
+            (
+                "165",
+                "Net trading profits",
+                "ct-comp:NetTradingProfits",
+                "ctxt-3",
+                self.net_trading_profits,
+            ),
+            (
+                "220",
+                "Net chargeable gains",
+                "ct-comp:NetChargeableGains",
+                "ctxt-1",
+                self.net_chargeable_gains,
+            ),
+            (
+                "235",
+                "Profits before other deductions and reliefs",
+                "ct-comp:ProfitsBeforeOtherDeductionsAndReliefs",
+                "ctxt-3",
+                self.profits_before_deductions,
+            ),
+            (
+                "300",
+                "Profits before donations and group relief",
+                "ct-comp:ProfitsBeforeChargesAndGroupRelief",
+                "ctxt-3",
+                self.profits_before_charges,
+            ),
+            (
+                "305",
+                "Qualifying donations",
+                "ct-comp:QualifyingDonations",
+                "ctxt-1",
+                self.qualifying_donations,
+            ),
+            (
+                "310",
+                "Group relief claimed",
+                "ct-comp:GroupReliefClaimed",
+                "ctxt-1",
+                self.group_relief,
+            ),
+            (
+                "320",
+                "Group relief for carried forward losses",
+                "ct-comp:GroupReliefClaimedForCarriedForwardLosses",
+                "ctxt-1",
+                self.group_relief_carried_forward,
+            ),
+            (
+                "335",
+                "Profits chargeable to Corporation Tax",
+                "ct-comp:TotalProfitsChargeableToCorporationTax",
+                "ctxt-3",
+                self.profits_chargeable_to_corporation_tax,
+            ),
         ];
         for (ref_num, label, tag, ctx, val) in fields {
             self.write_fact_numeric(w, ref_num, label, tag, ctx, "U-GBP", *val);
@@ -1110,13 +1452,21 @@ impl CorporationTaxReturn {
         self.open_page(w, "elt-030", "elt-031", "Losses");
 
         self.write_fact_numeric(
-            w, "-", "Trading losses of this or later AP",
-            "ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3", "U-GBP",
+            w,
+            "-",
+            "Trading losses of this or later AP",
+            "ct-comp:TradingLossesOfThisOrLaterAP",
+            "ctxt-3",
+            "U-GBP",
             self.losses_of_trades_uk,
         );
         self.write_fact_numeric(
-            w, "-", "Losses from miscellaneous transactions",
-            "ct-comp:LossesFromMiscellaneousTransactions", "ctxt-1", "U-GBP",
+            w,
+            "-",
+            "Losses from miscellaneous transactions",
+            "ct-comp:LossesFromMiscellaneousTransactions",
+            "ctxt-1",
+            "U-GBP",
             self.losses_from_miscellaneous,
         );
 
@@ -1127,78 +1477,138 @@ impl CorporationTaxReturn {
         self.open_page(w, "elt-040", "elt-041", "Tax chargeable");
 
         self.write_fact_non_numeric(
-            w, "400", "Financial year 1 covered by the return",
-            "ct-comp:FinancialYear1CoveredByTheReturn", "ctxt-1",
-            &self.company.fy1_year.to_string(), None,
+            w,
+            "400",
+            "Financial year 1 covered by the return",
+            "ct-comp:FinancialYear1CoveredByTheReturn",
+            "ctxt-1",
+            &self.company.fy1_year.to_string(),
+            None,
         );
         self.write_fact_non_numeric(
-            w, "405", "Financial year 2 covered by the return",
-            "ct-comp:FinancialYear2CoveredByTheReturn", "ctxt-1",
-            &self.company.fy2_year.to_string(), None,
+            w,
+            "405",
+            "Financial year 2 covered by the return",
+            "ct-comp:FinancialYear2CoveredByTheReturn",
+            "ctxt-1",
+            &self.company.fy2_year.to_string(),
+            None,
         );
         self.write_fact_numeric(
-            w, "410", "FY1 profit chargeable at first rate",
-            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", "U-GBP",
+            w,
+            "410",
+            "FY1 profit chargeable at first rate",
+            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate",
+            "ctxt-3",
+            "U-GBP",
             self.fy1_profit,
         );
         self.write_fact_numeric(
-            w, "415", "FY2 profit chargeable at first rate",
-            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", "U-GBP",
+            w,
+            "415",
+            "FY2 profit chargeable at first rate",
+            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate",
+            "ctxt-3",
+            "U-GBP",
             self.fy2_profit,
         );
         self.write_fact_numeric(
-            w, "420", "FY1 first rate of tax",
-            "ct-comp:FY1FirstRateOfTax", "ctxt-1", "U-GBP",
+            w,
+            "420",
+            "FY1 first rate of tax",
+            "ct-comp:FY1FirstRateOfTax",
+            "ctxt-1",
+            "U-GBP",
             self.company.fy1_rate,
         );
         self.write_fact_numeric(
-            w, "425", "FY2 first rate of tax",
-            "ct-comp:FY2FirstRateOfTax", "ctxt-1", "U-GBP",
+            w,
+            "425",
+            "FY2 first rate of tax",
+            "ct-comp:FY2FirstRateOfTax",
+            "ctxt-1",
+            "U-GBP",
             self.company.fy2_rate,
         );
         self.write_fact_numeric(
-            w, "430", "FY1 tax at first rate",
-            "ct-comp:FY1TaxAtFirstRate", "ctxt-3", "U-GBP",
+            w,
+            "430",
+            "FY1 tax at first rate",
+            "ct-comp:FY1TaxAtFirstRate",
+            "ctxt-3",
+            "U-GBP",
             self.fy1_tax,
         );
         self.write_fact_numeric(
-            w, "435", "FY2 tax at first rate",
-            "ct-comp:FY2TaxAtFirstRate", "ctxt-3", "U-GBP",
+            w,
+            "435",
+            "FY2 tax at first rate",
+            "ct-comp:FY2TaxAtFirstRate",
+            "ctxt-3",
+            "U-GBP",
             self.fy2_tax,
         );
         self.write_fact_numeric(
-            w, "440", "Corporation tax chargeable",
-            "ct-comp:CorporationTaxChargeable", "ctxt-3", "U-GBP",
+            w,
+            "440",
+            "Corporation tax chargeable",
+            "ct-comp:CorporationTaxChargeable",
+            "ctxt-3",
+            "U-GBP",
             self.corporation_tax_chargeable,
         );
         self.write_fact_numeric(
-            w, "445", "Marginal rate relief",
-            "ct-comp:MarginalRateReliefForRingFenceTradesPayable", "ctxt-1", "U-GBP",
+            w,
+            "445",
+            "Marginal rate relief",
+            "ct-comp:MarginalRateReliefForRingFenceTradesPayable",
+            "ctxt-1",
+            "U-GBP",
             self.marginal_relief,
         );
         self.write_fact_numeric(
-            w, "450", "Corporation tax chargeable payable",
-            "ct-comp:CorporationTaxChargeablePayable", "ctxt-3", "U-GBP",
+            w,
+            "450",
+            "Corporation tax chargeable payable",
+            "ct-comp:CorporationTaxChargeablePayable",
+            "ctxt-3",
+            "U-GBP",
             self.corporation_tax_chargeable_payable,
         );
         self.write_fact_numeric(
-            w, "455", "Total reliefs and deductions",
-            "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable", "ctxt-1", "U-GBP",
+            w,
+            "455",
+            "Total reliefs and deductions",
+            "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable",
+            "ctxt-1",
+            "U-GBP",
             self.total_reliefs_deductions_tax,
         );
         self.write_fact_numeric(
-            w, "460", "Net corporation tax payable",
-            "ct-comp:NetCorporationTaxPayable", "ctxt-3", "U-GBP",
+            w,
+            "460",
+            "Net corporation tax payable",
+            "ct-comp:NetCorporationTaxPayable",
+            "ctxt-3",
+            "U-GBP",
             self.net_corporation_tax_payable,
         );
         self.write_fact_numeric(
-            w, "465", "Tax chargeable",
-            "ct-comp:TaxChargeable", "ctxt-3", "U-GBP",
+            w,
+            "465",
+            "Tax chargeable",
+            "ct-comp:TaxChargeable",
+            "ctxt-3",
+            "U-GBP",
             self.tax_chargeable,
         );
         self.write_fact_numeric(
-            w, "470", "Tax payable",
-            "ct-comp:TaxPayable", "ctxt-3", "U-GBP",
+            w,
+            "470",
+            "Tax payable",
+            "ct-comp:TaxPayable",
+            "ctxt-3",
+            "U-GBP",
             self.tax_payable,
         );
 
@@ -1206,39 +1616,74 @@ impl CorporationTaxReturn {
     }
 
     fn write_rnd_page(&self, w: &mut IxbrlWriter) {
-        self.open_page(w, "elt-050", "elt-051", "R&D / Creative enhanced expenditure");
+        self.open_page(
+            w,
+            "elt-050",
+            "elt-051",
+            "R&D / Creative enhanced expenditure",
+        );
 
         self.write_fact_non_numeric(
-            w, "560", "SME company", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1",
-            &self.is_sme.to_string(), None,
+            w,
+            "560",
+            "SME company",
+            "ct-comp:CompanyIsAPartnerInAFirm",
+            "ctxt-1",
+            &self.is_sme.to_string(),
+            None,
         );
         self.write_fact_non_numeric(
-            w, "565", "Large company", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1",
-            &self.is_large_company.to_string(), None,
+            w,
+            "565",
+            "Large company",
+            "ct-comp:CompanyIsAPartnerInAFirm",
+            "ctxt-1",
+            &self.is_large_company.to_string(),
+            None,
         );
         self.write_fact_numeric(
-            w, "575", "Qualifying expenditure",
-            "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD", "ctxt-4", "U-GBP",
+            w,
+            "575",
+            "Qualifying expenditure",
+            "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD",
+            "ctxt-4",
+            "U-GBP",
             self.rnd_qualifying_expenditure,
         );
         self.write_fact_numeric(
-            w, "580", "Enhanced expenditure",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "U-GBP",
+            w,
+            "580",
+            "Enhanced expenditure",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+            "ctxt-4",
+            "U-GBP",
             self.rnd_enhanced_expenditure,
         );
         self.write_fact_numeric(
-            w, "585", "Creative enhanced expenditure",
-            "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment", "ctxt-5", "U-GBP",
+            w,
+            "585",
+            "Creative enhanced expenditure",
+            "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment",
+            "ctxt-5",
+            "U-GBP",
             self.creative_enhanced_expenditure,
         );
         self.write_fact_numeric(
-            w, "590", "R&D and creative total",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "U-GBP",
+            w,
+            "590",
+            "R&D and creative total",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+            "ctxt-4",
+            "U-GBP",
             self.rnd_creative_enhanced_total,
         );
         self.write_fact_numeric(
-            w, "-", "Subcontracted large",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", "U-GBP",
+            w,
+            "-",
+            "Subcontracted large",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+            "ctxt-8",
+            "U-GBP",
             self.rnd_subcontracted_large,
         );
 
@@ -1306,8 +1751,16 @@ impl CorporationTaxReturn {
             }
 
             // Subtotal
-            let total2: f64 = project.items.iter().map(|i| i.values_by_fy.get(&fy2).copied().unwrap_or(0.0)).sum();
-            let total1: f64 = project.items.iter().map(|i| i.values_by_fy.get(&fy1).copied().unwrap_or(0.0)).sum();
+            let total2: f64 = project
+                .items
+                .iter()
+                .map(|i| i.values_by_fy.get(&fy2).copied().unwrap_or(0.0))
+                .sum();
+            let total1: f64 = project
+                .items
+                .iter()
+                .map(|i| i.values_by_fy.get(&fy1).copied().unwrap_or(0.0))
+                .sum();
             w.open_element("tr", &[("class", "row")]);
             w.write_element("td", &[("class", "label breakdown total cell")], "Total");
             self.write_data_cell_total(w, -total2);
@@ -1342,8 +1795,18 @@ impl CorporationTaxReturn {
             // Enhanced total with ix:nonFraction
             w.open_element("tr", &[("class", "row")]);
             w.write_element("td", &[("class", "label breakdown total cell")], "Total");
-            self.write_data_cell_total_ix(w, "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", -enh2);
-            self.write_data_cell_total_ix(w, "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", -enh1);
+            self.write_data_cell_total_ix(
+                w,
+                "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+                "ctxt-4",
+                -enh2,
+            );
+            self.write_data_cell_total_ix(
+                w,
+                "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+                "ctxt-8",
+                -enh1,
+            );
             w.close_element("tr");
         }
 
@@ -1401,20 +1864,41 @@ impl CorporationTaxReturn {
         // Profit per accounts
         let ppa2 = *self.profit_per_accounts_by_fy.get(&fy2).unwrap_or(&0.0);
         let ppa1 = *self.profit_per_accounts_by_fy.get(&fy1).unwrap_or(&0.0);
-        self.write_table_row_with_ix(w, "Profit (loss) per accounts",
-            "ct-comp:ProfitLossPerAccounts", "ctxt-4", "ctxt-8", ppa2, ppa1);
+        self.write_table_row_with_ix(
+            w,
+            "Profit (loss) per accounts",
+            "ct-comp:ProfitLossPerAccounts",
+            "ctxt-4",
+            "ctxt-8",
+            ppa2,
+            ppa1,
+        );
 
         // AIA (negative)
         let aia2 = *self.aia_by_fy.get(&fy2).unwrap_or(&0.0);
         let aia1 = *self.aia_by_fy.get(&fy1).unwrap_or(&0.0);
-        self.write_table_row_with_ix_neg(w, "Annual investment allowance",
-            "ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", "ctxt-15", aia2, aia1);
+        self.write_table_row_with_ix_neg(
+            w,
+            "Annual investment allowance",
+            "ct-comp:MainPoolAnnualInvestmentAllowance",
+            "ctxt-2",
+            "ctxt-15",
+            aia2,
+            aia1,
+        );
 
         // SME R&D tax relief (negative)
         let rnd2 = *self.rnd_by_fy.get(&fy2).unwrap_or(&0.0);
         let rnd1 = *self.rnd_by_fy.get(&fy1).unwrap_or(&0.0);
-        self.write_table_row_with_ix_neg(w, "SME R&D tax relief (130%)",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "ctxt-8", rnd2, rnd1);
+        self.write_table_row_with_ix_neg(
+            w,
+            "SME R&D tax relief (130%)",
+            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+            "ctxt-4",
+            "ctxt-8",
+            rnd2,
+            rnd1,
+        );
 
         // Taxable profits total (plain value, no ix tag)
         let total2 = ppa2 - aia2 - rnd2;
@@ -1429,9 +1913,15 @@ impl CorporationTaxReturn {
         w.close_element("tr");
 
         // Trading losses brought forward
-        self.write_table_row_with_ix(w, "Trading losses brought forward",
-            "ct-comp:TradingLossesBroughtForward", "ctxt-3", "ctxt-16",
-            self.trading_losses_brought_forward, self.trading_losses_brought_forward);
+        self.write_table_row_with_ix(
+            w,
+            "Trading losses brought forward",
+            "ct-comp:TradingLossesBroughtForward",
+            "ctxt-3",
+            "ctxt-16",
+            self.trading_losses_brought_forward,
+            self.trading_losses_brought_forward,
+        );
 
         // Blank row
         w.open_element("tr", &[("class", "row")]);
@@ -1441,9 +1931,15 @@ impl CorporationTaxReturn {
         w.close_element("tr");
 
         // Profits chargeable
-        self.write_table_row_with_ix(w, "Profits chargeable to corporation tax",
-            "ct-comp:NetTradingProfits", "ctxt-3", "ctxt-16",
-            self.net_trading_profits, self.prev_profit_chargeable);
+        self.write_table_row_with_ix(
+            w,
+            "Profits chargeable to corporation tax",
+            "ct-comp:NetTradingProfits",
+            "ctxt-3",
+            "ctxt-16",
+            self.net_trading_profits,
+            self.prev_profit_chargeable,
+        );
 
         // Blank row
         w.open_element("tr", &[("class", "row")]);
@@ -1453,9 +1949,15 @@ impl CorporationTaxReturn {
         w.close_element("tr");
 
         // Trading losses
-        self.write_table_row_with_ix(w, "Trading losses",
-            "ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3", "ctxt-16",
-            self.losses_of_trades_uk, self.losses_of_trades_uk);
+        self.write_table_row_with_ix(
+            w,
+            "Trading losses",
+            "ct-comp:TradingLossesOfThisOrLaterAP",
+            "ctxt-3",
+            "ctxt-16",
+            self.losses_of_trades_uk,
+            self.losses_of_trades_uk,
+        );
 
         // Blank row
         w.open_element("tr", &[("class", "row")]);
@@ -1472,19 +1974,37 @@ impl CorporationTaxReturn {
         w.close_element("tr");
 
         // FY1 profit
-        self.write_table_row_with_ix(w, "FY1",
-            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", "ctxt-16",
-            self.fy1_profit, self.prev_fy1_profit);
+        self.write_table_row_with_ix(
+            w,
+            "FY1",
+            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate",
+            "ctxt-3",
+            "ctxt-16",
+            self.fy1_profit,
+            self.prev_fy1_profit,
+        );
 
         // FY2 profit
-        self.write_table_row_with_ix(w, "FY2",
-            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", "ctxt-16",
-            self.fy2_profit, self.prev_fy2_profit);
+        self.write_table_row_with_ix(
+            w,
+            "FY2",
+            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate",
+            "ctxt-3",
+            "ctxt-16",
+            self.fy2_profit,
+            self.prev_fy2_profit,
+        );
 
         // Profits total
-        self.write_table_row_with_ix(w, "Total",
-            "ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3", "ctxt-16",
-            self.profits_chargeable_to_corporation_tax, self.prev_profit_chargeable);
+        self.write_table_row_with_ix(
+            w,
+            "Total",
+            "ct-comp:TotalProfitsChargeableToCorporationTax",
+            "ctxt-3",
+            "ctxt-16",
+            self.profits_chargeable_to_corporation_tax,
+            self.prev_profit_chargeable,
+        );
 
         // Blank row
         w.open_element("tr", &[("class", "row")]);
@@ -1501,26 +2021,53 @@ impl CorporationTaxReturn {
         w.close_element("tr");
 
         // FY1 tax (negative)
-        self.write_table_row_with_ix_neg(w, "FY1 (19%)",
-            "ct-comp:FY1TaxAtFirstRate", "ctxt-3", "ctxt-16",
-            self.fy1_tax, self.prev_fy1_tax);
+        self.write_table_row_with_ix_neg(
+            w,
+            "FY1 (19%)",
+            "ct-comp:FY1TaxAtFirstRate",
+            "ctxt-3",
+            "ctxt-16",
+            self.fy1_tax,
+            self.prev_fy1_tax,
+        );
 
         // FY2 tax (negative)
-        self.write_table_row_with_ix_neg(w, "FY2 (19%)",
-            "ct-comp:FY2TaxAtFirstRate", "ctxt-3", "ctxt-16",
-            self.fy2_tax, self.prev_fy2_tax);
+        self.write_table_row_with_ix_neg(
+            w,
+            "FY2 (19%)",
+            "ct-comp:FY2TaxAtFirstRate",
+            "ctxt-3",
+            "ctxt-16",
+            self.fy2_tax,
+            self.prev_fy2_tax,
+        );
 
         // CT chargeable total (negative)
-        self.write_table_row_with_ix_neg(w, "Total",
-            "ct-comp:CorporationTaxChargeable", "ctxt-3", "ctxt-16",
-            self.corporation_tax_chargeable, self.prev_corporation_tax_chargeable);
+        self.write_table_row_with_ix_neg(
+            w,
+            "Total",
+            "ct-comp:CorporationTaxChargeable",
+            "ctxt-3",
+            "ctxt-16",
+            self.corporation_tax_chargeable,
+            self.prev_corporation_tax_chargeable,
+        );
 
         w.close_element("table");
         w.close_element("div");
         w.close_element("div");
     }
 
-    fn write_table_row_with_ix(&self, w: &mut IxbrlWriter, label: &str, name: &str, ctx_cur: &str, ctx_prev: &str, val_cur: f64, val_prev: f64) {
+    fn write_table_row_with_ix(
+        &self,
+        w: &mut IxbrlWriter,
+        label: &str,
+        name: &str,
+        ctx_cur: &str,
+        ctx_prev: &str,
+        val_cur: f64,
+        val_prev: f64,
+    ) {
         w.open_element("tr", &[("class", "row")]);
         w.open_element("td", &[("class", "label breakdown item cell")]);
         w.write_element("span", &[], label);
@@ -1530,14 +2077,17 @@ impl CorporationTaxReturn {
         w.open_element("span", &[]);
         w.open_element("span", &[]);
         w.write_raw("</span>");
-        w.open_element("ix:nonFraction", &[
-            ("name", name),
-            ("contextRef", ctx_cur),
-            ("format", "ixt2:numdotdecimal"),
-            ("unitRef", "U-GBP"),
-            ("decimals", "2"),
-            ("scale", "0"),
-        ]);
+        w.open_element(
+            "ix:nonFraction",
+            &[
+                ("name", name),
+                ("contextRef", ctx_cur),
+                ("format", "ixt2:numdotdecimal"),
+                ("unitRef", "U-GBP"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ],
+        );
         w.write_raw(&format!("{:.2}", val_cur));
         w.close_element("ix:nonFraction");
         w.write_raw("<span>&#160;&#160;</span>");
@@ -1548,14 +2098,17 @@ impl CorporationTaxReturn {
         w.open_element("span", &[]);
         w.open_element("span", &[]);
         w.write_raw("</span>");
-        w.open_element("ix:nonFraction", &[
-            ("name", name),
-            ("contextRef", ctx_prev),
-            ("format", "ixt2:numdotdecimal"),
-            ("unitRef", "U-GBP"),
-            ("decimals", "2"),
-            ("scale", "0"),
-        ]);
+        w.open_element(
+            "ix:nonFraction",
+            &[
+                ("name", name),
+                ("contextRef", ctx_prev),
+                ("format", "ixt2:numdotdecimal"),
+                ("unitRef", "U-GBP"),
+                ("decimals", "2"),
+                ("scale", "0"),
+            ],
+        );
         w.write_raw(&format!("{:.2}", val_prev));
         w.close_element("ix:nonFraction");
         w.write_raw("<span>&#160;&#160;</span>");
@@ -1564,7 +2117,16 @@ impl CorporationTaxReturn {
         w.close_element("tr");
     }
 
-    fn write_table_row_with_ix_neg(&self, w: &mut IxbrlWriter, label: &str, name: &str, ctx_cur: &str, ctx_prev: &str, val_cur: f64, val_prev: f64) {
+    fn write_table_row_with_ix_neg(
+        &self,
+        w: &mut IxbrlWriter,
+        label: &str,
+        name: &str,
+        ctx_cur: &str,
+        ctx_prev: &str,
+        val_cur: f64,
+        val_prev: f64,
+    ) {
         w.open_element("tr", &[("class", "row")]);
         w.open_element("td", &[("class", "label breakdown item cell")]);
         w.write_element("span", &[], label);
@@ -1574,14 +2136,17 @@ impl CorporationTaxReturn {
             w.open_element("td", &[("class", "data value negative cell")]);
             w.open_element("span", &[]);
             w.write_raw("<span>( </span>");
-            w.open_element("ix:nonFraction", &[
-                ("name", name),
-                ("contextRef", ctx_cur),
-                ("format", "ixt2:numdotdecimal"),
-                ("unitRef", "U-GBP"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ]);
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx_cur),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
             w.write_raw(&format!("{:.2}", val_cur));
             w.close_element("ix:nonFraction");
             w.write_raw("<span> )</span>");
@@ -1592,14 +2157,17 @@ impl CorporationTaxReturn {
             w.open_element("span", &[]);
             w.open_element("span", &[]);
             w.write_raw("</span>");
-            w.open_element("ix:nonFraction", &[
-                ("name", name),
-                ("contextRef", ctx_cur),
-                ("format", "ixt2:numdotdecimal"),
-                ("unitRef", "U-GBP"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ]);
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx_cur),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
             w.write_raw("0.00");
             w.close_element("ix:nonFraction");
             w.write_raw("<span>&#160;&#160;</span>");
@@ -1611,14 +2179,17 @@ impl CorporationTaxReturn {
             w.open_element("td", &[("class", "data value negative cell")]);
             w.open_element("span", &[]);
             w.write_raw("<span>( </span>");
-            w.open_element("ix:nonFraction", &[
-                ("name", name),
-                ("contextRef", ctx_prev),
-                ("format", "ixt2:numdotdecimal"),
-                ("unitRef", "U-GBP"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ]);
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx_prev),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
             w.write_raw(&format!("{:.2}", val_prev));
             w.close_element("ix:nonFraction");
             w.write_raw("<span> )</span>");
@@ -1629,14 +2200,17 @@ impl CorporationTaxReturn {
             w.open_element("span", &[]);
             w.open_element("span", &[]);
             w.write_raw("</span>");
-            w.open_element("ix:nonFraction", &[
-                ("name", name),
-                ("contextRef", ctx_prev),
-                ("format", "ixt2:numdotdecimal"),
-                ("unitRef", "U-GBP"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ]);
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx_prev),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
             w.write_raw("0.00");
             w.close_element("ix:nonFraction");
             w.write_raw("<span>&#160;&#160;</span>");
@@ -1684,7 +2258,10 @@ impl CorporationTaxReturn {
             w.close_element("span");
             w.close_element("td");
         } else if value < 0.0 {
-            w.open_element("td", &[("class", "data value breakdown total negative cell")]);
+            w.open_element(
+                "td",
+                &[("class", "data value breakdown total negative cell")],
+            );
             w.open_element("span", &[]);
             w.write_raw("<span>( </span>");
             w.write_element("span", &[], &format!("{:.2}", value.abs()));
@@ -1700,17 +2277,23 @@ impl CorporationTaxReturn {
 
     fn write_data_cell_total_ix(&self, w: &mut IxbrlWriter, name: &str, ctx: &str, value: f64) {
         if value < 0.0 {
-            w.open_element("td", &[("class", "data value breakdown total negative cell")]);
+            w.open_element(
+                "td",
+                &[("class", "data value breakdown total negative cell")],
+            );
             w.open_element("span", &[]);
             w.write_raw("<span>( </span>");
-            w.open_element("ix:nonFraction", &[
-                ("name", name),
-                ("contextRef", ctx),
-                ("unitRef", "U-GBP"),
-                ("format", "ixt2:numdotdecimal"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ]);
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("unitRef", "U-GBP"),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
             w.write_raw(&format!("{:.2}", value.abs()));
             w.close_element("ix:nonFraction");
             w.write_raw("<span> )</span>");
@@ -1719,14 +2302,17 @@ impl CorporationTaxReturn {
         } else if value == 0.0 {
             w.open_element("td", &[("class", "data value breakdown total nil cell")]);
             w.open_element("span", &[]);
-            w.open_element("ix:nonFraction", &[
-                ("name", name),
-                ("contextRef", ctx),
-                ("unitRef", "U-GBP"),
-                ("format", "ixt2:numdotdecimal"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ]);
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("unitRef", "U-GBP"),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
             w.write_raw("0.00");
             w.close_element("ix:nonFraction");
             w.open_element("span", &[]);
@@ -1737,14 +2323,17 @@ impl CorporationTaxReturn {
         } else {
             w.open_element("td", &[("class", "data value breakdown total cell")]);
             w.open_element("span", &[]);
-            w.open_element("ix:nonFraction", &[
-                ("name", name),
-                ("contextRef", ctx),
-                ("unitRef", "U-GBP"),
-                ("format", "ixt2:numdotdecimal"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ]);
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("unitRef", "U-GBP"),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
             w.write_raw(&format!("{:.2}", value));
             w.close_element("ix:nonFraction");
             w.open_element("span", &[]);
@@ -1766,7 +2355,7 @@ fn format_f64(v: f64) -> String {
     let bytes = int_part.as_bytes();
     let len = bytes.len();
     for (i, b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             result.push(',');
         }
         result.push(*b as char);
@@ -1806,11 +2395,24 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
         );
         let ct = CorporationTaxReturn::builder(&gnucash, &company)
-            .add_rd_project("Project Iguana", &[
-                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
-                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
-                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
-            ], "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs")
+            .add_rd_project(
+                "Project Iguana",
+                &[
+                    (
+                        "Staffing Costs",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
+                    ),
+                    (
+                        "Software/Consumables",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables",
+                    ),
+                    (
+                        "External Workers",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers",
+                    ),
+                ],
+                "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
+            )
             .build();
 
         assert_eq!(ct.company.name, "Example Biz Ltd.");
@@ -1886,11 +2488,24 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
         );
         let ct = CorporationTaxReturn::builder(&gnucash, &company)
-            .add_rd_project("Project Iguana", &[
-                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
-                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
-                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
-            ], "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs")
+            .add_rd_project(
+                "Project Iguana",
+                &[
+                    (
+                        "Staffing Costs",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
+                    ),
+                    (
+                        "Software/Consumables",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables",
+                    ),
+                    (
+                        "External Workers",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers",
+                    ),
+                ],
+                "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
+            )
             .build();
 
         assert!(!ct.rd_projects.is_empty());
@@ -1911,7 +2526,9 @@ mod tests {
         assert!(ixbrl.contains("External Workers"));
         assert!(ixbrl.contains("SME R&amp;D tax relief (130%)"));
         assert!(ixbrl.contains("Project Iguana"));
-        assert!(ixbrl.contains("ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME"));
+        assert!(
+            ixbrl.contains("ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME")
+        );
         assert!(ixbrl.contains("sheet table"));
     }
 
@@ -1929,11 +2546,24 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
         );
         let ct = CorporationTaxReturn::builder(&gnucash, &company)
-            .add_rd_project("Project Iguana", &[
-                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
-                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
-                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
-            ], "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs")
+            .add_rd_project(
+                "Project Iguana",
+                &[
+                    (
+                        "Staffing Costs",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
+                    ),
+                    (
+                        "Software/Consumables",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables",
+                    ),
+                    (
+                        "External Workers",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers",
+                    ),
+                ],
+                "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
+            )
             .build();
         let ixbrl = ct.to_ixbrl();
 
@@ -2115,11 +2745,24 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
         );
         CorporationTaxReturn::builder(&gnucash, &company)
-            .add_rd_project("Project Iguana", &[
-                ("Staffing Costs", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs"),
-                ("Software/Consumables", "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables"),
-                ("External Workers", "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers"),
-            ], "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs")
+            .add_rd_project(
+                "Project Iguana",
+                &[
+                    (
+                        "Staffing Costs",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
+                    ),
+                    (
+                        "Software/Consumables",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:Software/Consumables",
+                    ),
+                    (
+                        "External Workers",
+                        "R&D Enhanced Expenditure:Expenditure:Project Iguana:External Workers",
+                    ),
+                ],
+                "R&D Enhanced Expenditure:Expenditure:Project Iguana:Staffing Costs",
+            )
             .build()
     }
 
@@ -2154,8 +2797,8 @@ mod tests {
     #[tokio::test]
     async fn test_invariant_tax_chargeable() {
         let ct = build_example2_ct().await;
-        let expected_tax = (ct.fy1_tax * 100.0).round() / 100.0
-            + (ct.fy2_tax * 100.0).round() / 100.0;
+        let expected_tax =
+            (ct.fy1_tax * 100.0).round() / 100.0 + (ct.fy2_tax * 100.0).round() / 100.0;
         assert_eq!(ct.corporation_tax_chargeable, expected_tax);
         assert_eq!(
             ct.corporation_tax_chargeable_payable,
@@ -2211,14 +2854,8 @@ mod tests {
     async fn test_invariant_by_fy_consistency() {
         let ct = build_example2_ct().await;
         let fy2 = ct.company.fy2_year;
-        assert_eq!(
-            *ct.turnover_by_fy.get(&fy2).unwrap_or(&0.0),
-            ct.turnover
-        );
-        assert_eq!(
-            *ct.costs_by_fy.get(&fy2).unwrap_or(&0.0),
-            ct.total_costs
-        );
+        assert_eq!(*ct.turnover_by_fy.get(&fy2).unwrap_or(&0.0), ct.turnover);
+        assert_eq!(*ct.costs_by_fy.get(&fy2).unwrap_or(&0.0), ct.total_costs);
         assert_eq!(
             *ct.profit_per_accounts_by_fy.get(&fy2).unwrap_or(&0.0),
             ct.profit_before_tax
@@ -2229,7 +2866,7 @@ mod tests {
     fn test_from_ixbrl_round_trip() {
         let html = std::fs::read_to_string("../../.cache/ct_return_example2.html")
             .expect("read cached ixbrl");
-        let facts = CorporationTaxReturn::from_ixbrl(&html);
+        let facts = ParsedIxBrlFacts::from_html(&html);
 
         assert_eq!(
             facts.non_numeric.get("ct-comp:CompanyName").unwrap(),
@@ -2241,21 +2878,21 @@ mod tests {
         );
 
         assert_eq!(
-            facts.numeric_by_ctx.get(&("ct-comp:NetTradingProfits".into(), "ctxt-3".into())),
+            facts
+                .numeric_by_ctx
+                .get(&("ct-comp:NetTradingProfits".into(), "ctxt-3".into())),
             Some(&748.0)
         );
         assert_eq!(
-            facts.numeric_by_ctx.get(&(
-                "ct-comp:CorporationTaxChargeable".into(),
-                "ctxt-3".into()
-            )),
+            facts
+                .numeric_by_ctx
+                .get(&("ct-comp:CorporationTaxChargeable".into(), "ctxt-3".into())),
             Some(&142.12)
         );
         assert_eq!(
-            facts.numeric_by_ctx.get(&(
-                "ct-comp:NetCorporationTaxPayable".into(),
-                "ctxt-3".into()
-            )),
+            facts
+                .numeric_by_ctx
+                .get(&("ct-comp:NetCorporationTaxPayable".into(), "ctxt-3".into())),
             Some(&142.12)
         );
         assert_eq!(
@@ -2284,21 +2921,126 @@ mod tests {
     fn test_from_ixbrl_worksheet_fy_split() {
         let html = std::fs::read_to_string("../../.cache/ct_return_example2.html")
             .expect("read cached ixbrl");
-        let facts = CorporationTaxReturn::from_ixbrl(&html);
+        let facts = ParsedIxBrlFacts::from_html(&html);
 
-        let fy1_cur = facts
-            .numeric_by_ctx
-            .get(&(
-                "ct-comp:FY1AmountOfProfitChargeableAtFirstRate".into(),
-                "ctxt-3".into(),
-            ));
-        let fy1_prev = facts
-            .numeric_by_ctx
-            .get(&(
-                "ct-comp:FY1AmountOfProfitChargeableAtFirstRate".into(),
-                "ctxt-16".into(),
-            ));
+        let fy1_cur = facts.numeric_by_ctx.get(&(
+            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate".into(),
+            "ctxt-3".into(),
+        ));
+        let fy1_prev = facts.numeric_by_ctx.get(&(
+            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate".into(),
+            "ctxt-16".into(),
+        ));
         assert_eq!(fy1_cur, Some(&186.0));
         assert!(fy1_prev.is_some());
+    }
+
+    #[test]
+    fn test_from_parsed_facts() {
+        let html = std::fs::read_to_string("../../.cache/ct_return_example2.html")
+            .expect("read cached ixbrl");
+        let facts = ParsedIxBrlFacts::from_html(&html);
+
+        let company = crate::company::Company::new(
+            "Example Biz Ltd.",
+            "8596148860",
+            "12345678",
+            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
+        );
+
+        let ct = CorporationTaxReturn::from_parsed_facts(&facts, &company);
+
+        // -- company fields ------------------------------------------------
+
+        assert_eq!(ct.company.name, "Example Biz Ltd.");
+        assert_eq!(ct.company.tax_reference, "8596148860");
+        assert_eq!(ct.company.company_number, "12345678");
+        assert_eq!(ct.company.fy1_year, 2019);
+        assert_eq!(ct.company.fy2_year, 2020);
+        assert_eq!(ct.company.fy1_rate, 19.0);
+        assert_eq!(ct.company.fy2_rate, 19.0);
+        assert_eq!(
+            ct.company.accounting_period_start,
+            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()
+        );
+        assert_eq!(
+            ct.company.accounting_period_end,
+            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap()
+        );
+
+        // -- profits & gains page -----------------------------------------
+
+        assert_eq!(ct.adjusted_trading_profit, 748.0);
+        assert_eq!(ct.trading_losses_brought_forward, 0.0);
+        assert_eq!(ct.net_trading_profits, 748.0);
+        assert_eq!(ct.net_chargeable_gains, 0.0);
+        assert_eq!(ct.profits_before_deductions, 748.0);
+        assert_eq!(ct.profits_before_charges, 748.0);
+        assert_eq!(ct.profits_chargeable_to_corporation_tax, 748.0);
+
+        // -- tax chargeable page ----------------------------------------
+
+        assert_eq!(ct.fy1_profit, 186.0);
+        assert_eq!(ct.fy2_profit, 562.0);
+        assert_eq!(ct.fy1_tax, 35.34);
+        assert_eq!(ct.fy2_tax, 106.78);
+        assert_eq!(ct.corporation_tax_chargeable, 142.12);
+        assert_eq!(ct.marginal_relief, 0.0);
+        assert_eq!(ct.corporation_tax_chargeable_payable, 142.12);
+        assert_eq!(ct.total_reliefs_deductions_tax, 0.0);
+        assert_eq!(ct.net_corporation_tax_payable, 142.12);
+        assert_eq!(ct.tax_chargeable, 142.12);
+        assert_eq!(ct.tax_payable, 142.12);
+
+        // -- previous year -------------------------------------------------
+
+        assert_eq!(ct.prev_profit_chargeable, 4010.0);
+        assert_eq!(ct.prev_fy1_profit, 986.0);
+        assert_eq!(ct.prev_fy2_profit, 3024.0);
+        assert_eq!(ct.prev_fy1_tax, 187.34);
+        assert_eq!(ct.prev_fy2_tax, 574.56);
+        assert_eq!(ct.prev_corporation_tax_chargeable, 761.9);
+        assert!(ct.prev_fy1_profit > 0.0);
+        assert!(ct.prev_fy2_profit > 0.0);
+        assert!(ct.prev_corporation_tax_chargeable > 0.0);
+
+        // -- capital allowances -------------------------------------------
+
+        assert_eq!(ct.annual_investment_allowance, 591.0);
+
+        // -- R&D page -----------------------------------------------------
+
+        assert_eq!(ct.rnd_enhanced_expenditure, 465.0);
+        assert_eq!(ct.rnd_creative_enhanced_total, 465.0);
+        assert!(ct.is_sme);
+        assert!(!ct.is_large_company);
+        assert!(!ct.partner_in_a_firm);
+
+        // -- per-year hash maps ------------------------------------------
+
+        assert_eq!(
+            *ct.profit_per_accounts_by_fy.get(&2020).unwrap_or(&0.0),
+            1804.94
+        );
+        assert_eq!(
+            *ct.profit_per_accounts_by_fy.get(&2019).unwrap_or(&0.0),
+            4837.88
+        );
+        assert_eq!(*ct.aia_by_fy.get(&2020).unwrap_or(&0.0), 591.0);
+        assert_eq!(*ct.rnd_by_fy.get(&2020).unwrap_or(&0.0), 465.0);
+
+        // -- invariants ---------------------------------------------------
+
+        // profit_before_tax must equal profit_per_accounts_by_fy[fy2]
+        assert_eq!(
+            *ct.profit_per_accounts_by_fy
+                .get(&ct.company.fy2_year)
+                .unwrap_or(&0.0),
+            ct.profit_before_tax
+        );
+
+        // corporation_tax_chargeable must equal fy1_tax + fy2_tax
+        assert_eq!(ct.fy1_tax + ct.fy2_tax, ct.corporation_tax_chargeable);
     }
 }

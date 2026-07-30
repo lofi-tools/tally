@@ -1,7 +1,7 @@
 use std::fmt;
 
 pub mod company;
-pub mod ixbrl_writer;
+pub mod ixbrl_fmt;
 pub mod taxonomy;
 pub mod taxonomy_mappings {
     pub mod ct_return;
@@ -238,9 +238,8 @@ impl GnucashBook {
         let net_assets: rucash::Num = top_level
             .iter()
             .map(|&idx| {
-                let account_type =
-                    AccountType::try_from(raw_accounts[idx].r#type.as_str())
-                        .unwrap_or(AccountType::Expense);
+                let account_type = AccountType::try_from(raw_accounts[idx].r#type.as_str())
+                    .unwrap_or(AccountType::Expense);
                 (account_type, &balances[idx])
             })
             .filter(|(t, _)| t.is_balance_sheet())
@@ -326,9 +325,8 @@ impl GnucashBook {
         let net_assets: rucash::Num = top_level
             .iter()
             .map(|&idx| {
-                let account_type =
-                    AccountType::try_from(raw_accounts[idx].r#type.as_str())
-                        .unwrap_or(AccountType::Expense);
+                let account_type = AccountType::try_from(raw_accounts[idx].r#type.as_str())
+                    .unwrap_or(AccountType::Expense);
                 (account_type, &balances[idx])
             })
             .filter(|(t, _)| t.is_balance_sheet())
