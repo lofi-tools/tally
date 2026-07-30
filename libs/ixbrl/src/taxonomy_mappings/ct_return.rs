@@ -1930,7 +1930,7 @@ impl CorporationTaxReturn {
         w.close_element("tr");
 
         // Total (turnover)
-        self.write_table_row_with_ix(
+        self.write_table_total_row_with_ix(
             w,
             "Total",
             "uk-core:TurnoverRevenue",
@@ -2003,7 +2003,7 @@ impl CorporationTaxReturn {
         }
 
         // Total costs
-        self.write_table_row_with_ix_neg(
+        self.write_table_total_row_with_ix_neg(
             w,
             "Total",
             "dpl:TotalCosts",
@@ -2052,7 +2052,7 @@ impl CorporationTaxReturn {
         );
 
         // Total (profit before tax)
-        self.write_table_row_with_ix(
+        self.write_table_total_row_with_ix(
             w,
             "Total",
             "uk-core:ProfitLossBeforeTax",
@@ -2539,6 +2539,41 @@ impl CorporationTaxReturn {
         w.write_raw("<span>&#160;&#160;</span>");
         w.close_element("span");
         w.close_element("td");
+        w.close_element("tr");
+    }
+
+    fn write_table_total_row_with_ix(
+        &self,
+        w: &mut IxbrlWriter,
+        label: &str,
+        name: &str,
+        ctx_cur: &str,
+        ctx_prev: &str,
+        val_cur: f64,
+        val_prev: f64,
+    ) {
+        w.open_element("tr", &[("class", "row")]);
+        w.write_element("td", &[("class", "label breakdown total cell")], label);
+        self.write_data_cell_total_ix(w, name, ctx_cur, val_cur);
+        self.write_data_cell_total_ix(w, name, ctx_prev, val_prev);
+        w.close_element("tr");
+    }
+
+    fn write_table_total_row_with_ix_neg(
+        &self,
+        w: &mut IxbrlWriter,
+        label: &str,
+        name: &str,
+        ctx_cur: &str,
+        ctx_prev: &str,
+        val_cur: f64,
+        val_prev: f64,
+    ) {
+        w.open_element("tr", &[("class", "row")]);
+        w.write_element("td", &[("class", "label breakdown total cell")], label);
+        // Negate values so write_data_cell_total_ix renders them with parens
+        self.write_data_cell_total_ix(w, name, ctx_cur, -val_cur);
+        self.write_data_cell_total_ix(w, name, ctx_prev, -val_prev);
         w.close_element("tr");
     }
 
