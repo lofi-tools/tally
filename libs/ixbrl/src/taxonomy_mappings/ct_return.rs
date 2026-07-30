@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::GnucashBook;
 use crate::company::Company;
-use crate::ixbrl_fmt::{format_f64, IxbrlWriter, ParsedIxBrlFacts};
+use crate::ixbrl_fmt::*;
 
 #[derive(Debug, Clone)]
 pub struct RdExpenditureItem {
@@ -195,7 +195,7 @@ pub fn calculate_corporation_tax_2025(taxable_profit: f64) -> CorporationTaxCalc
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[allow(clippy::type_complexity)]
 impl CorporationTaxReturn {
     pub fn builder<'a>(
         gnucash: &GnucashBook,
@@ -596,232 +596,165 @@ impl CorporationTaxReturn {
     }
 
     pub fn to_ixbrl(&self) -> String {
-        let mut w = IxbrlWriter::new();
+        // -- Build the ix:header section --------------------------------------
 
-        w.write_raw("<?xml version='1.0' encoding='ASCII'?>\n");
-        w.write_raw("<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:ix=\"http://www.xbrl.org/2013/inlineXBRL\" xmlns:link=\"http://www.xbrl.org/2003/linkbase\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:xbrli=\"http://www.xbrl.org/2003/instance\" xmlns:xbrldi=\"http://xbrl.org/2006/xbrldi\" xmlns:ixt2=\"http://www.xbrl.org/inlineXBRL/transformation/2011-07-31\" xmlns:iso4217=\"http://www.xbrl.org/2003/iso4217\" xmlns:ct-comp=\"http://www.hmrc.gov.uk/schemas/ct/comp/2023-01-01\" xmlns:dpl=\"http://xbrl.frc.org.uk/dpl/2023-01-01\" xmlns:uk-bus=\"http://xbrl.frc.org.uk/cd/2023-01-01/business\" xmlns:uk-core=\"http://xbrl.frc.org.uk/fr/2023-01-01/core\" xmlns:uk-geo=\"http://xbrl.frc.org.uk/cd/2023-01-01/countries\">");
+        let hidden = elt("ix:hidden", &[]).children(vec![
+            non_numeric("ct-comp:NameOfProductionSoftware", "ctxt-0", "ixbrl-reporter"),
+            non_numeric("ct-comp:VersionOfProductionSoftware", "ctxt-0", "1.2.1"),
+            non_numeric("ct-comp:CompanyName", "ctxt-0", &self.company.name),
+            non_numeric("ct-comp:TaxReference", "ctxt-0", &self.company.tax_reference),
+        ]);
 
-        w.write_raw("<head><title>Corporation Tax Statement</title><style type=\"text/css\">\n");
-        w.write_raw(include_str!("ct_return_style.css"));
-        w.write_raw("</style></head><body>");
+        let refs = elt("ix:references", &[]).children(vec![
+            elt_text("link:schemaRef", &[
+                ("xlink:type", "simple"),
+                ("xlink:href", "http://www.hmrc.gov.uk/schemas/ct/comp/2023-01-01/ct-comp-2023.xsd"),
+            ], ""),
+            elt_text("link:schemaRef", &[
+                ("xlink:type", "simple"),
+                ("xlink:href", "https://xbrl.frc.org.uk/dpl/2023-01-01/dpl-2023-01-01.xsd"),
+            ], ""),
+        ]);
 
-        w.write_raw("<div style=\"display:none\"><ix:header>");
-        w.write_raw("<ix:hidden>");
-        self.ix_non_numeric(
-            &mut w,
-            "ct-comp:NameOfProductionSoftware",
-            "ctxt-0",
-            "ixbrl-reporter",
-            None,
-        );
-        self.ix_non_numeric(
-            &mut w,
-            "ct-comp:VersionOfProductionSoftware",
-            "ctxt-0",
-            "1.2.1",
-            None,
-        );
-        self.ix_non_numeric(
-            &mut w,
-            "ct-comp:CompanyName",
-            "ctxt-0",
-            &self.company.name,
-            None,
-        );
-        self.ix_non_numeric(
-            &mut w,
-            "ct-comp:TaxReference",
-            "ctxt-0",
-            &self.company.tax_reference,
-            None,
-        );
-        w.write_raw("</ix:hidden>");
+        let resources = elt("ix:resources", &[]).children(vec![
+            context_instant(
+                "ctxt-0", &self.company.company_number, &self.company.accounting_period_end,
+                Some("ct-comp:BusinessTypeDimension"), Some("ct-comp:Company"),
+            ),
+            context_duration(
+                "ctxt-1", &self.company.company_number, &self.company.accounting_period_start,
+                &self.company.accounting_period_end,
+                Some("ct-comp:BusinessTypeDimension"), Some("ct-comp:Company"),
+            ),
+            context_duration(
+                "ctxt-2", &self.company.company_number, &self.company.accounting_period_start,
+                &self.company.accounting_period_end,
+                Some("ct-comp:BusinessTypeDimension"), Some("ct-comp:ManagementExpenses"),
+            ),
+            context_duration(
+                "ctxt-3", &self.company.company_number, &self.company.accounting_period_start,
+                &self.company.accounting_period_end,
+                Some("ct-comp:BusinessTypeDimension"), Some("ct-comp:Company"),
+            ),
+            context_duration_full(
+                "ctxt-4", &self.company.company_number, &self.company.accounting_period_start,
+                &self.company.accounting_period_end,
+                Some("ct-comp:BusinessNameDimension"), Some(&self.company.name),
+                &[
+                    ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
+                    ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
+                    ("ct-comp:TerritoryDimension", "ct-comp:UK"),
+                ],
+            ),
+            context_duration_full(
+                "ctxt-5", &self.company.company_number, &self.company.accounting_period_start,
+                &self.company.accounting_period_end,
+                Some("ct-comp:BusinessNameDimension"), Some(&self.company.name),
+                &[
+                    ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
+                    ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
+                    ("ct-comp:TerritoryDimension", "ct-comp:UK"),
+                ],
+            ),
+            context_duration_full(
+                "ctxt-8", &self.company.company_number,
+                &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
+                &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
+                Some("ct-comp:BusinessNameDimension"), Some(&self.company.name),
+                &[
+                    ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
+                    ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
+                    ("ct-comp:TerritoryDimension", "ct-comp:UK"),
+                ],
+            ),
+            context_duration_full(
+                "ctxt-9", &self.company.company_number, &self.company.accounting_period_start,
+                &self.company.accounting_period_end,
+                None, None,
+                &[
+                    ("dpl:DetailedAnalysisDimension", "dpl:Item1"),
+                    ("uk-geo:CountriesRegionsDimension", "uk-geo:UnitedKingdom"),
+                ],
+            ),
+            context_duration_full(
+                "ctxt-10", &self.company.company_number,
+                &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
+                &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
+                None, None,
+                &[
+                    ("dpl:DetailedAnalysisDimension", "dpl:Item1"),
+                    ("uk-geo:CountriesRegionsDimension", "uk-geo:UnitedKingdom"),
+                ],
+            ),
+            context_duration_full(
+                "ctxt-11", &self.company.company_number, &self.company.accounting_period_start,
+                &self.company.accounting_period_end, None, None, &[],
+            ),
+            context_duration_full(
+                "ctxt-12", &self.company.company_number,
+                &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
+                &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
+                None, None, &[],
+            ),
+            context_duration(
+                "ctxt-13", &self.company.company_number, &self.company.accounting_period_start,
+                &self.company.accounting_period_end,
+                Some("dpl:ExpenseTypeDimension"), Some("dpl:AdministrativeExpenses"),
+            ),
+            context_duration(
+                "ctxt-14", &self.company.company_number,
+                &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
+                &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
+                Some("dpl:ExpenseTypeDimension"), Some("dpl:AdministrativeExpenses"),
+            ),
+            context_duration(
+                "ctxt-15", &self.company.company_number,
+                &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
+                &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
+                Some("ct-comp:BusinessTypeDimension"), Some("ct-comp:ManagementExpenses"),
+            ),
+            context_duration(
+                "ctxt-16", &self.company.company_number,
+                &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
+                &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
+                Some("ct-comp:BusinessTypeDimension"), Some("ct-comp:Company"),
+            ),
+            unit("iso4217:GBP"),
+        ]);
 
-        w.write_raw("<ix:references>");
-        w.write_raw("<link:schemaRef xlink:type=\"simple\" xlink:href=\"http://www.hmrc.gov.uk/schemas/ct/comp/2023-01-01/ct-comp-2023.xsd\"></link:schemaRef>");
-        w.write_raw("<link:schemaRef xlink:type=\"simple\" xlink:href=\"https://xbrl.frc.org.uk/dpl/2023-01-01/dpl-2023-01-01.xsd\"></link:schemaRef>");
-        w.write_raw("</ix:references>");
+        let header = elt("ix:header", &[]).children(vec![hidden, refs, resources]);
 
-        w.write_raw("<ix:resources>");
-        self.write_context_instant(
-            &mut w,
-            "ctxt-0",
-            &self.company.company_number,
-            &self.company.accounting_period_end,
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:Company"),
-        );
-        self.write_context_duration(
-            &mut w,
-            "ctxt-1",
-            &self.company.company_number,
-            &self.company.accounting_period_start,
-            &self.company.accounting_period_end,
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:Company"),
-        );
-        self.write_context_duration(
-            &mut w,
-            "ctxt-2",
-            &self.company.company_number,
-            &self.company.accounting_period_start,
-            &self.company.accounting_period_end,
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:ManagementExpenses"),
-        );
-        self.write_context_duration(
-            &mut w,
-            "ctxt-3",
-            &self.company.company_number,
-            &self.company.accounting_period_start,
-            &self.company.accounting_period_end,
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:Company"),
-        );
-        self.write_context_duration_full(
-            &mut w,
-            "ctxt-4",
-            &self.company.company_number,
-            &self.company.accounting_period_start,
-            &self.company.accounting_period_end,
-            Some("ct-comp:BusinessNameDimension"),
-            Some(&self.company.name),
-            &[
-                ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
-                ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
-                ("ct-comp:TerritoryDimension", "ct-comp:UK"),
-            ],
-        );
-        self.write_context_duration_full(
-            &mut w,
-            "ctxt-5",
-            &self.company.company_number,
-            &self.company.accounting_period_start,
-            &self.company.accounting_period_end,
-            Some("ct-comp:BusinessNameDimension"),
-            Some(&self.company.name),
-            &[
-                ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
-                ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
-                ("ct-comp:TerritoryDimension", "ct-comp:UK"),
-            ],
-        );
-        self.write_context_duration_full(
-            &mut w,
-            "ctxt-8",
-            &self.company.company_number,
-            &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
-            &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
-            Some("ct-comp:BusinessNameDimension"),
-            Some(&self.company.name),
-            &[
-                ("ct-comp:BusinessTypeDimension", "ct-comp:Trade"),
-                ("ct-comp:LossReformDimension", "ct-comp:Post-lossReform"),
-                ("ct-comp:TerritoryDimension", "ct-comp:UK"),
-            ],
-        );
-        self.write_context_duration_full(
-            &mut w,
-            "ctxt-9",
-            &self.company.company_number,
-            &self.company.accounting_period_start,
-            &self.company.accounting_period_end,
-            None,
-            None,
-            &[
-                ("dpl:DetailedAnalysisDimension", "dpl:Item1"),
-                ("uk-geo:CountriesRegionsDimension", "uk-geo:UnitedKingdom"),
-            ],
-        );
-        self.write_context_duration_full(
-            &mut w,
-            "ctxt-10",
-            &self.company.company_number,
-            &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
-            &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
-            None,
-            None,
-            &[
-                ("dpl:DetailedAnalysisDimension", "dpl:Item1"),
-                ("uk-geo:CountriesRegionsDimension", "uk-geo:UnitedKingdom"),
-            ],
-        );
-        self.write_context_duration_full(
-            &mut w,
-            "ctxt-11",
-            &self.company.company_number,
-            &self.company.accounting_period_start,
-            &self.company.accounting_period_end,
-            None,
-            None,
-            &[],
-        );
-        self.write_context_duration_full(
-            &mut w,
-            "ctxt-12",
-            &self.company.company_number,
-            &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
-            &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
-            None,
-            None,
-            &[],
-        );
-        self.write_context_duration(
-            &mut w,
-            "ctxt-13",
-            &self.company.company_number,
-            &self.company.accounting_period_start,
-            &self.company.accounting_period_end,
-            Some("dpl:ExpenseTypeDimension"),
-            Some("dpl:AdministrativeExpenses"),
-        );
-        self.write_context_duration(
-            &mut w,
-            "ctxt-14",
-            &self.company.company_number,
-            &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
-            &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
-            Some("dpl:ExpenseTypeDimension"),
-            Some("dpl:AdministrativeExpenses"),
-        );
-        self.write_context_duration(
-            &mut w,
-            "ctxt-15",
-            &self.company.company_number,
-            &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
-            &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:ManagementExpenses"),
-        );
-        self.write_context_duration(
-            &mut w,
-            "ctxt-16",
-            &self.company.company_number,
-            &chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
-            &chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
-            Some("ct-comp:BusinessTypeDimension"),
-            Some("ct-comp:Company"),
-        );
+        // -- Build report pages -----------------------------------------------
 
-        self.write_unit(&mut w, "iso4217:GBP");
-        w.write_raw("</ix:resources></ix:header></div>");
-
-        w.write_raw("<div id=\"report\" class=\"report\">");
-        self.write_corporation_tax_return_page(&mut w);
-        self.write_capital_allowances_page(&mut w);
-        self.write_profits_and_gains_page(&mut w);
-        self.write_losses_page(&mut w);
-        self.write_tax_chargeable_page(&mut w);
-        self.write_rnd_page(&mut w);
+        let mut report_pages = vec![
+            self.build_corporation_tax_return_page(),
+            self.build_capital_allowances_page(),
+            self.build_profits_and_gains_page(),
+            self.build_losses_page(),
+            self.build_tax_chargeable_page(),
+            self.build_rnd_page(),
+        ];
         if !self.rd_projects.is_empty() {
-            self.write_rnd_worksheet_page(&mut w);
+            report_pages.push(self.build_rnd_worksheet_page());
         }
-        self.write_profit_and_loss_worksheet(&mut w);
-        self.write_tax_calculation_worksheet(&mut w);
-        w.write_raw("</div>");
+        report_pages.push(self.build_profit_and_loss_worksheet());
+        report_pages.push(self.build_tax_calculation_worksheet());
 
-        w.write_raw("</body></html>");
-        w.into_string()
+        // -- Assemble full document -------------------------------------------
+
+        let doc = elt("html", HTML_ATTRS).children(vec![
+            elt("head", &[]).children(vec![
+                elt_text("title", &[], "Corporation Tax Statement"),
+                elt_text("style", &[("type", "text/css")], include_str!("ct_return_style.css")),
+            ]),
+            elt("body", &[]).children(vec![
+                elt("div", &[("style", "display:none")]).child(header),
+                elt("div", &[("id", "report"), ("class", "report")]).children(report_pages),
+            ]),
+        ]);
+
+        let body = doc.to_xml_string();
+        format!("<?xml version='1.0' encoding='UTF-8'?>\n{}", body)
     }
 
     /// Parse a [`ParsedIxBrlFacts`] into a [`CorporationTaxReturn`].
@@ -1083,743 +1016,186 @@ impl CorporationTaxReturn {
         }
     }
 
-    fn write_context_instant(
-        &self,
-        w: &mut IxbrlWriter,
-        id: &str,
-        scheme_id: &str,
-        date: &chrono::NaiveDate,
-        dim: Option<&str>,
-        val: Option<&str>,
-    ) {
-        w.open_element("xbrli:context", &[("id", id)]);
-        w.open_element("xbrli:entity", &[]);
-        w.write_element(
-            "xbrli:identifier",
-            &[("scheme", "http://www.companieshouse.gov.uk/")],
-            scheme_id,
-        );
-        if let Some(d) = dim {
-            w.open_element("xbrli:segment", &[]);
-            w.write_element(
-                "xbrldi:explicitMember",
-                &[("dimension", d)],
-                val.unwrap_or(""),
-            );
-            w.close_element("xbrli:segment");
-        }
-        w.close_element("xbrli:entity");
-        w.open_element("xbrli:period", &[]);
-        w.write_element("xbrli:instant", &[], &date.to_string());
-        w.close_element("xbrli:period");
-        w.close_element("xbrli:context");
+
+
+
+
+
+
+
+
+
+
+    fn build_fact_text(&self, ref_num: &str, label: &str, value: &str) -> XmlNode {
+        fact_wrapper(ref_num, label, span_text(value))
     }
 
-    fn write_context_duration(
-        &self,
-        w: &mut IxbrlWriter,
-        id: &str,
-        scheme_id: &str,
-        start: &chrono::NaiveDate,
-        end: &chrono::NaiveDate,
-        dim: Option<&str>,
-        val: Option<&str>,
-    ) {
-        let dims = match (dim, val) {
-            (Some(d), Some(v)) => vec![(d, v)],
-            _ => vec![],
+    fn build_fact_numeric(&self, ref_num: &str, label: &str, name: &str, ctx: &str, value: f64) -> XmlNode {
+        fact_wrapper(ref_num, label, non_fraction(name, ctx, &format_f64(value)))
+    }
+
+    fn build_fact_non_numeric(&self, ref_num: &str, label: &str, name: &str, ctx: &str, value: &str, format: Option<&str>) -> XmlNode {
+        let fact = match format {
+            Some(f) => non_numeric_fmt(name, ctx, value, f),
+            None => non_numeric(name, ctx, value),
         };
-        self.write_context_duration_full(w, id, scheme_id, start, end, None, None, &dims);
+        fact_wrapper(ref_num, label, fact)
     }
 
-    fn write_context_duration_full(
-        &self,
-        w: &mut IxbrlWriter,
-        id: &str,
-        scheme_id: &str,
-        start: &chrono::NaiveDate,
-        end: &chrono::NaiveDate,
-        typed_dim: Option<&str>,
-        typed_val: Option<&str>,
-        explicit_dims: &[(&str, &str)],
-    ) {
-        w.open_element("xbrli:context", &[("id", id)]);
-        w.open_element("xbrli:entity", &[]);
-        w.write_element(
-            "xbrli:identifier",
-            &[("scheme", "http://www.companieshouse.gov.uk/")],
-            scheme_id,
-        );
-        if typed_dim.is_some() || !explicit_dims.is_empty() {
-            w.open_element("xbrli:segment", &[]);
-            if let Some(d) = typed_dim {
-                w.open_element("xbrldi:typedMember", &[("dimension", d)]);
-                w.write_element("ct-comp:BusinessNameDomain", &[], typed_val.unwrap_or(""));
-                w.close_element("xbrldi:typedMember");
-            }
-            for (dim, val) in explicit_dims {
-                w.write_element("xbrldi:explicitMember", &[("dimension", dim)], val);
-            }
-            w.close_element("xbrli:segment");
-        }
-        w.close_element("xbrli:entity");
-        w.open_element("xbrli:period", &[]);
-        w.write_element("xbrli:startDate", &[], &start.to_string());
-        w.write_element("xbrli:endDate", &[], &end.to_string());
-        w.close_element("xbrli:period");
-        w.close_element("xbrli:context");
+    fn page_facts(&self, title: &str, fact_items: Vec<XmlNode>) -> XmlNode {
+        page(vec![crate::ixbrl_fmt::facts(vec![h2(title)].into_iter().chain(fact_items).collect())])
     }
 
-    fn write_unit(&self, w: &mut IxbrlWriter, measure: &str) {
-        w.open_element("xbrli:unit", &[("id", "U-GBP")]);
-        w.write_element("xbrli:measure", &[], measure);
-        w.close_element("xbrli:unit");
+    fn build_corporation_tax_return_page(&self) -> XmlNode {
+        self.page_facts("Corporation Tax Return", vec![
+            self.build_fact_non_numeric("1", "Company name", "ct-comp:CompanyName", "ctxt-0", &self.company.name, None),
+            self.build_fact_non_numeric("3", "Tax reference", "ct-comp:TaxReference", "ctxt-0", &self.company.tax_reference, None),
+            self.build_fact_text("-", "Company number", &self.company.company_number),
+            self.build_fact_non_numeric("30", "Return period start", "ct-comp:StartOfPeriodCoveredByReturn", "ctxt-0", &format_date(&self.company.return_period_start()), Some("ixt2:datedaymonthyearen")),
+            self.build_fact_non_numeric("35", "Return period end", "ct-comp:EndOfPeriodCoveredByReturn", "ctxt-0", &format_date(&self.company.return_period_end()), Some("ixt2:datedaymonthyearen")),
+            self.build_fact_non_numeric("-", "Period of account start", "ct-comp:PeriodOfAccountStartDate", "ctxt-0", &format_date(&self.company.accounting_period_start), Some("ixt2:datedaymonthyearen")),
+            self.build_fact_non_numeric("-", "Period of account end", "ct-comp:PeriodOfAccountEndDate", "ctxt-0", &format_date(&self.company.accounting_period_end), Some("ixt2:datedaymonthyearen")),
+            self.build_fact_non_numeric("-", "Partner in a firm", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1", &self.partner_in_a_firm.to_string(), None),
+        ])
     }
 
-    fn ix_non_numeric(
-        &self,
-        w: &mut IxbrlWriter,
-        name: &str,
-        ctx: &str,
-        value: &str,
-        format: Option<&str>,
-    ) {
-        let mut attrs = vec![("name", name), ("contextRef", ctx)];
-        let fmt_str;
-        if let Some(f) = format {
-            fmt_str = f.to_string();
-            attrs.push(("format", &fmt_str));
-        }
-        w.open_element("ix:nonNumeric", &attrs);
-        w.write_raw(value);
-        w.close_element("ix:nonNumeric");
+    fn build_capital_allowances_page(&self) -> XmlNode {
+        self.page_facts("Capital allowances and balancing charges", vec![
+            self.build_fact_numeric("690", "Annual investment allowance", "ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", self.annual_investment_allowance),
+        ])
     }
 
-    fn write_fact(&self, w: &mut IxbrlWriter, ref_num: &str, label: &str, value: &str) {
-        w.open_element("div", &[("class", "fact")]);
-        w.write_element("div", &[("class", "ref")], ref_num);
-        let desc = format!("{}:", label);
-        w.write_element("div", &[("class", "description")], &desc);
-        w.open_element("div", &[("class", "factvalue")]);
-        w.write_raw(value);
-        w.close_element("div");
-        w.close_element("div");
-    }
-
-    fn write_fact_numeric(
-        &self,
-        w: &mut IxbrlWriter,
-        ref_num: &str,
-        label: &str,
-        name: &str,
-        ctx: &str,
-        unit: &str,
-        value: f64,
-    ) {
-        let formatted = format_f64(value);
-        w.open_element("div", &[("class", "fact")]);
-        w.write_element("div", &[("class", "ref")], ref_num);
-        let desc = format!("{}:", label);
-        w.write_element("div", &[("class", "description")], &desc);
-        w.open_element("div", &[("class", "factvalue")]);
-        w.open_element(
-            "ix:nonFraction",
-            &[
-                ("name", name),
-                ("contextRef", ctx),
-                ("unitRef", unit),
-                ("format", "ixt2:numdotdecimal"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ],
-        );
-        w.write_raw(&formatted);
-        w.close_element("ix:nonFraction");
-        w.close_element("div");
-        w.close_element("div");
-    }
-
-    fn write_fact_non_numeric(
-        &self,
-        w: &mut IxbrlWriter,
-        ref_num: &str,
-        label: &str,
-        name: &str,
-        ctx: &str,
-        value: &str,
-        format: Option<&str>,
-    ) {
-        w.open_element("div", &[("class", "fact")]);
-        w.write_element("div", &[("class", "ref")], ref_num);
-        let desc = format!("{}:", label);
-        w.write_element("div", &[("class", "description")], &desc);
-        w.open_element("div", &[("class", "factvalue")]);
-        let mut attrs = vec![("name", name), ("contextRef", ctx)];
-        let fmt_str;
-        if let Some(f) = format {
-            fmt_str = f.to_string();
-            attrs.push(("format", &fmt_str));
-        }
-        w.open_element("ix:nonNumeric", &attrs);
-        w.write_raw(value);
-        w.close_element("ix:nonNumeric");
-        w.close_element("div");
-        w.close_element("div");
-    }
-
-    fn open_page(&self, w: &mut IxbrlWriter, id: &str, facts_id: &str, title: &str) {
-        w.open_element("div", &[("class", "page"), ("id", id)]);
-        w.open_element("div", &[("class", "facts"), ("id", facts_id)]);
-        w.write_element("h2", &[], title);
-    }
-
-    fn close_page(&self, w: &mut IxbrlWriter) {
-        w.close_element("div");
-        w.close_element("div");
-    }
-
-    fn write_corporation_tax_return_page(&self, w: &mut IxbrlWriter) {
-        self.open_page(w, "elt-001", "elt-002", "Corporation Tax Return");
-
-        self.write_fact_non_numeric(
-            w,
-            "1",
-            "Company name",
-            "ct-comp:CompanyName",
-            "ctxt-0",
-            &self.company.name,
-            None,
-        );
-        self.write_fact_non_numeric(
-            w,
-            "3",
-            "Tax reference",
-            "ct-comp:TaxReference",
-            "ctxt-0",
-            &self.company.tax_reference,
-            None,
-        );
-        self.write_fact(w, "-", "Company number", &self.company.company_number);
-        self.write_fact_non_numeric(
-            w,
-            "30",
-            "Return period start",
-            "ct-comp:StartOfPeriodCoveredByReturn",
-            "ctxt-0",
-            &format_date(&self.company.return_period_start()),
-            Some("ixt2:datedaymonthyearen"),
-        );
-        self.write_fact_non_numeric(
-            w,
-            "35",
-            "Return period end",
-            "ct-comp:EndOfPeriodCoveredByReturn",
-            "ctxt-0",
-            &format_date(&self.company.return_period_end()),
-            Some("ixt2:datedaymonthyearen"),
-        );
-        self.write_fact_non_numeric(
-            w,
-            "-",
-            "Period of account start",
-            "ct-comp:PeriodOfAccountStartDate",
-            "ctxt-0",
-            &format_date(&self.company.accounting_period_start),
-            Some("ixt2:datedaymonthyearen"),
-        );
-        self.write_fact_non_numeric(
-            w,
-            "-",
-            "Period of account end",
-            "ct-comp:PeriodOfAccountEndDate",
-            "ctxt-0",
-            &format_date(&self.company.accounting_period_end),
-            Some("ixt2:datedaymonthyearen"),
-        );
-        self.write_fact_non_numeric(
-            w,
-            "-",
-            "Partner in a firm",
-            "ct-comp:CompanyIsAPartnerInAFirm",
-            "ctxt-1",
-            &self.partner_in_a_firm.to_string(),
-            None,
-        );
-
-        self.close_page(w);
-    }
-
-    fn write_capital_allowances_page(&self, w: &mut IxbrlWriter) {
-        self.open_page(
-            w,
-            "elt-010",
-            "elt-011",
-            "Capital allowances and balancing charges",
-        );
-
-        self.write_fact_numeric(
-            w,
-            "690",
-            "Annual investment allowance",
-            "ct-comp:MainPoolAnnualInvestmentAllowance",
-            "ctxt-2",
-            "U-GBP",
-            self.annual_investment_allowance,
-        );
-
-        self.close_page(w);
-    }
-
-    fn write_profits_and_gains_page(&self, w: &mut IxbrlWriter) {
-        self.open_page(w, "elt-020", "elt-021", "Profits and gains");
-
+    fn build_profits_and_gains_page(&self) -> XmlNode {
         let fields: &[(&str, &str, &str, &str, f64)] = &[
-            (
-                "155",
-                "Trading profits",
-                "ct-comp:AdjustedTradingProfitOfThisPeriod",
-                "ctxt-3",
-                self.adjusted_trading_profit,
-            ),
-            (
-                "160",
-                "Trading losses brought forward",
-                "ct-comp:TradingLossesBroughtForward",
-                "ctxt-3",
-                self.trading_losses_brought_forward,
-            ),
-            (
-                "165",
-                "Net trading profits",
-                "ct-comp:NetTradingProfits",
-                "ctxt-3",
-                self.net_trading_profits,
-            ),
-            (
-                "220",
-                "Net chargeable gains",
-                "ct-comp:NetChargeableGains",
-                "ctxt-1",
-                self.net_chargeable_gains,
-            ),
-            (
-                "235",
-                "Profits before other deductions and reliefs",
-                "ct-comp:ProfitsBeforeOtherDeductionsAndReliefs",
-                "ctxt-3",
-                self.profits_before_deductions,
-            ),
-            (
-                "300",
-                "Profits before donations and group relief",
-                "ct-comp:ProfitsBeforeChargesAndGroupRelief",
-                "ctxt-3",
-                self.profits_before_charges,
-            ),
-            (
-                "305",
-                "Qualifying donations",
-                "ct-comp:QualifyingDonations",
-                "ctxt-1",
-                self.qualifying_donations,
-            ),
-            (
-                "310",
-                "Group relief claimed",
-                "ct-comp:GroupReliefClaimed",
-                "ctxt-1",
-                self.group_relief,
-            ),
-            (
-                "320",
-                "Group relief for carried forward losses",
-                "ct-comp:GroupReliefClaimedForCarriedForwardLosses",
-                "ctxt-1",
-                self.group_relief_carried_forward,
-            ),
-            (
-                "335",
-                "Profits chargeable to Corporation Tax",
-                "ct-comp:TotalProfitsChargeableToCorporationTax",
-                "ctxt-3",
-                self.profits_chargeable_to_corporation_tax,
-            ),
+            ("155", "Trading profits", "ct-comp:AdjustedTradingProfitOfThisPeriod", "ctxt-3", self.adjusted_trading_profit),
+            ("160", "Trading losses brought forward", "ct-comp:TradingLossesBroughtForward", "ctxt-3", self.trading_losses_brought_forward),
+            ("165", "Net trading profits", "ct-comp:NetTradingProfits", "ctxt-3", self.net_trading_profits),
+            ("220", "Net chargeable gains", "ct-comp:NetChargeableGains", "ctxt-1", self.net_chargeable_gains),
+            ("235", "Profits before other deductions and reliefs", "ct-comp:ProfitsBeforeOtherDeductionsAndReliefs", "ctxt-3", self.profits_before_deductions),
+            ("300", "Profits before donations and group relief", "ct-comp:ProfitsBeforeChargesAndGroupRelief", "ctxt-3", self.profits_before_charges),
+            ("305", "Qualifying donations", "ct-comp:QualifyingDonations", "ctxt-1", self.qualifying_donations),
+            ("310", "Group relief claimed", "ct-comp:GroupReliefClaimed", "ctxt-1", self.group_relief),
+            ("320", "Group relief for carried forward losses", "ct-comp:GroupReliefClaimedForCarriedForwardLosses", "ctxt-1", self.group_relief_carried_forward),
+            ("335", "Profits chargeable to Corporation Tax", "ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3", self.profits_chargeable_to_corporation_tax),
         ];
-        for (ref_num, label, tag, ctx, val) in fields {
-            self.write_fact_numeric(w, ref_num, label, tag, ctx, "U-GBP", *val);
-        }
-
-        self.close_page(w);
+        self.page_facts("Profits and gains",
+            fields.iter().map(|(r, l, t, c, v)| self.build_fact_numeric(r, l, t, c, *v)).collect())
     }
 
-    fn write_losses_page(&self, w: &mut IxbrlWriter) {
-        self.open_page(w, "elt-030", "elt-031", "Losses");
-
-        self.write_fact_numeric(
-            w,
-            "-",
-            "Trading losses of this or later AP",
-            "ct-comp:TradingLossesOfThisOrLaterAP",
-            "ctxt-3",
-            "U-GBP",
-            self.losses_of_trades_uk,
-        );
-        self.write_fact_numeric(
-            w,
-            "-",
-            "Losses from miscellaneous transactions",
-            "ct-comp:LossesFromMiscellaneousTransactions",
-            "ctxt-1",
-            "U-GBP",
-            self.losses_from_miscellaneous,
-        );
-
-        self.close_page(w);
+    fn build_losses_page(&self) -> XmlNode {
+        self.page_facts("Losses", vec![
+            self.build_fact_numeric("-", "Trading losses of this or later AP", "ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3", self.losses_of_trades_uk),
+            self.build_fact_numeric("-", "Losses from miscellaneous transactions", "ct-comp:LossesFromMiscellaneousTransactions", "ctxt-1", self.losses_from_miscellaneous),
+        ])
     }
 
-    fn write_tax_chargeable_page(&self, w: &mut IxbrlWriter) {
-        self.open_page(w, "elt-040", "elt-041", "Tax chargeable");
-
-        self.write_fact_non_numeric(
-            w,
-            "400",
-            "Financial year 1 covered by the return",
-            "ct-comp:FinancialYear1CoveredByTheReturn",
-            "ctxt-1",
-            &self.company.fy1_year.to_string(),
-            None,
-        );
-        self.write_fact_non_numeric(
-            w,
-            "405",
-            "Financial year 2 covered by the return",
-            "ct-comp:FinancialYear2CoveredByTheReturn",
-            "ctxt-1",
-            &self.company.fy2_year.to_string(),
-            None,
-        );
-        self.write_fact_numeric(
-            w,
-            "410",
-            "FY1 profit chargeable at first rate",
-            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate",
-            "ctxt-3",
-            "U-GBP",
-            self.fy1_profit,
-        );
-        self.write_fact_numeric(
-            w,
-            "415",
-            "FY2 profit chargeable at first rate",
-            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate",
-            "ctxt-3",
-            "U-GBP",
-            self.fy2_profit,
-        );
-        self.write_fact_numeric(
-            w,
-            "420",
-            "FY1 first rate of tax",
-            "ct-comp:FY1FirstRateOfTax",
-            "ctxt-1",
-            "U-GBP",
-            self.company.fy1_rate,
-        );
-        self.write_fact_numeric(
-            w,
-            "425",
-            "FY2 first rate of tax",
-            "ct-comp:FY2FirstRateOfTax",
-            "ctxt-1",
-            "U-GBP",
-            self.company.fy2_rate,
-        );
-        self.write_fact_numeric(
-            w,
-            "430",
-            "FY1 tax at first rate",
-            "ct-comp:FY1TaxAtFirstRate",
-            "ctxt-3",
-            "U-GBP",
-            self.fy1_tax,
-        );
-        self.write_fact_numeric(
-            w,
-            "435",
-            "FY2 tax at first rate",
-            "ct-comp:FY2TaxAtFirstRate",
-            "ctxt-3",
-            "U-GBP",
-            self.fy2_tax,
-        );
-        self.write_fact_numeric(
-            w,
-            "440",
-            "Corporation tax chargeable",
-            "ct-comp:CorporationTaxChargeable",
-            "ctxt-3",
-            "U-GBP",
-            self.corporation_tax_chargeable,
-        );
-        self.write_fact_numeric(
-            w,
-            "445",
-            "Marginal rate relief",
-            "ct-comp:MarginalRateReliefForRingFenceTradesPayable",
-            "ctxt-1",
-            "U-GBP",
-            self.marginal_relief,
-        );
-        self.write_fact_numeric(
-            w,
-            "450",
-            "Corporation tax chargeable payable",
-            "ct-comp:CorporationTaxChargeablePayable",
-            "ctxt-3",
-            "U-GBP",
-            self.corporation_tax_chargeable_payable,
-        );
-        self.write_fact_numeric(
-            w,
-            "455",
-            "Total reliefs and deductions",
-            "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable",
-            "ctxt-1",
-            "U-GBP",
-            self.total_reliefs_deductions_tax,
-        );
-        self.write_fact_numeric(
-            w,
-            "460",
-            "Net corporation tax payable",
-            "ct-comp:NetCorporationTaxPayable",
-            "ctxt-3",
-            "U-GBP",
-            self.net_corporation_tax_payable,
-        );
-        self.write_fact_numeric(
-            w,
-            "465",
-            "Tax chargeable",
-            "ct-comp:TaxChargeable",
-            "ctxt-3",
-            "U-GBP",
-            self.tax_chargeable,
-        );
-        self.write_fact_numeric(
-            w,
-            "470",
-            "Tax payable",
-            "ct-comp:TaxPayable",
-            "ctxt-3",
-            "U-GBP",
-            self.tax_payable,
-        );
-
-        self.close_page(w);
+    fn build_tax_chargeable_page(&self) -> XmlNode {
+        self.page_facts("Tax chargeable", vec![
+            self.build_fact_non_numeric("400", "Financial year 1 covered by the return", "ct-comp:FinancialYear1CoveredByTheReturn", "ctxt-1", &self.company.fy1_year.to_string(), None),
+            self.build_fact_non_numeric("405", "Financial year 2 covered by the return", "ct-comp:FinancialYear2CoveredByTheReturn", "ctxt-1", &self.company.fy2_year.to_string(), None),
+            self.build_fact_numeric("410", "FY1 profit chargeable at first rate", "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", self.fy1_profit),
+            self.build_fact_numeric("415", "FY2 profit chargeable at first rate", "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", self.fy2_profit),
+            self.build_fact_numeric("420", "FY1 first rate of tax", "ct-comp:FY1FirstRateOfTax", "ctxt-1", self.company.fy1_rate),
+            self.build_fact_numeric("425", "FY2 first rate of tax", "ct-comp:FY2FirstRateOfTax", "ctxt-1", self.company.fy2_rate),
+            self.build_fact_numeric("430", "FY1 tax at first rate", "ct-comp:FY1TaxAtFirstRate", "ctxt-3", self.fy1_tax),
+            self.build_fact_numeric("435", "FY2 tax at first rate", "ct-comp:FY2TaxAtFirstRate", "ctxt-3", self.fy2_tax),
+            self.build_fact_numeric("440", "Corporation tax chargeable", "ct-comp:CorporationTaxChargeable", "ctxt-3", self.corporation_tax_chargeable),
+            self.build_fact_numeric("445", "Marginal rate relief", "ct-comp:MarginalRateReliefForRingFenceTradesPayable", "ctxt-1", self.marginal_relief),
+            self.build_fact_numeric("450", "Corporation tax chargeable payable", "ct-comp:CorporationTaxChargeablePayable", "ctxt-3", self.corporation_tax_chargeable_payable),
+            self.build_fact_numeric("455", "Total reliefs and deductions", "ct-comp:TotalReliefsAndDeductionsInTermsOfTaxPayable", "ctxt-1", self.total_reliefs_deductions_tax),
+            self.build_fact_numeric("460", "Net corporation tax payable", "ct-comp:NetCorporationTaxPayable", "ctxt-3", self.net_corporation_tax_payable),
+            self.build_fact_numeric("465", "Tax chargeable", "ct-comp:TaxChargeable", "ctxt-3", self.tax_chargeable),
+            self.build_fact_numeric("470", "Tax payable", "ct-comp:TaxPayable", "ctxt-3", self.tax_payable),
+        ])
     }
 
-    fn write_rnd_page(&self, w: &mut IxbrlWriter) {
-        self.open_page(
-            w,
-            "elt-050",
-            "elt-051",
-            "R&D / Creative enhanced expenditure",
-        );
-
-        self.write_fact_non_numeric(
-            w,
-            "560",
-            "SME company",
-            "ct-comp:CompanyIsAPartnerInAFirm",
-            "ctxt-1",
-            &self.is_sme.to_string(),
-            None,
-        );
-        self.write_fact_non_numeric(
-            w,
-            "565",
-            "Large company",
-            "ct-comp:CompanyIsAPartnerInAFirm",
-            "ctxt-1",
-            &self.is_large_company.to_string(),
-            None,
-        );
-        self.write_fact_numeric(
-            w,
-            "575",
-            "Qualifying expenditure",
-            "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD",
-            "ctxt-4",
-            "U-GBP",
-            self.rnd_qualifying_expenditure,
-        );
-        self.write_fact_numeric(
-            w,
-            "580",
-            "Enhanced expenditure",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-            "ctxt-4",
-            "U-GBP",
-            self.rnd_enhanced_expenditure,
-        );
-        self.write_fact_numeric(
-            w,
-            "585",
-            "Creative enhanced expenditure",
-            "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment",
-            "ctxt-5",
-            "U-GBP",
-            self.creative_enhanced_expenditure,
-        );
-        self.write_fact_numeric(
-            w,
-            "590",
-            "R&D and creative total",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-            "ctxt-4",
-            "U-GBP",
-            self.rnd_creative_enhanced_total,
-        );
-        self.write_fact_numeric(
-            w,
-            "-",
-            "Subcontracted large",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-            "ctxt-8",
-            "U-GBP",
-            self.rnd_subcontracted_large,
-        );
-
-        self.close_page(w);
+    fn build_rnd_page(&self) -> XmlNode {
+        self.page_facts("R&D / Creative enhanced expenditure", vec![
+            self.build_fact_non_numeric("560", "SME company", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1", &self.is_sme.to_string(), None),
+            self.build_fact_non_numeric("565", "Large company", "ct-comp:CompanyIsAPartnerInAFirm", "ctxt-1", &self.is_large_company.to_string(), None),
+            self.build_fact_numeric("575", "Qualifying expenditure", "ct-comp:SubsidisedQualifyingExpenditureOnIn-HouseDirectRD", "ctxt-4", self.rnd_qualifying_expenditure),
+            self.build_fact_numeric("580", "Enhanced expenditure", "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", self.rnd_enhanced_expenditure),
+            self.build_fact_numeric("585", "Creative enhanced expenditure", "ct-comp:AdjustmentsCreativeProductionCompanyAdjustment", "ctxt-5", self.creative_enhanced_expenditure),
+            self.build_fact_numeric("590", "R&D and creative total", "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", self.rnd_creative_enhanced_total),
+            self.build_fact_numeric("-", "Subcontracted large", "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", self.rnd_subcontracted_large),
+        ])
     }
 
-    fn write_rnd_worksheet_page(&self, w: &mut IxbrlWriter) {
+    fn build_rnd_worksheet_page(&self) -> XmlNode {
         let fy1 = self.company.fy1_year;
         let fy2 = self.company.fy2_year;
 
-        w.open_element("div", &[("class", "page")]);
-        w.open_element("div", &[("class", "worksheet")]);
-        w.write_element("h2", &[], "SME R&D");
-
-        w.open_element("table", &[("class", "sheet table")]);
-
-        // Header row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.write_element("td", &[("class", "column header cell")], &fy2.to_string());
-        w.write_element("td", &[("class", "column header cell")], &fy1.to_string());
-        w.close_element("tr");
-
-        // Currency row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.open_element("td", &[("class", "column currency cell")]);
-        w.write_raw("&#163;");
-        w.close_element("td");
-        w.open_element("td", &[("class", "column currency cell")]);
-        w.write_raw("&#163;");
-        w.close_element("td");
-        w.close_element("tr");
+        let mut rows = vec![
+            worksheet_header_row(fy2, fy1),
+            worksheet_currency_row(),
+        ];
 
         for project in &self.rd_projects {
-            // Blank row
-            w.open_element("tr", &[("class", "row")]);
-            w.open_element("td", &[("class", "label cell")]);
-            w.write_raw("&#160;");
-            w.close_element("td");
-            w.close_element("tr");
+            rows.push(spacer_row());
 
             // Project heading
-            w.open_element("tr", &[("class", "row")]);
-            w.open_element("td", &[("class", "label breakdown heading cell")]);
-            w.write_element("span", &[], &project.name);
-            w.close_element("td");
-            w.close_element("tr");
+            rows.push(
+                tr(Some("row"), vec![
+                    td("label breakdown heading cell", vec![span_text(&project.name)]),
+                ])
+            );
 
             // Item rows
             for item in &project.items {
                 let v2 = item.values_by_fy.get(&fy2).copied().unwrap_or(0.0);
                 let v1 = item.values_by_fy.get(&fy1).copied().unwrap_or(0.0);
-                w.open_element("tr", &[("class", "row")]);
-                w.open_element("td", &[("class", "label breakdown item cell")]);
-                w.write_element("span", &[], &item.label);
-                w.close_element("td");
-                self.write_data_cell(w, -v2);
-                self.write_data_cell(w, -v1);
-                w.close_element("tr");
+                rows.push(
+                    tr(Some("row"), vec![
+                        td("label breakdown item cell", vec![span_text(&item.label)]),
+                        data_cell(-v2),
+                        data_cell(-v1),
+                    ])
+                );
             }
 
             // Subtotal
-            let total2: f64 = project
-                .items
-                .iter()
-                .map(|i| i.values_by_fy.get(&fy2).copied().unwrap_or(0.0))
-                .sum();
-            let total1: f64 = project
-                .items
-                .iter()
-                .map(|i| i.values_by_fy.get(&fy1).copied().unwrap_or(0.0))
-                .sum();
-            w.open_element("tr", &[("class", "row")]);
-            w.write_element("td", &[("class", "label breakdown total cell")], "Total");
-            self.write_data_cell_total(w, -total2);
-            self.write_data_cell_total(w, -total1);
-            w.close_element("tr");
-
-            // Blank row
-            w.open_element("tr", &[("class", "row")]);
-            w.open_element("td", &[("class", "label cell")]);
-            w.write_raw("&#160;");
-            w.close_element("td");
-            w.close_element("tr");
+            let total2: f64 = project.items.iter().map(|i| i.values_by_fy.get(&fy2).copied().unwrap_or(0.0)).sum();
+            let total1: f64 = project.items.iter().map(|i| i.values_by_fy.get(&fy1).copied().unwrap_or(0.0)).sum();
+            rows.push(table_row_total("Total", -total2, -total1));
+            rows.push(spacer_row());
 
             // Enhanced heading
-            w.open_element("tr", &[("class", "row")]);
-            w.open_element("td", &[("class", "label breakdown heading cell")]);
-            w.write_element("span", &[], "SME R&D tax relief (130%)");
-            w.close_element("td");
-            w.close_element("tr");
+            rows.push(
+                tr(Some("row"), vec![
+                    td("label breakdown heading cell", vec![span_text("SME R&D tax relief (130%)")]),
+                ])
+            );
 
             // Enhanced project row
             let enh2 = project.enhanced_by_fy.get(&fy2).copied().unwrap_or(0.0);
             let enh1 = project.enhanced_by_fy.get(&fy1).copied().unwrap_or(0.0);
-            w.open_element("tr", &[("class", "row")]);
-            w.open_element("td", &[("class", "label breakdown item cell")]);
-            w.write_element("span", &[], &project.name);
-            w.close_element("td");
-            self.write_data_cell(w, -enh2);
-            self.write_data_cell(w, -enh1);
-            w.close_element("tr");
+            rows.push(
+                tr(Some("row"), vec![
+                    td("label breakdown item cell", vec![span_text(&project.name)]),
+                    data_cell(-enh2),
+                    data_cell(-enh1),
+                ])
+            );
 
             // Enhanced total with ix:nonFraction
-            w.open_element("tr", &[("class", "row")]);
-            w.write_element("td", &[("class", "label breakdown total cell")], "Total");
-            self.write_data_cell_total_ix(
-                w,
-                "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-                "ctxt-4",
-                -enh2,
+            rows.push(
+                tr(Some("row"), vec![
+                    td_text("label breakdown total cell", "Total"),
+                    data_cell_total_ix("ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", -enh2),
+                    data_cell_total_ix("ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-8", -enh1),
+                ])
             );
-            self.write_data_cell_total_ix(
-                w,
-                "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-                "ctxt-8",
-                -enh1,
-            );
-            w.close_element("tr");
         }
 
-        w.close_element("table");
-        w.close_element("div");
-        w.close_element("div");
+        page(vec![
+            worksheet(vec![
+                h2("SME R&D"),
+                table("sheet table", rows),
+            ])
+        ])
     }
 
-    fn write_profit_and_loss_worksheet(&self, w: &mut IxbrlWriter) {
+    fn build_profit_and_loss_worksheet(&self) -> XmlNode {
         let fy1 = self.company.fy1_year;
         let fy2 = self.company.fy2_year;
 
@@ -1849,7 +1225,7 @@ impl CorporationTaxReturn {
                 .unwrap_or(0.0)
         };
 
-        let expense_expense_defs: &[(&str, &str, &str)] = &[
+        let expense_defs: &[(&str, &str, &str)] = &[
             ("Accountancy services", "dpl:AuditAccountancyCosts", "accountancy"),
             ("Bank charges", "dpl:BankCharges", "bank-charges"),
             ("Office costs", "dpl:PrintingPostageStationeryCosts", "office"),
@@ -1860,957 +1236,187 @@ impl CorporationTaxReturn {
             ("Travel", "dpl:TravelSubsistenceCosts", "travel"),
         ];
 
-        w.open_element("div", &[("class", "page")]);
-        w.open_element("div", &[("class", "worksheet")]);
-        w.write_element("h2", &[], "Detailed Profit-and-Loss");
+        let mut rows = vec![
+            worksheet_header_row_pl(fy2, fy1),
+            worksheet_currency_row(),
+        ];
+        rows.push(spacer_row());
 
-        w.open_element("table", &[("class", "sheet table")]);
-
-        // Header row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.write_element(
-            "td",
-            &[("class", "column header cell"), ("colspan", "1")],
-            &fy2.to_string(),
-        );
-        w.write_element(
-            "td",
-            &[("class", "column header cell"), ("colspan", "1")],
-            &fy1.to_string(),
-        );
-        w.close_element("tr");
-
-        // Currency row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.open_element("td", &[("class", "column currency cell"), ("colspan", "1")]);
-        w.write_raw("&#163;");
-        w.close_element("td");
-        w.open_element("td", &[("class", "column currency cell"), ("colspan", "1")]);
-        w.write_raw("&#163;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // ==========================================
         // Turnover / revenue
-        // ==========================================
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown heading cell")]);
-        w.write_element("span", &[], "Turnover / revenue");
-        w.close_element("td");
-        w.close_element("tr");
+        rows.push(
+            tr(Some("row"), vec![
+                td("label breakdown heading cell", vec![span_text("Turnover / revenue")]),
+            ])
+        );
 
         // Income from main trade
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown item cell")]);
-        w.open_element(
-            "ix:nonNumeric",
-            &[
-                ("name", "dpl:DescriptionActivity"),
-                ("contextRef", "ctxt-9"),
-            ],
+        rows.push(
+            tr(Some("row"), vec![
+                td("label breakdown item cell", vec![non_numeric("dpl:DescriptionActivity", "ctxt-9", "Income from main trade")]),
+                data_cell_ix(turnover2, "uk-core:TurnoverRevenue", "ctxt-9"),
+                data_cell_ix(turnover1, "uk-core:TurnoverRevenue", "ctxt-10"),
+            ])
         );
-        w.write_raw("Income from main trade");
-        w.close_element("ix:nonNumeric");
-        w.close_element("td");
-        self.write_data_cell_with_ix(w, turnover2, "uk-core:TurnoverRevenue", "ctxt-9");
-        self.write_data_cell_with_ix(w, turnover1, "uk-core:TurnoverRevenue", "ctxt-10");
-        w.close_element("tr");
 
         // Total (turnover)
-        self.write_table_total_row_with_ix(
-            w,
-            "Total",
-            "uk-core:TurnoverRevenue",
-            "ctxt-11",
-            "ctxt-12",
-            turnover2,
-            turnover1,
-        );
+        rows.push(table_total_row_ix("Total", "uk-core:TurnoverRevenue", "ctxt-11", "ctxt-12", turnover2, turnover1));
+        rows.push(spacer_row());
 
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // ==========================================
         // Gross profit
-        // ==========================================
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label heading total cell")]);
-        w.write_element("span", &[], "Gross profit");
-        w.close_element("td");
-        self.write_total_cell_with_ix(w, gross_profit2, "uk-core:GrossProfitLoss", "ctxt-11");
-        self.write_total_cell_with_ix(w, gross_profit1, "uk-core:GrossProfitLoss", "ctxt-12");
-        w.close_element("tr");
+        rows.push(
+            tr(Some("row"), vec![
+                td("label heading total cell", vec![span_text("Gross profit")]),
+                data_cell_total_n_ix("uk-core:GrossProfitLoss", "ctxt-11", gross_profit2),
+                data_cell_total_n_ix("uk-core:GrossProfitLoss", "ctxt-12", gross_profit1),
+            ])
+        );
+        rows.push(spacer_row());
 
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // ==========================================
         // Total costs
-        // ==========================================
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown heading cell")]);
-        w.write_element("span", &[], "Total costs");
-        w.close_element("td");
-        w.close_element("tr");
+        rows.push(
+            tr(Some("row"), vec![
+                td("label breakdown heading cell", vec![span_text("Total costs")]),
+            ])
+        );
 
-        // Salaries
-        self.write_table_row_with_ix_neg(
-            w,
-            "Salaries",
-            "uk-core:WagesSalaries",
-            "ctxt-13",
-            "ctxt-14",
-            wages2,
-            wages1,
-        );
-        // Pension contributions
-        self.write_table_row_with_ix_neg(
-            w,
-            "Pension contributions",
-            "uk-core:PensionCostsDefinedContributionPlan",
-            "ctxt-13",
-            "ctxt-14",
-            pensions2,
-            pensions1,
-        );
+        // Salaries + Pensions
+        rows.push(table_row_ix_neg("Salaries", "uk-core:WagesSalaries", "ctxt-13", "ctxt-14", wages2, wages1));
+        rows.push(table_row_ix_neg("Pension contributions", "uk-core:PensionCostsDefinedContributionPlan", "ctxt-13", "ctxt-14", pensions2, pensions1));
 
         // Other expenses from expenses_by_fy
-        for (label, ix_name, expense_key) in expense_expense_defs {
+        for (label, ix_name, expense_key) in expense_defs {
             let v2 = get_exp(expense_key, fy2);
             let v1 = get_exp(expense_key, fy1);
-            self.write_table_row_with_ix_neg(w, label, ix_name, "ctxt-13", "ctxt-14", v2, v1);
+            rows.push(table_row_ix_neg(label, ix_name, "ctxt-13", "ctxt-14", v2, v1));
         }
 
-        // Total costs
-        self.write_table_total_row_with_ix_neg(
-            w,
-            "Total",
-            "dpl:TotalCosts",
-            "ctxt-11",
-            "ctxt-12",
-            costs2,
-            costs1,
-        );
+        // Total costs total
+        rows.push(table_total_row_ix_neg("Total", "dpl:TotalCosts", "ctxt-11", "ctxt-12", costs2, costs1));
+        rows.push(spacer_row());
 
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // ==========================================
         // Net profit before tax
-        // ==========================================
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown heading cell")]);
-        w.write_element("span", &[], "Net profit before tax");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // Gross profit (item)
-        self.write_table_row_with_ix(
-            w,
-            "Gross profit",
-            "uk-core:GrossProfitLoss",
-            "ctxt-11",
-            "ctxt-12",
-            gross_profit2,
-            gross_profit1,
+        rows.push(
+            tr(Some("row"), vec![
+                td("label breakdown heading cell", vec![span_text("Net profit before tax")]),
+            ])
         );
 
-        // Total costs (item, negative)
-        self.write_table_row_with_ix_neg(
-            w,
-            "Total costs",
-            "dpl:TotalCosts",
-            "ctxt-11",
-            "ctxt-12",
-            costs2,
-            costs1,
+        rows.push(table_row_ix("Gross profit", "uk-core:GrossProfitLoss", "ctxt-11", "ctxt-12", gross_profit2, gross_profit1));
+        rows.push(table_row_ix_neg("Total costs", "dpl:TotalCosts", "ctxt-11", "ctxt-12", costs2, costs1));
+        rows.push(table_total_row_ix("Total", "uk-core:ProfitLossBeforeTax", "ctxt-11", "ctxt-12", pbt2, pbt1));
+        rows.push(spacer_row());
+
+        // Corporation tax
+        rows.push(
+            tr(Some("row"), vec![
+                td("label heading total cell", vec![span_text("Corporation tax")]),
+                data_cell_total_neg_ix("uk-core:IncomeTaxExpenseCredit", "ctxt-11", tax2),
+                data_cell_total_neg_ix("uk-core:IncomeTaxExpenseCredit", "ctxt-12", tax1),
+            ])
         );
+        rows.push(spacer_row());
 
-        // Total (profit before tax)
-        self.write_table_total_row_with_ix(
-            w,
-            "Total",
-            "uk-core:ProfitLossBeforeTax",
-            "ctxt-11",
-            "ctxt-12",
-            pbt2,
-            pbt1,
-        );
-
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // ==========================================
-        // Corporation tax (negative)
-        // ==========================================
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label heading total cell")]);
-        w.write_element("span", &[], "Corporation tax");
-        w.close_element("td");
-        self.write_total_cell_neg_with_ix(w, tax2, "uk-core:IncomeTaxExpenseCredit", "ctxt-11");
-        self.write_total_cell_neg_with_ix(w, tax1, "uk-core:IncomeTaxExpenseCredit", "ctxt-12");
-        w.close_element("tr");
-
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // ==========================================
         // Profit (Loss) after tax
-        // ==========================================
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label heading total cell")]);
-        w.write_element("span", &[], "Profit (Loss) after tax");
-        w.close_element("td");
-        self.write_total_cell_with_ix(w, pat2, "uk-core:ProfitLoss", "ctxt-11");
-        self.write_total_cell_with_ix(w, pat1, "uk-core:ProfitLoss", "ctxt-12");
-        w.close_element("tr");
+        rows.push(
+            tr(Some("row"), vec![
+                td("label heading total cell", vec![span_text("Profit (Loss) after tax")]),
+                data_cell_total_n_ix("uk-core:ProfitLoss", "ctxt-11", pat2),
+                data_cell_total_n_ix("uk-core:ProfitLoss", "ctxt-12", pat1),
+            ])
+        );
 
-        w.close_element("table");
-        w.close_element("div");
-        w.close_element("div");
+        page(vec![
+            worksheet(vec![
+                h2("Detailed Profit-and-Loss"),
+                table("sheet table", rows),
+            ])
+        ])
     }
 
-    fn write_data_cell_with_ix(&self, w: &mut IxbrlWriter, value: f64, name: &str, ctx: &str) {
-        if value == 0.0 {
-            w.open_element("td", &[("class", "data value nil cell")]);
-            w.open_element("span", &[]);
-            w.open_element("span", &[]);
-            w.write_raw("</span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw("0.00");
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-            w.close_element("span");
-            w.close_element("td");
-        } else {
-            w.open_element("td", &[("class", "data value cell")]);
-            w.open_element("span", &[]);
-            w.open_element("span", &[]);
-            w.write_raw("</span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw(&format_f64(value));
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-            w.close_element("span");
-            w.close_element("td");
-        }
-    }
 
-    fn write_total_cell_with_ix(&self, w: &mut IxbrlWriter, value: f64, name: &str, ctx: &str) {
-        if value == 0.0 {
-            w.open_element("td", &[("class", "data value total nil cell")]);
-            w.open_element("span", &[]);
-            w.open_element("span", &[]);
-            w.write_raw("</span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw("0.00");
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-            w.close_element("span");
-            w.close_element("td");
-        } else {
-            w.open_element("td", &[("class", "data value total cell")]);
-            w.open_element("span", &[]);
-            w.open_element("span", &[]);
-            w.write_raw("</span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw(&format_f64(value));
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-            w.close_element("span");
-            w.close_element("td");
-        }
-    }
 
-    fn write_total_cell_neg_with_ix(&self, w: &mut IxbrlWriter, value: f64, name: &str, ctx: &str) {
-        if value == 0.0 {
-            w.open_element("td", &[("class", "data value total nil cell")]);
-            w.open_element("span", &[]);
-            w.open_element("span", &[]);
-            w.write_raw("</span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw("0.00");
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-            w.close_element("span");
-            w.close_element("td");
-        } else {
-            w.open_element("td", &[("class", "data value total negative cell")]);
-            w.open_element("span", &[]);
-            w.write_raw("<span>( </span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw(&format_f64(value));
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span> )</span>");
-            w.close_element("span");
-            w.close_element("td");
-        }
-    }
-
-    fn write_tax_calculation_worksheet(&self, w: &mut IxbrlWriter) {
+    fn build_tax_calculation_worksheet(&self) -> XmlNode {
         let fy1 = self.company.fy1_year;
         let fy2 = self.company.fy2_year;
 
-        w.open_element("div", &[("class", "page")]);
-        w.open_element("div", &[("class", "worksheet")]);
-        w.write_element("h2", &[], "Tax calculation");
-
-        w.open_element("table", &[("class", "sheet table")]);
-
-        // Header row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.write_element("td", &[("class", "column header cell")], &fy2.to_string());
-        w.write_element("td", &[("class", "column header cell")], &fy1.to_string());
-        w.close_element("tr");
-
-        // Currency row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.open_element("td", &[("class", "column currency cell")]);
-        w.write_raw("&#163;");
-        w.close_element("td");
-        w.open_element("td", &[("class", "column currency cell")]);
-        w.write_raw("&#163;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // "Taxable profits" heading
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown heading cell")]);
-        w.write_element("span", &[], "Taxable profits");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // Profit per accounts
         let ppa2 = *self.profit_per_accounts_by_fy.get(&fy2).unwrap_or(&0.0);
         let ppa1 = *self.profit_per_accounts_by_fy.get(&fy1).unwrap_or(&0.0);
-        self.write_table_row_with_ix(
-            w,
-            "Profit (loss) per accounts",
-            "ct-comp:ProfitLossPerAccounts",
-            "ctxt-4",
-            "ctxt-8",
-            ppa2,
-            ppa1,
-        );
-
-        // AIA (negative)
         let aia2 = *self.aia_by_fy.get(&fy2).unwrap_or(&0.0);
         let aia1 = *self.aia_by_fy.get(&fy1).unwrap_or(&0.0);
-        self.write_table_row_with_ix_neg(
-            w,
-            "Annual investment allowance",
-            "ct-comp:MainPoolAnnualInvestmentAllowance",
-            "ctxt-2",
-            "ctxt-15",
-            aia2,
-            aia1,
-        );
-
-        // SME R&D tax relief (negative)
         let rnd2 = *self.rnd_by_fy.get(&fy2).unwrap_or(&0.0);
         let rnd1 = *self.rnd_by_fy.get(&fy1).unwrap_or(&0.0);
-        self.write_table_row_with_ix_neg(
-            w,
-            "SME R&D tax relief (130%)",
-            "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-            "ctxt-4",
-            "ctxt-8",
-            rnd2,
-            rnd1,
-        );
-
-        // Taxable profits total (plain value, no ix tag)
         let total2 = ppa2 - aia2 - rnd2;
         let total1 = ppa1 - aia1 - rnd1;
-        self.write_table_row_total(w, "Total", total2, total1);
 
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
+        let mut rows = vec![
+            worksheet_header_row(fy2, fy1),
+            worksheet_currency_row(),
+            spacer_row(),
+        ];
+
+        // Taxable profits
+        rows.push(
+            tr(Some("row"), vec![
+                td("label breakdown heading cell", vec![span_text("Taxable profits")]),
+            ])
+        );
+        rows.push(table_row_ix("Profit (loss) per accounts", "ct-comp:ProfitLossPerAccounts", "ctxt-4", "ctxt-8", ppa2, ppa1));
+        rows.push(table_row_ix_neg("Annual investment allowance", "ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", "ctxt-15", aia2, aia1));
+        rows.push(table_row_ix_neg("SME R&D tax relief (130%)", "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME", "ctxt-4", "ctxt-8", rnd2, rnd1));
+        rows.push(table_row_total("Total", total2, total1));
+        rows.push(spacer_row());
 
         // Trading losses brought forward
-        self.write_table_row_with_ix(
-            w,
-            "Trading losses brought forward",
-            "ct-comp:TradingLossesBroughtForward",
-            "ctxt-3",
-            "ctxt-16",
-            self.trading_losses_brought_forward,
-            self.trading_losses_brought_forward,
-        );
-
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
+        rows.push(table_row_ix("Trading losses brought forward", "ct-comp:TradingLossesBroughtForward", "ctxt-3", "ctxt-16", self.trading_losses_brought_forward, self.trading_losses_brought_forward));
+        rows.push(spacer_row());
 
         // Profits chargeable
-        self.write_table_row_with_ix(
-            w,
-            "Profits chargeable to corporation tax",
-            "ct-comp:NetTradingProfits",
-            "ctxt-3",
-            "ctxt-16",
-            self.net_trading_profits,
-            self.prev_profit_chargeable,
-        );
-
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
+        rows.push(table_row_ix("Profits chargeable to corporation tax", "ct-comp:NetTradingProfits", "ctxt-3", "ctxt-16", self.net_trading_profits, self.prev_profit_chargeable));
+        rows.push(spacer_row());
 
         // Trading losses
-        self.write_table_row_with_ix(
-            w,
-            "Trading losses",
-            "ct-comp:TradingLossesOfThisOrLaterAP",
-            "ctxt-3",
-            "ctxt-16",
-            self.losses_of_trades_uk,
-            self.losses_of_trades_uk,
+        rows.push(table_row_ix("Trading losses", "ct-comp:TradingLossesOfThisOrLaterAP", "ctxt-3", "ctxt-16", self.losses_of_trades_uk, self.losses_of_trades_uk));
+        rows.push(spacer_row());
+
+        // Profits, by financial year
+        rows.push(
+            tr(Some("row"), vec![
+                td("label breakdown heading cell", vec![span_text("Profits, by financial year")]),
+            ])
         );
+        rows.push(table_row_ix("FY1", "ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", "ctxt-16", self.fy1_profit, self.prev_fy1_profit));
+        rows.push(table_row_ix("FY2", "ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", "ctxt-16", self.fy2_profit, self.prev_fy2_profit));
+        rows.push(table_row_ix("Total", "ct-comp:TotalProfitsChargeableToCorporationTax", "ctxt-3", "ctxt-16", self.profits_chargeable_to_corporation_tax, self.prev_profit_chargeable));
+        rows.push(spacer_row());
 
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // "Profits, by financial year" heading
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown heading cell")]);
-        w.write_element("span", &[], "Profits, by financial year");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // FY1 profit
-        self.write_table_row_with_ix(
-            w,
-            "FY1",
-            "ct-comp:FY1AmountOfProfitChargeableAtFirstRate",
-            "ctxt-3",
-            "ctxt-16",
-            self.fy1_profit,
-            self.prev_fy1_profit,
+        // Corporation tax chargeable
+        rows.push(
+            tr(Some("row"), vec![
+                td("label breakdown heading cell", vec![span_text("Corporation tax chargeable")]),
+            ])
         );
+        rows.push(table_row_ix_neg("FY1 (19%)", "ct-comp:FY1TaxAtFirstRate", "ctxt-3", "ctxt-16", self.fy1_tax, self.prev_fy1_tax));
+        rows.push(table_row_ix_neg("FY2 (19%)", "ct-comp:FY2TaxAtFirstRate", "ctxt-3", "ctxt-16", self.fy2_tax, self.prev_fy2_tax));
+        rows.push(table_row_ix_neg("Total", "ct-comp:CorporationTaxChargeable", "ctxt-3", "ctxt-16", self.corporation_tax_chargeable, self.prev_corporation_tax_chargeable));
 
-        // FY2 profit
-        self.write_table_row_with_ix(
-            w,
-            "FY2",
-            "ct-comp:FY2AmountOfProfitChargeableAtFirstRate",
-            "ctxt-3",
-            "ctxt-16",
-            self.fy2_profit,
-            self.prev_fy2_profit,
-        );
-
-        // Profits total
-        self.write_table_row_with_ix(
-            w,
-            "Total",
-            "ct-comp:TotalProfitsChargeableToCorporationTax",
-            "ctxt-3",
-            "ctxt-16",
-            self.profits_chargeable_to_corporation_tax,
-            self.prev_profit_chargeable,
-        );
-
-        // Blank row
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label cell")]);
-        w.write_raw("&#160;");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // "Corporation tax chargeable" heading
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown heading cell")]);
-        w.write_element("span", &[], "Corporation tax chargeable");
-        w.close_element("td");
-        w.close_element("tr");
-
-        // FY1 tax (negative)
-        self.write_table_row_with_ix_neg(
-            w,
-            "FY1 (19%)",
-            "ct-comp:FY1TaxAtFirstRate",
-            "ctxt-3",
-            "ctxt-16",
-            self.fy1_tax,
-            self.prev_fy1_tax,
-        );
-
-        // FY2 tax (negative)
-        self.write_table_row_with_ix_neg(
-            w,
-            "FY2 (19%)",
-            "ct-comp:FY2TaxAtFirstRate",
-            "ctxt-3",
-            "ctxt-16",
-            self.fy2_tax,
-            self.prev_fy2_tax,
-        );
-
-        // CT chargeable total (negative)
-        self.write_table_row_with_ix_neg(
-            w,
-            "Total",
-            "ct-comp:CorporationTaxChargeable",
-            "ctxt-3",
-            "ctxt-16",
-            self.corporation_tax_chargeable,
-            self.prev_corporation_tax_chargeable,
-        );
-
-        w.close_element("table");
-        w.close_element("div");
-        w.close_element("div");
+        page(vec![
+            worksheet(vec![
+                h2("Tax calculation"),
+                table("sheet table", rows),
+            ])
+        ])
     }
 
-    fn write_table_row_with_ix(
-        &self,
-        w: &mut IxbrlWriter,
-        label: &str,
-        name: &str,
-        ctx_cur: &str,
-        ctx_prev: &str,
-        val_cur: f64,
-        val_prev: f64,
-    ) {
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown item cell")]);
-        w.write_element("span", &[], label);
-        w.close_element("td");
-        // Current year
-        w.open_element("td", &[("class", "data value cell")]);
-        w.open_element("span", &[]);
-        w.open_element("span", &[]);
-        w.write_raw("</span>");
-        w.open_element(
-            "ix:nonFraction",
-            &[
-                ("name", name),
-                ("contextRef", ctx_cur),
-                ("format", "ixt2:numdotdecimal"),
-                ("unitRef", "U-GBP"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ],
-        );            w.write_raw(&format_f64(val_cur));
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-            w.close_element("span");
-            w.close_element("td");
-            // Previous year
-            w.open_element("td", &[("class", "data value cell")]);
-            w.open_element("span", &[]);
-            w.open_element("span", &[]);
-            w.write_raw("</span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx_prev),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw(&format_f64(val_prev));
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-        w.close_element("span");
-        w.close_element("td");
-        w.close_element("tr");
-    }
 
-    fn write_table_total_row_with_ix(
-        &self,
-        w: &mut IxbrlWriter,
-        label: &str,
-        name: &str,
-        ctx_cur: &str,
-        ctx_prev: &str,
-        val_cur: f64,
-        val_prev: f64,
-    ) {
-        w.open_element("tr", &[("class", "row")]);
-        w.write_element("td", &[("class", "label breakdown total cell")], label);
-        self.write_data_cell_total_ix(w, name, ctx_cur, val_cur);
-        self.write_data_cell_total_ix(w, name, ctx_prev, val_prev);
-        w.close_element("tr");
-    }
-
-    fn write_table_total_row_with_ix_neg(
-        &self,
-        w: &mut IxbrlWriter,
-        label: &str,
-        name: &str,
-        ctx_cur: &str,
-        ctx_prev: &str,
-        val_cur: f64,
-        val_prev: f64,
-    ) {
-        w.open_element("tr", &[("class", "row")]);
-        w.write_element("td", &[("class", "label breakdown total cell")], label);
-        // Negate values so write_data_cell_total_ix renders them with parens
-        self.write_data_cell_total_ix(w, name, ctx_cur, -val_cur);
-        self.write_data_cell_total_ix(w, name, ctx_prev, -val_prev);
-        w.close_element("tr");
-    }
-
-    fn write_table_row_with_ix_neg(
-        &self,
-        w: &mut IxbrlWriter,
-        label: &str,
-        name: &str,
-        ctx_cur: &str,
-        ctx_prev: &str,
-        val_cur: f64,
-        val_prev: f64,
-    ) {
-        w.open_element("tr", &[("class", "row")]);
-        w.open_element("td", &[("class", "label breakdown item cell")]);
-        w.write_element("span", &[], label);
-        w.close_element("td");
-        // Current year (negative)
-        if val_cur != 0.0 {
-            w.open_element("td", &[("class", "data value negative cell")]);
-            w.open_element("span", &[]);
-            w.write_raw("<span>( </span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx_cur),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw(&format_f64(val_cur));
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span> )</span>");
-            w.close_element("span");
-            w.close_element("td");
-        } else {
-            w.open_element("td", &[("class", "data value nil cell")]);
-            w.open_element("span", &[]);
-            w.open_element("span", &[]);
-            w.write_raw("</span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx_cur),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw("0.00");
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-            w.close_element("span");
-            w.close_element("td");
-        }
-        // Previous year (negative)
-        if val_prev != 0.0 {
-            w.open_element("td", &[("class", "data value negative cell")]);
-            w.open_element("span", &[]);
-            w.write_raw("<span>( </span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx_prev),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw(&format_f64(val_prev));
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span> )</span>");
-            w.close_element("span");
-            w.close_element("td");
-        } else {
-            w.open_element("td", &[("class", "data value nil cell")]);
-            w.open_element("span", &[]);
-            w.open_element("span", &[]);
-            w.write_raw("</span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx_prev),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("unitRef", "U-GBP"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw("0.00");
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span>&#160;&#160;</span>");
-            w.close_element("span");
-            w.close_element("td");
-        }
-        w.close_element("tr");
-    }
-
-    fn write_table_row_total(&self, w: &mut IxbrlWriter, label: &str, val_cur: f64, val_prev: f64) {
-        w.open_element("tr", &[("class", "row")]);
-        w.write_element("td", &[("class", "label breakdown total cell")], label);
-        self.write_data_cell_total(w, val_cur);
-        self.write_data_cell_total(w, val_prev);
-        w.close_element("tr");
-    }
-
-    fn write_data_cell(&self, w: &mut IxbrlWriter, value: f64) {
-        if value == 0.0 {
-            w.open_element("td", &[("class", "data value nil cell")]);
-            w.open_element("span", &[]);
-            w.write_raw("0.00&#160;&#160;");
-            w.close_element("span");
-            w.close_element("td");
-        } else if value < 0.0 {
-            w.open_element("td", &[("class", "data value negative cell")]);
-            w.open_element("span", &[]);
-            w.write_raw("<span>( </span>");
-            w.write_element("span", &[], &format_f64(value.abs()));
-            w.write_raw("<span> )</span>");
-            w.close_element("span");
-            w.close_element("td");
-        } else {
-            w.open_element("td", &[("class", "data value cell")]);
-            w.write_element("span", &[], &format_f64(value));
-            w.close_element("td");
-        }
-    }
-
-    fn write_data_cell_total(&self, w: &mut IxbrlWriter, value: f64) {
-        if value == 0.0 {
-            w.open_element("td", &[("class", "data value breakdown total nil cell")]);
-            w.open_element("span", &[]);
-            w.write_raw("0.00&#160;&#160;");
-            w.close_element("span");
-            w.close_element("td");
-        } else if value < 0.0 {
-            w.open_element(
-                "td",
-                &[("class", "data value breakdown total negative cell")],
-            );
-            w.open_element("span", &[]);
-            w.write_raw("<span>( </span>");
-            w.write_element("span", &[], &format_f64(value.abs()));
-            w.write_raw("<span> )</span>");
-            w.close_element("span");
-            w.close_element("td");
-        } else {
-            w.open_element("td", &[("class", "data value breakdown total cell")]);
-            w.write_element("span", &[], &format_f64(value));
-            w.close_element("td");
-        }
-    }
-
-    fn write_data_cell_total_ix(&self, w: &mut IxbrlWriter, name: &str, ctx: &str, value: f64) {
-        if value < 0.0 {
-            w.open_element(
-                "td",
-                &[("class", "data value breakdown total negative cell")],
-            );
-            w.open_element("span", &[]);
-            w.write_raw("<span>( </span>");
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("unitRef", "U-GBP"),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw(&format_f64(value.abs()));
-            w.close_element("ix:nonFraction");
-            w.write_raw("<span> )</span>");
-            w.close_element("span");
-            w.close_element("td");
-        } else if value == 0.0 {
-            w.open_element("td", &[("class", "data value breakdown total nil cell")]);
-            w.open_element("span", &[]);
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("unitRef", "U-GBP"),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw("0.00");
-            w.close_element("ix:nonFraction");
-            w.open_element("span", &[]);
-            w.write_raw("&#160;&#160;");
-            w.close_element("span");
-            w.close_element("span");
-            w.close_element("td");
-        } else {
-            w.open_element("td", &[("class", "data value breakdown total cell")]);
-            w.open_element("span", &[]);
-            w.open_element(
-                "ix:nonFraction",
-                &[
-                    ("name", name),
-                    ("contextRef", ctx),
-                    ("unitRef", "U-GBP"),
-                    ("format", "ixt2:numdotdecimal"),
-                    ("decimals", "2"),
-                    ("scale", "0"),
-                ],
-            );
-            w.write_raw(&format_f64(value));
-            w.close_element("ix:nonFraction");
-            w.open_element("span", &[]);
-            w.write_raw("&#160;&#160;");
-            w.close_element("span");
-            w.close_element("span");
-            w.close_element("td");
-        }
-    }
 }
 
-#[allow(dead_code)]
+/// Format a date for iXBRL output with non-breaking spaces.
 fn format_date(d: &chrono::NaiveDate) -> String {
     let day = d.format("%d").to_string();
     let month = d.format("%B").to_string();
     let year = d.format("%Y").to_string();
     format!(
-        "{}&#160;{}&#160;{}",
+        "{}\u{00A0}{}\u{00A0}{}",
         day.trim_start_matches('0'),
         month,
         year
@@ -2911,7 +1517,7 @@ mod tests {
     #[test]
     fn test_format_date() {
         let d = chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        assert_eq!(format_date(&d), "1&#160;January&#160;2020");
+        assert_eq!(format_date(&d), "1\u{00A0}January\u{00A0}2020");
     }
 
     #[tokio::test]
@@ -3302,10 +1908,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_from_ixbrl_round_trip() {
-        let html = std::fs::read_to_string("../../.cache/ct_return_example2.html")
-            .expect("read cached ixbrl");
+    #[tokio::test]
+    async fn test_from_ixbrl_round_trip() {
+        // Ensure the cache file exists (test may run in parallel)
+        let ct = build_example2_ct().await;
+        let html = ct.to_ixbrl();
+        std::fs::create_dir_all("../../.cache").unwrap();
+        std::fs::write("../../.cache/ct_return_example2.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         assert_eq!(
@@ -3357,10 +1966,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_from_ixbrl_worksheet_fy_split() {
-        let html = std::fs::read_to_string("../../.cache/ct_return_example2.html")
-            .expect("read cached ixbrl");
+    #[tokio::test]
+    async fn test_from_ixbrl_worksheet_fy_split() {
+        let ct = build_example2_ct().await;
+        let html = ct.to_ixbrl();
+        std::fs::create_dir_all("../../.cache").unwrap();
+        std::fs::write("../../.cache/ct_return_example2.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let fy1_cur = facts.numeric_by_ctx.get(&(
@@ -3375,10 +1986,12 @@ mod tests {
         assert!(fy1_prev.is_some());
     }
 
-    #[test]
-    fn test_from_parsed_facts() {
-        let html = std::fs::read_to_string("../../.cache/ct_return_example2.html")
-            .expect("read cached ixbrl");
+    #[tokio::test]
+    async fn test_from_parsed_facts() {
+        let ct = build_example2_ct().await;
+        let html = ct.to_ixbrl();
+        std::fs::create_dir_all("../../.cache").unwrap();
+        std::fs::write("../../.cache/ct_return_example2.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let company = crate::company::Company::new(
