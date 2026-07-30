@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::GnucashBook;
 use crate::company::Company;
-use crate::ixbrl_fmt::{IxbrlWriter, ParsedIxBrlFacts};
+use crate::ixbrl_fmt::{format_f64, IxbrlWriter, ParsedIxBrlFacts};
 
 #[derive(Debug, Clone)]
 pub struct RdExpenditureItem {
@@ -1216,7 +1216,7 @@ impl CorporationTaxReturn {
         unit: &str,
         value: f64,
     ) {
-        let formatted = format!("{:.2}", value);
+        let formatted = format_f64(value);
         w.open_element("div", &[("class", "fact")]);
         w.write_element("div", &[("class", "ref")], ref_num);
         let desc = format!("{}:", label);
@@ -2141,7 +2141,7 @@ impl CorporationTaxReturn {
                     ("scale", "0"),
                 ],
             );
-            w.write_raw(&format!("{:.2}", value));
+            w.write_raw(&format_f64(value));
             w.close_element("ix:nonFraction");
             w.write_raw("<span>&#160;&#160;</span>");
             w.close_element("span");
@@ -2187,7 +2187,7 @@ impl CorporationTaxReturn {
                     ("scale", "0"),
                 ],
             );
-            w.write_raw(&format!("{:.2}", value));
+            w.write_raw(&format_f64(value));
             w.close_element("ix:nonFraction");
             w.write_raw("<span>&#160;&#160;</span>");
             w.close_element("span");
@@ -2232,7 +2232,7 @@ impl CorporationTaxReturn {
                     ("scale", "0"),
                 ],
             );
-            w.write_raw(&format!("{:.2}", value));
+            w.write_raw(&format_f64(value));
             w.close_element("ix:nonFraction");
             w.write_raw("<span> )</span>");
             w.close_element("span");
@@ -2512,31 +2512,30 @@ impl CorporationTaxReturn {
                 ("decimals", "2"),
                 ("scale", "0"),
             ],
-        );
-        w.write_raw(&format!("{:.2}", val_cur));
-        w.close_element("ix:nonFraction");
-        w.write_raw("<span>&#160;&#160;</span>");
-        w.close_element("span");
-        w.close_element("td");
-        // Previous year
-        w.open_element("td", &[("class", "data value cell")]);
-        w.open_element("span", &[]);
-        w.open_element("span", &[]);
-        w.write_raw("</span>");
-        w.open_element(
-            "ix:nonFraction",
-            &[
-                ("name", name),
-                ("contextRef", ctx_prev),
-                ("format", "ixt2:numdotdecimal"),
-                ("unitRef", "U-GBP"),
-                ("decimals", "2"),
-                ("scale", "0"),
-            ],
-        );
-        w.write_raw(&format!("{:.2}", val_prev));
-        w.close_element("ix:nonFraction");
-        w.write_raw("<span>&#160;&#160;</span>");
+        );            w.write_raw(&format_f64(val_cur));
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
+            w.close_element("span");
+            w.close_element("td");
+            // Previous year
+            w.open_element("td", &[("class", "data value cell")]);
+            w.open_element("span", &[]);
+            w.open_element("span", &[]);
+            w.write_raw("</span>");
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx_prev),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
+            w.write_raw(&format_f64(val_prev));
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
         w.close_element("span");
         w.close_element("td");
         w.close_element("tr");
@@ -2607,7 +2606,7 @@ impl CorporationTaxReturn {
                     ("scale", "0"),
                 ],
             );
-            w.write_raw(&format!("{:.2}", val_cur));
+            w.write_raw(&format_f64(val_cur));
             w.close_element("ix:nonFraction");
             w.write_raw("<span> )</span>");
             w.close_element("span");
@@ -2650,7 +2649,7 @@ impl CorporationTaxReturn {
                     ("scale", "0"),
                 ],
             );
-            w.write_raw(&format!("{:.2}", val_prev));
+            w.write_raw(&format_f64(val_prev));
             w.close_element("ix:nonFraction");
             w.write_raw("<span> )</span>");
             w.close_element("span");
@@ -2699,13 +2698,13 @@ impl CorporationTaxReturn {
             w.open_element("td", &[("class", "data value negative cell")]);
             w.open_element("span", &[]);
             w.write_raw("<span>( </span>");
-            w.write_element("span", &[], &format!("{:.2}", value.abs()));
+            w.write_element("span", &[], &format_f64(value.abs()));
             w.write_raw("<span> )</span>");
             w.close_element("span");
             w.close_element("td");
         } else {
             w.open_element("td", &[("class", "data value cell")]);
-            w.write_element("span", &[], &format!("{:.2}", value));
+            w.write_element("span", &[], &format_f64(value));
             w.close_element("td");
         }
     }
@@ -2724,13 +2723,13 @@ impl CorporationTaxReturn {
             );
             w.open_element("span", &[]);
             w.write_raw("<span>( </span>");
-            w.write_element("span", &[], &format!("{:.2}", value.abs()));
+            w.write_element("span", &[], &format_f64(value.abs()));
             w.write_raw("<span> )</span>");
             w.close_element("span");
             w.close_element("td");
         } else {
             w.open_element("td", &[("class", "data value breakdown total cell")]);
-            w.write_element("span", &[], &format!("{:.2}", value));
+            w.write_element("span", &[], &format_f64(value));
             w.close_element("td");
         }
     }
@@ -2754,7 +2753,7 @@ impl CorporationTaxReturn {
                     ("scale", "0"),
                 ],
             );
-            w.write_raw(&format!("{:.2}", value.abs()));
+            w.write_raw(&format_f64(value.abs()));
             w.close_element("ix:nonFraction");
             w.write_raw("<span> )</span>");
             w.close_element("span");
@@ -2794,7 +2793,7 @@ impl CorporationTaxReturn {
                     ("scale", "0"),
                 ],
             );
-            w.write_raw(&format!("{:.2}", value));
+            w.write_raw(&format_f64(value));
             w.close_element("ix:nonFraction");
             w.open_element("span", &[]);
             w.write_raw("&#160;&#160;");
@@ -2806,25 +2805,6 @@ impl CorporationTaxReturn {
 }
 
 #[allow(dead_code)]
-fn format_f64(v: f64) -> String {
-    let formatted = format!("{:.2}", v);
-    let parts: Vec<&str> = formatted.split('.').collect();
-    let int_part = parts[0];
-    let dec_part = parts.get(1).unwrap_or(&"00");
-    let mut result = String::new();
-    let bytes = int_part.as_bytes();
-    let len = bytes.len();
-    for (i, b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i).is_multiple_of(3) {
-            result.push(',');
-        }
-        result.push(*b as char);
-    }
-    result.push('.');
-    result.push_str(dec_part);
-    result
-}
-
 fn format_date(d: &chrono::NaiveDate) -> String {
     let day = d.format("%d").to_string();
     let month = d.format("%B").to_string();

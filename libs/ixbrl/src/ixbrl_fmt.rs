@@ -106,7 +106,7 @@ impl ParsedIxBrlFacts {
                     ("scale", "0"),
                 ],
             );
-            w.write_raw(&format!("{:.2}", value));
+            w.write_raw(&format_f64(*value));
             w.close_element("ix:nonFraction");
             w.close_element("div");
             w.close_element("div");
@@ -151,7 +151,8 @@ impl ParsedIxBrlFacts {
                             let raw = text.unescape().unwrap_or_default().to_string();
                             let val = raw.trim();
                             if tag == "ix:nonFraction" {
-                                if let Ok(v) = val.parse::<f64>() {
+                                let cleaned = val.replace(',', "");
+                                if let Ok(v) = cleaned.parse::<f64>() {
                                     facts.numeric.insert(name.clone(), v);
                                     facts.numeric_by_ctx.insert((name, ctx), v);
                                 }
@@ -235,4 +236,23 @@ impl IxbrlWriter {
         let cursor = self.writer.into_inner();
         String::from_utf8(cursor.into_inner()).unwrap()
     }
+}
+
+pub fn format_f64(v: f64) -> String {
+    let formatted = format!("{:.2}", v);
+    let parts: Vec<&str> = formatted.split('.').collect();
+    let int_part = parts[0];
+    let dec_part = parts.get(1).unwrap_or(&"00");
+    let mut result = String::new();
+    let bytes = int_part.as_bytes();
+    let len = bytes.len();
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (len - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(*b as char);
+    }
+    result.push('.');
+    result.push_str(dec_part);
+    result
 }
