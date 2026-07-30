@@ -82,6 +82,7 @@ pub struct FRS105Mapper {
     account_balances: HashMap<String, f64>,
 }
 
+#[allow(clippy::new_without_default)]
 impl FRS105Mapper {
     pub fn new() -> Self {
         Self {

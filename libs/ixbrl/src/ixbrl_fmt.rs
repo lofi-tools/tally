@@ -36,9 +36,9 @@ impl ParsedIxBrlFacts {
 
         // Write non-numeric facts with ctxt-0 context
         for (name, value) in &self.non_numeric {
-            if let Some(val) = self
+            if self
                 .non_numeric_by_ctx
-                .get(&(name.clone(), "ctxt-0".to_string()))
+                .contains_key(&(name.clone(), "ctxt-0".to_string()))
             {
                 w.open_element("ix:nonNumeric", &[("name", name), ("contextRef", "ctxt-0")]);
                 w.write_raw(value);
@@ -179,6 +179,7 @@ pub struct IxbrlWriter {
     writer: Writer<Cursor<Vec<u8>>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl IxbrlWriter {
     pub fn new() -> Self {
         Self {

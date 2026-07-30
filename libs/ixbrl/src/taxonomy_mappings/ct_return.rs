@@ -94,6 +94,7 @@ pub struct CorporationTaxReturn {
     pub expenses_by_fy: HashMap<String, HashMap<i32, f64>>,
 }
 
+#[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
 pub struct CorporationTaxReturnBuilder<'a> {
     company: &'a Company,
@@ -102,6 +103,7 @@ pub struct CorporationTaxReturnBuilder<'a> {
     rd_project_defs: Vec<(&'a str, Vec<(&'a str, &'a str)>, &'a str)>,
 }
 
+#[allow(clippy::type_complexity)]
 impl<'a> CorporationTaxReturnBuilder<'a> {
     pub fn add_rd_project(
         mut self,
@@ -193,6 +195,7 @@ pub fn calculate_corporation_tax_2025(taxable_profit: f64) -> CorporationTaxCalc
     }
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 impl CorporationTaxReturn {
     pub fn builder<'a>(
         gnucash: &GnucashBook,
