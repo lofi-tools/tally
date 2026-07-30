@@ -238,7 +238,11 @@ pub fn non_fraction(name: &str, ctx: &str, value: &str) -> XmlNode {
 
 /// Build an `ix:nonNumeric` fact.
 pub fn non_numeric(name: &str, ctx: &str, value: &str) -> XmlNode {
-    elt_text("ix:nonNumeric", &[("name", name), ("contextRef", ctx)], value)
+    elt_text(
+        "ix:nonNumeric",
+        &[("name", name), ("contextRef", ctx)],
+        value,
+    )
 }
 
 /// Build an `ix:nonNumeric` fact with a format attribute.
@@ -258,7 +262,11 @@ pub fn non_numeric_fmt(name: &str, ctx: &str, value: &str, format: &str) -> XmlN
 pub fn fact_wrapper(ref_num: &str, description: &str, fact_value: XmlNode) -> XmlNode {
     elt("div", &[("class", "fact")]).children(vec![
         elt_text("div", &[("class", "ref")], ref_num),
-        elt_text("div", &[("class", "description")], &format!("{}:", description)),
+        elt_text(
+            "div",
+            &[("class", "description")],
+            &format!("{}:", description),
+        ),
         elt("div", &[("class", "factvalue")]).child(fact_value),
     ])
 }
@@ -301,10 +309,7 @@ pub fn span_space2() -> XmlNode {
 pub fn data_cell(value: f64) -> XmlNode {
     let formatted = format_f64(value);
     if value == 0.0 {
-        td(
-            "data value nil cell",
-            vec![spannbsp("0.00")],
-        )
+        td("data value nil cell", vec![spannbsp("0.00")])
     } else if value < 0.0 {
         td(
             "data value negative cell",
@@ -361,24 +366,22 @@ pub fn data_cell_total_ix(name: &str, ctx: &str, value: f64) -> XmlNode {
                 span_text("( "),
                 non_fraction(name, ctx, &formatted),
                 span_text(" )"),
-            ])],    )
-        } else if value == 0.0 {
-            td(
-                "data value breakdown total nil cell",
-                vec![span(vec![
-                    non_fraction(name, ctx, "0.00"),
-                    span_space2(),
-                ])],
-            )
-        } else {
-            td(
-                "data value breakdown total cell",
-                vec![span(vec![
-                    non_fraction(name, ctx, &formatted),
-                    span_space2(),
-                ])],
-            )
-        }
+            ])],
+        )
+    } else if value == 0.0 {
+        td(
+            "data value breakdown total nil cell",
+            vec![span(vec![non_fraction(name, ctx, "0.00"), span_space2()])],
+        )
+    } else {
+        td(
+            "data value breakdown total cell",
+            vec![span(vec![
+                non_fraction(name, ctx, &formatted),
+                span_space2(),
+            ])],
+        )
+    }
 }
 
 /// Build a `td` with an iXBRL-tagged value (plain data cell style).
@@ -579,8 +582,16 @@ pub fn worksheet_header_row_pl(fy2: i32, fy1: i32) -> XmlNode {
         Some("row"),
         vec![
             td("label cell", vec![nbsp()]),
-            elt_text("td", &[("class", "column header cell"), ("colspan", "1")], &fy2.to_string()),
-            elt_text("td", &[("class", "column header cell"), ("colspan", "1")], &fy1.to_string()),
+            elt_text(
+                "td",
+                &[("class", "column header cell"), ("colspan", "1")],
+                &fy2.to_string(),
+            ),
+            elt_text(
+                "td",
+                &[("class", "column header cell"), ("colspan", "1")],
+                &fy1.to_string(),
+            ),
         ],
     )
 }
@@ -662,13 +673,9 @@ pub fn context_duration_full(
     if typed_dim.is_some() || !explicit_dims.is_empty() {
         let mut segment = elt("xbrli:segment", &[]);
         if let Some(d) = typed_dim {
-            segment = segment.child(
-                elt("xbrldi:typedMember", &[("dimension", d)]).child(elt_text(
-                    "ct-comp:BusinessNameDomain",
-                    &[],
-                    typed_val.unwrap_or(""),
-                )),
-            );
+            segment = segment.child(elt("xbrldi:typedMember", &[("dimension", d)]).child(
+                elt_text("ct-comp:BusinessNameDomain", &[], typed_val.unwrap_or("")),
+            ));
         }
         for (dim, val) in explicit_dims {
             segment = segment.child(elt_text(
@@ -706,8 +713,7 @@ pub fn context_duration(
 
 /// Build a `xbrli:unit`.
 pub fn unit(measure: &str) -> XmlNode {
-    elt("xbrli:unit", &[("id", "U-GBP")])
-        .child(elt_text("xbrli:measure", &[], measure))
+    elt("xbrli:unit", &[("id", "U-GBP")]).child(elt_text("xbrli:measure", &[], measure))
 }
 
 // ============================================================================
@@ -788,16 +794,15 @@ impl ParsedIxBrlFacts {
                 elt_text(
                     "style",
                     &[("type", "text/css")],
-                    include_str!("taxonomy_mappings/ct_return_style.css"),
+                    include_str!("reports/uk_frs105_corp_tax.css"),
                 ),
             ]),
             elt("body", &[]).children(vec![
                 elt("div", &[("style", "display:none")]).child(header),
-                elt("div", &[("id", "report"), ("class", "report")]).children(vec![
-                    div("page", vec![
-                        facts(vec![h2("Corporation Tax Facts")]),
-                    ]),
-                ]),
+                elt("div", &[("id", "report"), ("class", "report")]).children(vec![div(
+                    "page",
+                    vec![facts(vec![h2("Corporation Tax Facts")])],
+                )]),
             ]),
         ]);
 

@@ -2,11 +2,7 @@ use std::fmt;
 
 pub mod company;
 pub mod ixbrl_fmt;
-pub mod taxonomy;
-pub mod taxonomy_mappings {
-    pub mod ct_return;
-    pub mod frs105;
-}
+pub mod reports;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountType {
