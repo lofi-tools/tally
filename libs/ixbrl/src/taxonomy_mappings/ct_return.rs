@@ -380,7 +380,7 @@ impl CorporationTaxReturn {
         let tax_payable = tax_chargeable;
 
         let tax_expense_current = sum_abs(period_splits, "Equity:Corporation Tax:Corporation Tax");
-        let profit_after_tax = (profit_before_tax_current - tax_expense_current).round();
+        let profit_after_tax = round2(profit_before_tax_current - tax_expense_current);
 
         let ct_turnover_prev =
             sum_abs(prev_splits, "Income:Sales:UK") + sum_abs(prev_splits, "Income:Interest");
@@ -562,7 +562,7 @@ impl CorporationTaxReturn {
             profit_after_tax_by_fy: HashMap::from([
                 (
                     company.fy1_year,
-                    (profit_before_tax_prev - tax_expense_prev).round(),
+                    round2(profit_before_tax_prev - tax_expense_prev),
                 ),
                 (company.fy2_year, profit_after_tax),
             ]),
@@ -813,6 +813,7 @@ impl CorporationTaxReturn {
         if !self.rd_projects.is_empty() {
             self.write_rnd_worksheet_page(&mut w);
         }
+        self.write_profit_and_loss_worksheet(&mut w);
         self.write_tax_calculation_worksheet(&mut w);
         w.write_raw("</div>");
 
@@ -1813,6 +1814,427 @@ impl CorporationTaxReturn {
         w.close_element("table");
         w.close_element("div");
         w.close_element("div");
+    }
+
+    fn write_profit_and_loss_worksheet(&self, w: &mut IxbrlWriter) {
+        let fy1 = self.company.fy1_year;
+        let fy2 = self.company.fy2_year;
+
+        let turnover2 = *self.turnover_by_fy.get(&fy2).unwrap_or(&0.0);
+        let turnover1 = *self.turnover_by_fy.get(&fy1).unwrap_or(&0.0);
+        let costs2 = *self.costs_by_fy.get(&fy2).unwrap_or(&0.0);
+        let costs1 = *self.costs_by_fy.get(&fy1).unwrap_or(&0.0);
+        let pbt2 = *self.profit_before_tax_by_fy.get(&fy2).unwrap_or(&0.0);
+        let pbt1 = *self.profit_before_tax_by_fy.get(&fy1).unwrap_or(&0.0);
+        let tax2 = *self.tax_expense_by_fy.get(&fy2).unwrap_or(&0.0);
+        let tax1 = *self.tax_expense_by_fy.get(&fy1).unwrap_or(&0.0);
+        let pat2 = *self.profit_after_tax_by_fy.get(&fy2).unwrap_or(&0.0);
+        let pat1 = *self.profit_after_tax_by_fy.get(&fy1).unwrap_or(&0.0);
+        let wages2 = *self.wages_by_fy.get(&fy2).unwrap_or(&0.0);
+        let wages1 = *self.wages_by_fy.get(&fy1).unwrap_or(&0.0);
+        let pensions2 = *self.pensions_by_fy.get(&fy2).unwrap_or(&0.0);
+        let pensions1 = *self.pensions_by_fy.get(&fy1).unwrap_or(&0.0);
+
+        let gross_profit2 = round_down(turnover2);
+        let gross_profit1 = round_down(turnover1);
+
+        let get_exp = |key: &str, fy: i32| -> f64 {
+            self.expenses_by_fy
+                .get(key)
+                .and_then(|m| m.get(&fy))
+                .copied()
+                .unwrap_or(0.0)
+        };
+
+        let expense_expense_defs: &[(&str, &str, &str)] = &[
+            ("Accountancy services", "dpl:AuditAccountancyCosts", "accountancy"),
+            ("Bank charges", "dpl:BankCharges", "bank-charges"),
+            ("Office costs", "dpl:PrintingPostageStationeryCosts", "office"),
+            ("Software", "dpl:ITComputingCosts", "software-expenses"),
+            ("Subscriptions", "dpl:SubscriptionsCosts", "subscriptions-costs"),
+            ("Sundries", "dpl:OtherOperationalAdministrationCosts", "sundries"),
+            ("Telecoms", "dpl:TelecommunicationsCosts", "telecoms"),
+            ("Travel", "dpl:TravelSubsistenceCosts", "travel"),
+        ];
+
+        w.open_element("div", &[("class", "page")]);
+        w.open_element("div", &[("class", "worksheet")]);
+        w.write_element("h2", &[], "Detailed Profit-and-Loss");
+
+        w.open_element("table", &[("class", "sheet table")]);
+
+        // Header row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.write_element(
+            "td",
+            &[("class", "column header cell"), ("colspan", "1")],
+            &fy2.to_string(),
+        );
+        w.write_element(
+            "td",
+            &[("class", "column header cell"), ("colspan", "1")],
+            &fy1.to_string(),
+        );
+        w.close_element("tr");
+
+        // Currency row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.open_element("td", &[("class", "column currency cell"), ("colspan", "1")]);
+        w.write_raw("&#163;");
+        w.close_element("td");
+        w.open_element("td", &[("class", "column currency cell"), ("colspan", "1")]);
+        w.write_raw("&#163;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // ==========================================
+        // Turnover / revenue
+        // ==========================================
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown heading cell")]);
+        w.write_element("span", &[], "Turnover / revenue");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Income from main trade
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown item cell")]);
+        w.open_element(
+            "ix:nonNumeric",
+            &[
+                ("name", "dpl:DescriptionActivity"),
+                ("contextRef", "ctxt-9"),
+            ],
+        );
+        w.write_raw("Income from main trade");
+        w.close_element("ix:nonNumeric");
+        w.close_element("td");
+        self.write_data_cell_with_ix(w, turnover2, "uk-core:TurnoverRevenue", "ctxt-9");
+        self.write_data_cell_with_ix(w, turnover1, "uk-core:TurnoverRevenue", "ctxt-10");
+        w.close_element("tr");
+
+        // Total (turnover)
+        self.write_table_row_with_ix(
+            w,
+            "Total",
+            "uk-core:TurnoverRevenue",
+            "ctxt-11",
+            "ctxt-12",
+            turnover2,
+            turnover1,
+        );
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // ==========================================
+        // Gross profit
+        // ==========================================
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label heading total cell")]);
+        w.write_element("span", &[], "Gross profit");
+        w.close_element("td");
+        self.write_total_cell_with_ix(w, gross_profit2, "uk-core:GrossProfitLoss", "ctxt-11");
+        self.write_total_cell_with_ix(w, gross_profit1, "uk-core:GrossProfitLoss", "ctxt-12");
+        w.close_element("tr");
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // ==========================================
+        // Total costs
+        // ==========================================
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown heading cell")]);
+        w.write_element("span", &[], "Total costs");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Salaries
+        self.write_table_row_with_ix_neg(
+            w,
+            "Salaries",
+            "uk-core:WagesSalaries",
+            "ctxt-13",
+            "ctxt-14",
+            wages2,
+            wages1,
+        );
+        // Pension contributions
+        self.write_table_row_with_ix_neg(
+            w,
+            "Pension contributions",
+            "uk-core:PensionCostsDefinedContributionPlan",
+            "ctxt-13",
+            "ctxt-14",
+            pensions2,
+            pensions1,
+        );
+
+        // Other expenses from expenses_by_fy
+        for (label, ix_name, expense_key) in expense_expense_defs {
+            let v2 = get_exp(expense_key, fy2);
+            let v1 = get_exp(expense_key, fy1);
+            self.write_table_row_with_ix_neg(w, label, ix_name, "ctxt-13", "ctxt-14", v2, v1);
+        }
+
+        // Total costs
+        self.write_table_row_with_ix_neg(
+            w,
+            "Total",
+            "dpl:TotalCosts",
+            "ctxt-11",
+            "ctxt-12",
+            costs2,
+            costs1,
+        );
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // ==========================================
+        // Net profit before tax
+        // ==========================================
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label breakdown heading cell")]);
+        w.write_element("span", &[], "Net profit before tax");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // Gross profit (item)
+        self.write_table_row_with_ix(
+            w,
+            "Gross profit",
+            "uk-core:GrossProfitLoss",
+            "ctxt-11",
+            "ctxt-12",
+            gross_profit2,
+            gross_profit1,
+        );
+
+        // Total costs (item, negative)
+        self.write_table_row_with_ix_neg(
+            w,
+            "Total costs",
+            "dpl:TotalCosts",
+            "ctxt-11",
+            "ctxt-12",
+            costs2,
+            costs1,
+        );
+
+        // Total (profit before tax)
+        self.write_table_row_with_ix(
+            w,
+            "Total",
+            "uk-core:ProfitLossBeforeTax",
+            "ctxt-11",
+            "ctxt-12",
+            pbt2,
+            pbt1,
+        );
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // ==========================================
+        // Corporation tax (negative)
+        // ==========================================
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label heading total cell")]);
+        w.write_element("span", &[], "Corporation tax");
+        w.close_element("td");
+        self.write_total_cell_neg_with_ix(w, tax2, "uk-core:IncomeTaxExpenseCredit", "ctxt-11");
+        self.write_total_cell_neg_with_ix(w, tax1, "uk-core:IncomeTaxExpenseCredit", "ctxt-12");
+        w.close_element("tr");
+
+        // Blank row
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label cell")]);
+        w.write_raw("&#160;");
+        w.close_element("td");
+        w.close_element("tr");
+
+        // ==========================================
+        // Profit (Loss) after tax
+        // ==========================================
+        w.open_element("tr", &[("class", "row")]);
+        w.open_element("td", &[("class", "label heading total cell")]);
+        w.write_element("span", &[], "Profit (Loss) after tax");
+        w.close_element("td");
+        self.write_total_cell_with_ix(w, pat2, "uk-core:ProfitLoss", "ctxt-11");
+        self.write_total_cell_with_ix(w, pat1, "uk-core:ProfitLoss", "ctxt-12");
+        w.close_element("tr");
+
+        w.close_element("table");
+        w.close_element("div");
+        w.close_element("div");
+    }
+
+    fn write_data_cell_with_ix(&self, w: &mut IxbrlWriter, value: f64, name: &str, ctx: &str) {
+        if value == 0.0 {
+            w.open_element("td", &[("class", "data value nil cell")]);
+            w.open_element("span", &[]);
+            w.open_element("span", &[]);
+            w.write_raw("</span>");
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
+            w.write_raw("0.00");
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
+            w.close_element("span");
+            w.close_element("td");
+        } else {
+            w.open_element("td", &[("class", "data value cell")]);
+            w.open_element("span", &[]);
+            w.open_element("span", &[]);
+            w.write_raw("</span>");
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
+            w.write_raw(&format!("{:.2}", value));
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
+            w.close_element("span");
+            w.close_element("td");
+        }
+    }
+
+    fn write_total_cell_with_ix(&self, w: &mut IxbrlWriter, value: f64, name: &str, ctx: &str) {
+        if value == 0.0 {
+            w.open_element("td", &[("class", "data value total nil cell")]);
+            w.open_element("span", &[]);
+            w.open_element("span", &[]);
+            w.write_raw("</span>");
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
+            w.write_raw("0.00");
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
+            w.close_element("span");
+            w.close_element("td");
+        } else {
+            w.open_element("td", &[("class", "data value total cell")]);
+            w.open_element("span", &[]);
+            w.open_element("span", &[]);
+            w.write_raw("</span>");
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
+            w.write_raw(&format!("{:.2}", value));
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
+            w.close_element("span");
+            w.close_element("td");
+        }
+    }
+
+    fn write_total_cell_neg_with_ix(&self, w: &mut IxbrlWriter, value: f64, name: &str, ctx: &str) {
+        if value == 0.0 {
+            w.open_element("td", &[("class", "data value total nil cell")]);
+            w.open_element("span", &[]);
+            w.open_element("span", &[]);
+            w.write_raw("</span>");
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
+            w.write_raw("0.00");
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span>&#160;&#160;</span>");
+            w.close_element("span");
+            w.close_element("td");
+        } else {
+            w.open_element("td", &[("class", "data value total negative cell")]);
+            w.open_element("span", &[]);
+            w.write_raw("<span>( </span>");
+            w.open_element(
+                "ix:nonFraction",
+                &[
+                    ("name", name),
+                    ("contextRef", ctx),
+                    ("format", "ixt2:numdotdecimal"),
+                    ("unitRef", "U-GBP"),
+                    ("decimals", "2"),
+                    ("scale", "0"),
+                ],
+            );
+            w.write_raw(&format!("{:.2}", value));
+            w.close_element("ix:nonFraction");
+            w.write_raw("<span> )</span>");
+            w.close_element("span");
+            w.close_element("td");
+        }
     }
 
     fn write_tax_calculation_worksheet(&self, w: &mut IxbrlWriter) {
@@ -2846,7 +3268,7 @@ mod tests {
         let ct = build_example2_ct().await;
         assert_eq!(
             ct.profit_after_tax,
-            (ct.profit_before_tax - ct.tax_expense).round()
+            round2(ct.profit_before_tax - ct.tax_expense)
         );
     }
 
