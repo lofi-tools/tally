@@ -257,8 +257,8 @@ pub fn non_numeric_fmt(name: &str, ctx: &str, value: &str, format: &str) -> XmlN
 /// Build a fact div: `.fact > .ref + .description + .factvalue`.
 pub fn fact_wrapper(ref_num: &str, description: &str, fact_value: XmlNode) -> XmlNode {
     elt("div", &[("class", "fact")]).children(vec![
-        td_text("ref", ref_num),
-        td_text("description", &format!("{}:", description)),
+        elt_text("div", &[("class", "ref")], ref_num),
+        elt_text("div", &[("class", "description")], &format!("{}:", description)),
         elt("div", &[("class", "factvalue")]).child(fact_value),
     ])
 }
@@ -293,44 +293,62 @@ pub fn span_space2() -> XmlNode {
 }
 
 /// Build a `td` with a plain numeric value.
+///
+/// Trailing non-breaking spaces are included **in the text content**
+/// (not as a separate child element) for consistent visual alignment
+/// with iXBRL-tagged cells.  Negative values are never followed by NBSP
+/// — matching the reference output.
 pub fn data_cell(value: f64) -> XmlNode {
     let formatted = format_f64(value);
     if value == 0.0 {
-        td("data value nil cell", vec![span_text("0.00")])
+        td(
+            "data value nil cell",
+            vec![spannbsp("0.00")],
+        )
     } else if value < 0.0 {
         td(
             "data value negative cell",
             vec![span(vec![
                 span_text("( "),
-                span_text(&formatted),
+                span_text(&format_f64(value.abs())),
                 span_text(" )"),
             ])],
         )
     } else {
-        td("data value cell", vec![span_text(&formatted)])
+        td("data value cell", vec![spannbsp(&formatted)])
     }
 }
 
 /// Build a `td` with a plain total-value (breakdown total style).
+///
+/// Trailing NBSP is baked into the text content for non-negative values.
 pub fn data_cell_total(value: f64) -> XmlNode {
     let formatted = format_f64(value);
     if value == 0.0 {
-        td("data value breakdown total nil cell", vec![span_text("0.00")])
+        td(
+            "data value breakdown total nil cell",
+            vec![spannbsp("0.00")],
+        )
     } else if value < 0.0 {
         td(
             "data value breakdown total negative cell",
             vec![span(vec![
                 span_text("( "),
-                span_text(&formatted),
+                span_text(&format_f64(value.abs())),
                 span_text(" )"),
             ])],
         )
     } else {
         td(
             "data value breakdown total cell",
-            vec![span_text(&formatted)],
+            vec![spannbsp(&formatted)],
         )
     }
+}
+
+/// `span_text` with two trailing non-breaking spaces baked in.
+fn spannbsp(s: &str) -> XmlNode {
+    span_text(&format!("{}\u{00A0}\u{00A0}", s))
 }
 
 /// Build a `td` with an iXBRL-tagged value (breakdown total style).
@@ -872,7 +890,11 @@ impl ParsedIxBrlFacts {
 // ============================================================================
 
 pub fn format_f64(v: f64) -> String {
-    let formatted = format!("{:.2}", v);
+    // Format the absolute value first so comma-insertion works correctly
+    // regardless of whether the number is negative.  The minus sign is
+    // prepended at the end if needed.
+    let abs_v = v.abs();
+    let formatted = format!("{:.2}", abs_v);
     let parts: Vec<&str> = formatted.split('.').collect();
     let int_part = parts[0];
     let dec_part = parts.get(1).unwrap_or(&"00");
@@ -887,5 +909,8 @@ pub fn format_f64(v: f64) -> String {
     }
     result.push('.');
     result.push_str(dec_part);
+    if v < 0.0 {
+        result.insert(0, '-');
+    }
     result
 }
