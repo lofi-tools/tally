@@ -156,6 +156,8 @@
           # utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
           # ftest = ''set -x; cargo nextest run --workspace -E "''${TEST_FILTER:-all()}" --nocapture "$@" '';
           backup-txs = ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'';
+
+          refsrc = ''printf "%s\n" ${ixbrl-src}'';
           report = ''
             WD="${bash.wd}";
             cd ${ixbrl-src}
