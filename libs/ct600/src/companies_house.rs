@@ -11,9 +11,12 @@
 //! Authorization: Basic bXlfYXBpX2tleTo=
 //! ```
 
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::LazyLock;
 use std::{env::VarError, result::Result};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::form::CompanyFormValues;
@@ -39,6 +42,24 @@ pub enum CompaniesHouseError {
 }
 
 pub type ApiResult<T> = Result<T, CompaniesHouseError>;
+
+/// The repository root directory, resolved via `git rev-parse
+/// --show-toplevel`, falling back on the `CARGO_MANIFEST_DIR` build-time path.
+pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
+    let git_root = Command::new("git")
+        .arg("rev-parse")
+        .arg("--show-toplevel")
+        .output()
+        .ok()
+        .and_then(|out| {
+            if !out.status.success() {
+                return None;
+            }
+            let path = std::str::from_utf8(&out.stdout).ok()?.trim();
+            (!path.is_empty()).then(|| PathBuf::from(path))
+        });
+    git_root.unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+});
 
 /// A client for the Companies House public API.
 ///
@@ -107,6 +128,80 @@ impl CompaniesHouseClient {
     pub async fn company_form_values(&self, tax: &Frs105CorpTax) -> ApiResult<CompanyFormValues> {
         let profile = self.get_company_profile(tax.company_number()).await?;
         Ok(company_form_values_from_profile(&profile, tax))
+    }
+}
+
+/// A client that serves company profiles from a local JSON cache, falling
+/// back on the live Companies House API when the cache misses.
+///
+/// Cache writes are best-effort: a failure to read or write the cache is
+/// non-fatal and the live API result is used instead.
+#[derive(Debug, Clone)]
+pub struct CachedCompaniesHouseClient {
+    inner: CompaniesHouseClient,
+    cache_dir: PathBuf,
+}
+impl CachedCompaniesHouseClient {
+    /// Create a cached client with the default cache directory (`.cache`).
+    pub fn new(inner: CompaniesHouseClient) -> Self {
+        Self::with_cache_dir(inner, PathBuf::from(".cache"))
+    }
+
+    /// Create a cached client with the given cache directory.
+    pub fn with_cache_dir(inner: CompaniesHouseClient, cache_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            inner,
+            cache_dir: cache_dir.into(),
+        }
+    }
+
+    /// The cache file for a company number.
+    fn cache_path(&self, company_number: &str) -> PathBuf {
+        self.cache_dir
+            .join(format!("companies-house-{company_number}.json"))
+    }
+
+    /// Create a cached client for tests whose cache lives in
+    /// `{REPO}/.cache/api_responses`.
+    #[cfg(test)]
+    pub fn test_instance(inner: CompaniesHouseClient) -> Self {
+        Self::with_cache_dir(inner, REPO.join(".cache/api_responses"))
+    }
+
+    /// Fetch a company profile, loading from the local cache when available
+    /// and falling back on the live API otherwise (caching the result).
+    pub async fn get_company_profile(&self, company_number: &str) -> ApiResult<CompanyProfile> {
+        if let Some(profile) = self.read_cache(company_number) {
+            return Ok(profile);
+        }
+
+        let profile = self.inner.get_company_profile(company_number).await?;
+        self.write_cache(company_number, &profile);
+        Ok(profile)
+    }
+
+    /// Fetch the company header boxes, using the cached profile when
+    /// available.
+    pub async fn company_form_values(&self, tax: &Frs105CorpTax) -> ApiResult<CompanyFormValues> {
+        let profile = self.get_company_profile(tax.company_number()).await?;
+        Ok(company_form_values_from_profile(&profile, tax))
+    }
+
+    fn read_cache(&self, company_number: &str) -> Option<CompanyProfile> {
+        let data = std::fs::read_to_string(self.cache_path(company_number)).ok()?;
+        serde_json::from_str(&data).ok()
+    }
+
+    fn write_cache(&self, company_number: &str, profile: &CompanyProfile) {
+        let result = serde_json::to_vec(profile)
+            .map_err(|e| std::io::Error::other(e.to_string()))
+            .and_then(|data| {
+                std::fs::create_dir_all(&self.cache_dir)?;
+                std::fs::write(self.cache_path(company_number), data)
+            });
+        if let Err(e) = result {
+            log::warn!("failed to write Companies House cache: {e}");
+        }
     }
 }
 
@@ -181,7 +276,7 @@ impl CompanyType {
 ///
 /// Only the commonly used fields are modelled; all optional fields are
 /// tolerated when absent from the response.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompanyProfile {
     pub company_number: String,
     pub company_name: String,
@@ -211,7 +306,7 @@ pub struct CompanyProfile {
     pub links: Option<CompanyLinks>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisteredOfficeAddress {
     #[serde(default)]
     pub address_line_1: Option<String>,
@@ -233,7 +328,7 @@ pub struct RegisteredOfficeAddress {
     pub region: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Accounts {
     #[serde(default)]
     pub next_accounts: Option<NextAccounts>,
@@ -243,7 +338,7 @@ pub struct Accounts {
     pub overdue: Option<bool>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NextAccounts {
     #[serde(default)]
     pub period_end_on: Option<String>,
@@ -253,7 +348,7 @@ pub struct NextAccounts {
     pub due_on: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfirmationStatement {
     #[serde(default)]
     pub last_made_up_to: Option<String>,
@@ -265,7 +360,7 @@ pub struct ConfirmationStatement {
     pub overdue: Option<bool>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompanyLinks {
     #[serde(default)]
     pub filing_history: Option<String>,
@@ -307,10 +402,9 @@ mod tests {
             "ct-comp:CompanyName".to_string(),
             "EXT SOFTWARE SERVICES LTD".to_string(),
         );
-        facts.non_numeric.insert(
-            "ct-comp:TaxReference".to_string(),
-            "1234567890".to_string(),
-        );
+        facts
+            .non_numeric
+            .insert("ct-comp:TaxReference".to_string(), "1234567890".to_string());
         facts.non_numeric.insert(
             "ct-comp:FinancialYear1CoveredByTheReturn".to_string(),
             "2025".to_string(),
@@ -346,19 +440,22 @@ mod tests {
         assert_eq!(values.end.to_string(), "2025-12-31");
     }
 
-    /// Live integration test against the Companies House API.
+    /// Live integration test against the Companies House API, caching the
+    /// response in the repo `.cache/api_responses` directory so repeat runs
+    /// don't need the network or an API key.
     ///
-    /// Requires a valid API key in the `COMPANIES_HOUSE_API_KEY_TEST`
-    /// environment variable and network access, so it is ignored by default:
+    /// Requires a valid API key in the `COMPANIES_HOUSE_API_KEY` or
+    /// `COMPANIES_HOUSE_API_KEY_TEST` environment variable and network access
+    /// on the first (uncached) run, so it is ignored by default:
     ///
     /// ```text
-    /// COMPANIES_HOUSE_API_KEY_TEST=<key> cargo test --package ct600 -- --ignored
+    /// COMPANIES_HOUSE_API_KEY=<key> cargo test --package ct600 -- --ignored
     /// ```
     #[tokio::test]
-    // #[ignore = "requires the COMPANIES_HOUSE_API_KEY_TEST env var and network access"]
+    #[ignore = "requires an API key and network access on the first run"]
     async fn get_company_profile_14510633() {
-        let client = CompaniesHouseClient::live_from_env()
-            .expect("set COMPANIES_HOUSE_API_KEY_TEST to run this test");
+        let inner = CompaniesHouseClient::live_from_env().expect("set COMPANIES_HOUSE_API_KEY");
+        let client = CachedCompaniesHouseClient::test_instance(inner);
 
         let profile = client
             .get_company_profile(TEST_COMPANY_NUMBER)
@@ -370,5 +467,50 @@ mod tests {
         assert_eq!(profile.company_status.as_deref(), Some("active"));
         assert_eq!(profile.company_type.as_deref(), Some("ltd"));
         assert_eq!(profile.date_of_creation.as_deref(), Some("2022-11-28"));
+    }
+
+    /// The cache is consulted first: with a populated cache the live API is
+    /// never reached (the inner client points at an unreachable address).
+    #[tokio::test]
+    async fn test_cached_client_serves_from_cache_without_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let inner = CompaniesHouseClient {
+            base_url: "http://127.0.0.1:1",
+            http: reqwest::Client::new(),
+            api_key: "unused".to_string(),
+        };
+        let client = CachedCompaniesHouseClient::with_cache_dir(inner, dir.path());
+
+        let profile = CompanyProfile {
+            company_number: TEST_COMPANY_NUMBER.to_string(),
+            company_name: "EXT SOFTWARE SERVICES LTD".to_string(),
+            company_status: Some("active".to_string()),
+            company_status_detail: None,
+            date_of_creation: Some("2022-11-28".to_string()),
+            date_of_dissolution: None,
+            company_type: Some("ltd".to_string()),
+            jurisdiction: Some("England/Wales".to_string()),
+            registered_office_address: None,
+            accounts: None,
+            confirmation_statement: None,
+            sic_codes: None,
+            undeliverable_registered_office_address: None,
+            links: None,
+        };
+        let cache_file = client.cache_path(TEST_COMPANY_NUMBER);
+        std::fs::write(
+            &cache_file,
+            serde_json::to_vec(&profile).expect("serialising the profile"),
+        )
+        .expect("writing the cache file");
+
+        let cached = client
+            .get_company_profile(TEST_COMPANY_NUMBER)
+            .await
+            .expect("serving from cache should succeed");
+
+        assert_eq!(cached.company_name, "EXT SOFTWARE SERVICES LTD");
+        assert_eq!(cached.company_type.as_deref(), Some("ltd"));
+        assert!(cache_file.exists());
     }
 }

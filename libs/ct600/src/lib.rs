@@ -11,7 +11,9 @@ mod error;
 pub use error::{Ct600Error, Result};
 
 pub mod companies_house;
-pub use companies_house::{CompaniesHouseClient, CompaniesHouseError, CompanyType};
+pub use companies_house::{
+    CachedCompaniesHouseClient, CompaniesHouseClient, CompaniesHouseError, CompanyType, REPO,
+};
 
 pub mod form;
 pub use form::{BoxValue, CompanyFormValues, Ct600FormValues, FieldValue};
