@@ -16,6 +16,9 @@ use std::{env::VarError, result::Result};
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::form::CompanyFormValues;
+use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
+
 /// Errors returned by the Companies House API client.
 #[derive(Debug, Error)]
 pub enum CompaniesHouseError {
@@ -91,6 +94,86 @@ impl CompaniesHouseClient {
             .json::<CompanyProfile>()
             .await
             .map_err(CompaniesHouseError::DecodeFailed)
+    }
+
+    /// Fetch the company profile for the tax computation's company number and
+    /// combine it with the tax-derived values into the company header boxes
+    /// (1, 2, 3, 4, 30 and 35).
+    ///
+    /// Companies House supplies boxes 1 (name), 2 (registration number) and 4
+    /// (type of company, mapped from the register's company type); the tax
+    /// reference (3) and the return period (30/35) come from the tax
+    /// computation.
+    pub async fn company_form_values(&self, tax: &Frs105CorpTax) -> ApiResult<CompanyFormValues> {
+        let profile = self.get_company_profile(tax.company_number()).await?;
+        Ok(company_form_values_from_profile(&profile, tax))
+    }
+}
+
+/// Build the CT600 company header boxes from a Companies House profile and
+/// the tax computation.
+fn company_form_values_from_profile(
+    profile: &CompanyProfile,
+    tax: &Frs105CorpTax,
+) -> CompanyFormValues {
+    CompanyFormValues {
+        company_name: profile.company_name.clone(),
+        company_number: profile.company_number.clone(),
+        tax_reference: tax.tax_reference().to_string(),
+        type_of_company: profile
+            .company_type
+            .as_deref()
+            .and_then(CompanyType::parse_str)
+            .map(CompanyType::code)
+            .unwrap_or(0),
+        start: tax.start(),
+        end: tax.end(),
+    }
+}
+
+/// The CT600 box 4 "Type of company" options, as defined in the HMRC CT600
+/// guide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompanyType {
+    PrivateCompanyLimitedByShares,
+    PrivateCompanyLimitedByGuarantee,
+    PrivateUnlimitedCompany,
+    PublicLimitedCompany,
+    OldPublicCompany,
+    PrivateCompanyLimitedBySharesExempt,
+    LimitedLiabilityPartnership,
+}
+
+impl CompanyType {
+    /// Parse a Companies House company type string into a [`CompanyType`].
+    ///
+    /// Returns `None` for types not recognised.
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s {
+            "ltd" => Some(Self::PrivateCompanyLimitedByShares),
+            "private-limited-guarant-nsc" => Some(Self::PrivateCompanyLimitedByGuarantee),
+            "private-unlimited" | "unltd" => Some(Self::PrivateUnlimitedCompany),
+            "plc" => Some(Self::PublicLimitedCompany),
+            "old-public-company" => Some(Self::OldPublicCompany),
+            "private-limited-shares-section-30-exemption" => {
+                Some(Self::PrivateCompanyLimitedBySharesExempt)
+            }
+            "llp" => Some(Self::LimitedLiabilityPartnership),
+            _ => None,
+        }
+    }
+
+    /// The CT600 box 4 code for this company type.
+    pub fn code(self) -> u8 {
+        match self {
+            Self::PrivateCompanyLimitedByShares => 1,
+            Self::PrivateCompanyLimitedByGuarantee => 2,
+            Self::PrivateUnlimitedCompany => 3,
+            Self::PublicLimitedCompany => 4,
+            Self::OldPublicCompany => 5,
+            Self::PrivateCompanyLimitedBySharesExempt => 6,
+            Self::LimitedLiabilityPartnership => 9,
+        }
     }
 }
 
@@ -199,6 +282,69 @@ mod tests {
     /// EXT SOFTWARE SERVICES LTD, an active private limited company
     /// incorporated on 28 November 2022.
     const TEST_COMPANY_NUMBER: &str = "14510633";
+
+    #[test]
+    fn test_company_form_values_from_profile() {
+        let profile = CompanyProfile {
+            company_number: "14510633".to_string(),
+            company_name: "EXT SOFTWARE SERVICES LTD".to_string(),
+            company_status: Some("active".to_string()),
+            company_status_detail: None,
+            date_of_creation: Some("2022-11-28".to_string()),
+            date_of_dissolution: None,
+            company_type: Some("ltd".to_string()),
+            jurisdiction: Some("England/Wales".to_string()),
+            registered_office_address: None,
+            accounts: None,
+            confirmation_statement: None,
+            sic_codes: None,
+            undeliverable_registered_office_address: None,
+            links: None,
+        };
+
+        let mut facts = ixbrl::ixbrl_fmt::ParsedIxBrlFacts::default();
+        facts.non_numeric.insert(
+            "ct-comp:CompanyName".to_string(),
+            "EXT SOFTWARE SERVICES LTD".to_string(),
+        );
+        facts.non_numeric.insert(
+            "ct-comp:TaxReference".to_string(),
+            "1234567890".to_string(),
+        );
+        facts.non_numeric.insert(
+            "ct-comp:FinancialYear1CoveredByTheReturn".to_string(),
+            "2025".to_string(),
+        );
+        facts.non_numeric.insert(
+            "ct-comp:FinancialYear2CoveredByTheReturn".to_string(),
+            "2026".to_string(),
+        );
+        facts.non_numeric.insert(
+            "ct-comp:PeriodOfAccountStartDate".to_string(),
+            "1 January 2025".to_string(),
+        );
+        facts.non_numeric.insert(
+            "ct-comp:PeriodOfAccountEndDate".to_string(),
+            "31 December 2025".to_string(),
+        );
+        let company = ixbrl::company::Company::new(
+            "EXT SOFTWARE SERVICES LTD",
+            "1234567890",
+            "14510633",
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
+        );
+        let tax = Frs105CorpTax::from_parsed_facts(&facts, &company);
+
+        let values = company_form_values_from_profile(&profile, &tax);
+
+        assert_eq!(values.company_name, "EXT SOFTWARE SERVICES LTD");
+        assert_eq!(values.company_number, "14510633");
+        assert_eq!(values.tax_reference, "1234567890");
+        assert_eq!(values.type_of_company, 1);
+        assert_eq!(values.start.to_string(), "2025-01-01");
+        assert_eq!(values.end.to_string(), "2025-12-31");
+    }
 
     /// Live integration test against the Companies House API.
     ///
