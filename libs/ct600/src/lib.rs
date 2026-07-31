@@ -10,6 +10,9 @@ use bergshamra_c14n::{canonicalize, C14nMode};
 mod error;
 pub use error::{Ct600Error, Result};
 
+pub mod companies_house;
+pub use companies_house::{CompaniesHouseClient, CompaniesHouseError};
+
 pub mod form;
 pub use form::{Definition, FieldValue, to_values};
 
