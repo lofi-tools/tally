@@ -1951,6 +1951,173 @@ impl Frs105CorpTax {
 }
 
 /// Format a date for iXBRL output with non-breaking spaces.
+/*
+============================================================================
+CT600 form value accessors
+
+The Python reference implementation re-parses the generated iXBRL to extract
+these values.  Here we derive them directly from the computed
+[`Frs105CorpTax`] fields instead.
+============================================================================
+*/
+
+impl Frs105CorpTax {
+    /// Box 1 — Company name.
+    pub fn company_name(&self) -> &str {
+        &self.company.name
+    }
+
+    /// Box 2 — Company registration number.
+    pub fn company_number(&self) -> &str {
+        &self.company.company_number
+    }
+
+    /// Box 3 — Tax reference (UTR).
+    pub fn tax_reference(&self) -> &str {
+        &self.company.tax_reference
+    }
+
+    /// Box 4 — Type of company (0 = company).
+    pub fn type_of_company(&self) -> u8 {
+        0
+    }
+
+    /// Box 30 — Start of the period covered by the return.
+    pub fn start(&self) -> chrono::NaiveDate {
+        self.company.return_period_start()
+    }
+
+    /// Box 35 — End of the period covered by the return.
+    pub fn end(&self) -> chrono::NaiveDate {
+        self.company.return_period_end()
+    }
+
+    /// Gross profit / loss per the accounts.
+    pub fn gross_profit_loss(&self) -> f64 {
+        self.gross_profit
+    }
+
+    /// Box 145 — Total turnover from trade.
+    pub fn turnover_revenue(&self) -> f64 {
+        self.turnover
+    }
+
+    /// Box 155 — Adjusted trading profit of this period.
+    pub fn adjusted_trading_profit(&self) -> f64 {
+        self.adjusted_trading_profit
+    }
+
+    /// Box 165 — Net trading profits.
+    pub fn net_trading_profits(&self) -> f64 {
+        self.net_trading_profits
+    }
+
+    /// Box 220 — Net chargeable gains.
+    pub fn net_chargeable_gains(&self) -> f64 {
+        self.net_chargeable_gains
+    }
+
+    /// Box 235 — Profits before other deductions and reliefs.
+    pub fn profits_before_other_deductions_and_reliefs(&self) -> f64 {
+        self.profits_before_deductions
+    }
+
+    /// Box 300 — Profits before qualifying donations and group relief.
+    pub fn profits_before_charges_and_group_relief(&self) -> f64 {
+        self.profits_before_charges
+    }
+
+    /// Box 315 — Profits chargeable to Corporation Tax.
+    pub fn total_profits_chargeable_to_corporation_tax(&self) -> f64 {
+        self.profits_chargeable_to_corporation_tax
+    }
+
+    /// Box 330 — Financial year 1 covered by the return.
+    pub fn fy1(&self) -> i32 {
+        self.company.fy1_year
+    }
+
+    /// Box 380 — Financial year 2 covered by the return.
+    pub fn fy2(&self) -> i32 {
+        self.company.fy2_year
+    }
+
+    /// Box 335 — FY1 profit chargeable at the first rate.
+    pub fn fy1_profit(&self) -> f64 {
+        self.fy1_profit
+    }
+
+    /// Box 385 — FY2 profit chargeable at the first rate.
+    pub fn fy2_profit(&self) -> f64 {
+        self.fy2_profit
+    }
+
+    /// Box 340 — FY1 first rate of tax.
+    pub fn fy1_tax_rate(&self) -> f64 {
+        self.company.fy1_rate
+    }
+
+    /// Box 390 — FY2 first rate of tax.
+    pub fn fy2_tax_rate(&self) -> f64 {
+        self.company.fy2_rate
+    }
+
+    /// Box 345 — FY1 tax at first rate.
+    pub fn fy1_tax(&self) -> f64 {
+        self.fy1_tax
+    }
+
+    /// Box 395 — FY2 tax at first rate.
+    pub fn fy2_tax(&self) -> f64 {
+        self.fy2_tax
+    }
+
+    /// Box 430 / 440 / 475 — Corporation Tax chargeable.
+    pub fn corporation_tax_chargeable(&self) -> f64 {
+        self.corporation_tax_chargeable
+    }
+
+    /// Box 510 — Tax chargeable.
+    pub fn tax_chargeable(&self) -> f64 {
+        self.tax_chargeable
+    }
+
+    /// Box 525 / 528 — Tax payable.
+    pub fn tax_payable(&self) -> f64 {
+        self.tax_payable
+    }
+
+    /// Boxes 660 / 670 — SME R&D enhanced expenditure, if any.
+    pub fn sme_rnd_expenditure_deduction(&self) -> Option<f64> {
+        (self.rnd_enhanced_expenditure > 0.0).then_some(self.rnd_enhanced_expenditure)
+    }
+
+    /// Box 690 — Annual investment allowance.
+    pub fn investment_allowance(&self) -> f64 {
+        self.annual_investment_allowance
+    }
+
+    /// Box 40 — Repayments this period.
+    pub fn repayment(&self) -> bool {
+        false
+    }
+
+    /// Box 70 — Compensating adjustment claimed (earlier period relief).
+    pub fn claiming_earlier_period_relief(&self) -> bool {
+        false
+    }
+
+    /// Box 50 — Making more than one return now.
+    pub fn making_more_than_one_return(&self) -> bool {
+        false
+    }
+
+    /// Box 55 — Estimated figures.
+    pub fn estimated_figures(&self) -> bool {
+        false
+    }
+}
+
 fn format_date(d: &chrono::NaiveDate) -> String {
     let day = d.format("%d").to_string();
     let month = d.format("%B").to_string();

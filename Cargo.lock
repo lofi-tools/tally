@@ -477,6 +477,7 @@ dependencies = [
  "chrono",
  "env_logger",
  "futures",
+ "ixbrl",
  "log",
  "quick-xml 0.41.0",
  "reqwest",
