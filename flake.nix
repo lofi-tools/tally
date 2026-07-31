@@ -77,7 +77,7 @@
           };
         };
 
-        ownPkgs.ixbrl-parse = pythonVers.buildPythonPackage rec {
+        ownPkgs.ixbrl-parse = pythonVers.buildPythonPackage {
           pname = "ixbrl-parse";
           version = "0.11.0";
           format = "pyproject";
@@ -117,14 +117,12 @@
               rev = "v${version}";
               hash = "sha256-AMAO3ygDiIVkCsHmHy1fdGp4CVgb7YRV1M8w1mymUhY=";
             };
-
             propagatedBuildInputs = [
               pythonVers.requests
               pythonVers.lxml
               ownPkgs.piecash
               pythonVers.pyyaml
             ];
-
             nativeBuildInputs = [
               pythonVers.setuptools
               pythonVers.pytest
@@ -144,26 +142,64 @@
             passthru = { inherit src versions mkPkg; };
           };
 
-        ixbrl-src = ownPkgs.ixbrl-reporter.src;
+        ownPkgs.ct600-py = pythonVers.buildPythonPackage rec {
+          pname = "ct600";
+          version = "1.4.3";
+          format = "pyproject";
+
+          src = pkgs.fetchFromGitHub {
+            owner = "cybermaggedon";
+            repo = "ct600";
+            rev = "v${version}";
+            hash = "sha256-Pn1f0n2JHF7e8XZgOIvC6jV0JOJseYX2vpHdRyG/ZVo=";
+          };
+          nativeBuildInputs = [
+            pythonVers.setuptools
+          ];
+          propagatedBuildInputs = [
+            pythonVers.aiohttp
+            pythonVers.requests
+            pythonVers.pyaml
+            pythonVers.lxml
+            ownPkgs.ixbrl-parse
+          ];
+
+          # py-dmidecode is declared upstream but unused in the code, and is
+          # Linux-only in nixpkgs, so it's omitted here.
+          dontCheckRuntimeDeps = true;
+          pythonImportsCheck = [ "ct600" ];
+
+          meta = {
+            description = "UK HMRC Corporation Tax submission";
+            homepage = "https://github.com/cybermaggedon/ct600";
+            license = lib.licenses.gpl3Plus;
+            platforms = lib.platforms.unix;
+          };
+        };
+
+        ref-ixbrl = ownPkgs.ixbrl-reporter;
+        ref-ct600 = ownPkgs.ct600-py;
 
         bash.wd = "$(git rev-parse --show-toplevel)";
         bin = inputs.my-nix.bin.${system} // (mapAttrs (n: p: "${p}/bin/${n}") scripts) // {
-          ixbrl = "${ownPkgs.ixbrl-reporter}/bin/ixbrl-reporter";
+          ref-ixbrl = "${ownPkgs.ixbrl-reporter}/bin/ixbrl-reporter";
+          ref-ct600 = "${ownPkgs.ct600-py}/bin/ct600";
         };
-        scripts = with bash; mapAttrs (n: s: pkgs.writeShellScriptBin n s) {
+        scripts = with bash; mapAttrs pkgs.writeShellScriptBin {
           run = ''cargo run -- "$@" '';
           # packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
           # utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
           # ftest = ''set -x; cargo nextest run --workspace -E "''${TEST_FILTER:-all()}" --nocapture "$@" '';
           backup-txs = ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'';
 
-          refsrc = ''printf "%s\n" ${ixbrl-src}'';
+          rixsrc = ''printf "%s\n" ${ref-ixbrl.src}'';
           report = ''
             WD="${bash.wd}";
-            cd ${ixbrl-src}
-            ${bin.ixbrl} ${ixbrl-src}/config-corptax.yaml report ixbrl > "$WD/.cache/corp-tax.html"
+            cd ${ref-ixbrl.src}
+            ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$WD/.cache/corp-tax.html"
           '';
           validate = ''arelleCmdLine -f "${wd}/.cache/ct_return_example2.html" -v'';
+          rct600 = ''${ref-ct600} "$@" '';
         };
 
         env = {
