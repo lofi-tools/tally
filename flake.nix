@@ -193,10 +193,12 @@
           backup-txs = ''mkdir -p ./.cache/backup && mv ./.cache/starling_transactions.json ./.cache/backup/starling_transactions.$(date +%Y%m%d%H%M).json'';
 
           rixsrc = ''printf "%s\n" ${ref-ixbrl.src}'';
+          racc = ''
+             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
+            ${bin.ref-ixbrl} ${ref-ixbrl.src}/config.yaml report ixbrl > $HERE/.cache/accts-micro.html '';
           report = ''
-            WD="${bash.wd}";
-            cd ${ref-ixbrl.src}
-            ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$WD/.cache/corp-tax.html"
+            HERE="${bash.wd}"; cd ${ref-ixbrl.src}
+            ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$HERE/.cache/corp-tax.html"
           '';
           validate = ''arelleCmdLine -f "${wd}/.cache/ct_return_example2.html" -v'';
           rct600 = ''${ref-ct600} "$@" '';
