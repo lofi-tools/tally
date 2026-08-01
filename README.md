@@ -54,6 +54,11 @@ cargo test -p ct600
 cargo check --workspace
 ```
 
+The ct600 tests run fully offline out of the box: the Companies House
+endpoints serve from hardcoded fictional mock responses in
+`libs/ct600/src/test_utils.rs`, so `cargo test -p ct600` needs no API key,
+no network and no cached responses on a fresh checkout.
+
 ## Links
 
 - https://www.gov.uk/company-tax-returns

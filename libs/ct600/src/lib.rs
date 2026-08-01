@@ -2,21 +2,19 @@
 //! Uses Serde for XML serialization/deserialization
 
 use base64::{Engine as _, engine::general_purpose};
+use bergshamra_c14n::{C14nMode, canonicalize};
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
-use bergshamra_c14n::{canonicalize, C14nMode};
 
 mod error;
 pub use error::{Ct600Error, Result};
-
 pub mod companies_house;
-pub use companies_house::{
-    CachedCompaniesHouseClient, CompaniesHouseClient, CompaniesHouseError, CompanyType, REPO,
-};
-
+pub use companies_house::{CompaniesHouseClient, CompanyType};
 pub mod form;
 pub use form::{BoxValue, CompanyFormValues, Ct600FormValues, FieldValue};
+#[cfg(test)]
+pub mod test_utils;
 
 // ============================================================================
 // Namespace Definitions
@@ -520,13 +518,7 @@ impl GovTalkSubmissionRequest {
         let irmark = &self.params.irmark;
 
         let mut w = uppsala::XmlWriter::new();
-        w.start_element(
-            "IRenvelope",
-            &[
-                ("xmlns", ENV_NS),
-                ("xmlns:ct", CT_NS),
-            ],
-        );
+        w.start_element("IRenvelope", &[("xmlns", ENV_NS), ("xmlns:ct", CT_NS)]);
         w.start_element("ct:IRheader", &[]);
         w.start_element("ct:IRmark", &[("Type", "generic")]);
         w.text(irmark);

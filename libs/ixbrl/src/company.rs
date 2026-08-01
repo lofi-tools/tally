@@ -126,7 +126,7 @@ mod tests {
         let c = Company::new(
             "Acme Ltd",
             "1234567890",
-            "09876543",
+            "9876543",
             NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
             NaiveDate::from_ymd_opt(2024, 12, 31).unwrap(),
         );

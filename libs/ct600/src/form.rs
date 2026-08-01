@@ -619,7 +619,7 @@ mod tests {
         let company = Company::new(
             "Acme Ltd",
             "1234567890",
-            "09876543",
+            "9876543",
             NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
         );
@@ -638,7 +638,7 @@ mod tests {
     fn test_company_values_from_tax() {
         let values = sample_values();
         assert_eq!(values.company.company_name, "Acme Ltd");
-        assert_eq!(values.company.company_number, "09876543");
+        assert_eq!(values.company.company_number, "9876543");
         assert_eq!(values.company.tax_reference, "1234567890");
         assert_eq!(values.company.type_of_company, 0);
         assert_eq!(
@@ -661,7 +661,7 @@ mod tests {
         );
         assert_eq!(
             by_number(&map, 2).value,
-            Some(FieldValue::Text("09876543".to_string()))
+            Some(FieldValue::Text("9876543".to_string()))
         );
         assert_eq!(
             by_number(&map, 3).value,
@@ -747,7 +747,7 @@ mod tests {
     fn test_with_company_overrides() {
         let company = CompanyFormValues {
             company_name: "CH Ltd".to_string(),
-            company_number: "14510633".to_string(),
+            company_number: "12345678".to_string(),
             tax_reference: "9876543210".to_string(),
             type_of_company: 1,
             start: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
@@ -764,7 +764,7 @@ mod tests {
         );
         assert_eq!(
             by_number(&map, 2).value,
-            Some(FieldValue::Text("14510633".to_string()))
+            Some(FieldValue::Text("12345678".to_string()))
         );
         assert_eq!(by_number(&map, 4).value, Some(FieldValue::Number(1.0)));
     }
