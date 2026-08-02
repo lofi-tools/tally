@@ -230,8 +230,32 @@
 
           rixsrc = ''printf "%s\n" ${ref-ixbrl.src}'';
           racc = ''
-             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
+            HERE="${bash.wd}"; cd ${ref-ixbrl.src}
             ${bin.ref-ixbrl} ${ref-ixbrl.src}/config.yaml report ixbrl > $HERE/.cache/accts-micro.html '';
+
+          # Run the reference accounts report on the example GnuCash book.
+          racc-gnucash = ''
+            HERE="${bash.wd}"; cd ${ref-ixbrl.src}
+            mkdir -p "$HERE/.cache"
+            ${pkgs.gawk}/bin/awk -v file="$HERE/libs/ixbrl/example_data/example2/example2.gnucash" '
+              /^accounts:/ { print "accounts:"; print "  kind: piecash"; print "  file: " file; f=1; next }
+              /^report:/ { f=0 }
+              !f
+            ' config.yaml > "$HERE/.cache/config-gnucash.yaml"
+            ${bin.ref-ixbrl} "$HERE/.cache/config-gnucash.yaml" report ixbrl > "$HERE/.cache/accts-micro-gnucash.html"
+          '';
+
+          # Run the reference accounts report on the example CSV accounts.
+          racc-csv = ''
+            HERE="${bash.wd}"; cd ${ref-ixbrl.src}
+            mkdir -p "$HERE/.cache"
+            ${pkgs.gawk}/bin/awk -v file="$HERE/libs/ixbrl/example_data/example3.csv" '
+              /^accounts:/ { print "accounts:"; print "  kind: csv"; print "  file: " file; f=1; next }
+              /^report:/ { f=0 }
+              !f
+            ' config.yaml > "$HERE/.cache/config-csv.yaml"
+            ${bin.ref-ixbrl} "$HERE/.cache/config-csv.yaml" report ixbrl > "$HERE/.cache/accts-micro-csv.html"
+          '';
           report = ''
             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
             ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$HERE/.cache/corp-tax.html"
