@@ -237,7 +237,7 @@
           racc-gnucash = ''
             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
             mkdir -p "$HERE/.cache"
-            ${pkgs.gawk}/bin/awk -v file="$HERE/libs/ixbrl/example_data/example2/example2.gnucash" '
+            ${pkgs.gawk}/bin/awk -v file="$HERE/libs/ixbrl/example_data/example2/input.gnucash" '
               /^accounts:/ { print "accounts:"; print "  kind: piecash"; print "  file: " file; f=1; next }
               /^report:/ { f=0 }
               !f

@@ -15,10 +15,10 @@
 //! * `sum` / `group` computations add their inputs;
 //! * values are rounded to whole pounds (decimals = 0) at render time.
 //!
-//! For the example company (`example_data/example2/example2.gnucash`) the
+//! For the example company (`example_data/example2/input.gnucash`) the
 //! rendered output matches the reference fixture
-//! `example_data/example2/accts-micro.html` byte for byte (after stripping
-//! the reference's random element ids).
+//! `example_data/example2/output-accounts.html` byte for byte (after
+//! stripping the reference's random element ids).
 
 use std::collections::HashMap;
 
@@ -28,19 +28,15 @@ use crate::company::Company;
 use crate::ixbrl_fmt::*;
 use crate::GnucashBook;
 
-/// Base64-encoded company logo and director's signature used on the title
-/// page and the statement of financial position, matching the reference
-/// report assets.
-const LOGO_B64: &str = include_str!("logo.b64");
-const SIGNATURE_B64: &str = include_str!("signature.b64");
-
 /// Company details required by the accounts report that are not part of
 /// [`Company`] (directors, addresses, accountant/auditor, VAT number, SIC
-/// codes, employees, report dates, taxonomy dimension values, ...).
+/// codes, employees, report dates, taxonomy dimension values, ...), plus
+/// the base64-encoded logo and signature assets used on the report pages.
 ///
-/// [`Default`] provides the fictional example company's details, so tests
-/// run with zero configuration.
-#[derive(Debug, Clone)]
+/// Deserialisable from the example company's data file
+/// (`example_data/example2/input-company.json`), which the tests load as
+/// the single source of truth.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct AccountsMetadata {
     /// Names of the directors, in order (used for the officer contexts).
     pub directors: Vec<String>,
@@ -72,9 +68,9 @@ pub struct AccountsMetadata {
     pub sic_codes: Vec<String>,
     /// Summary of business activities.
     pub activities: String,
-    /// Average monthly number of employees for the current then previous
-    /// period.
-    pub average_employees: Vec<u32>,
+    /// Average monthly number of employees, indexed by calendar year
+    /// (e.g. `"2020" -> 2`, `"2019" -> 1`; JSON object keys are strings).
+    pub average_employees: HashMap<String, u32>,
     /// Jurisdiction, e.g. "England and Wales".
     pub jurisdiction: String,
     /// Accountant's name.
@@ -115,54 +111,18 @@ pub struct AccountsMetadata {
     pub contact_country_dimension: String,
     /// Taxonomy dimension value for the phone-number type.
     pub phone_type_dimension: String,
+    /// Base64-encoded company logo, embedded on the title page.
+    pub logo_b64: String,
+    /// Base64-encoded director's signature, embedded on the statement of
+    /// financial position.
+    pub signature_b64: String,
 }
 
-impl Default for AccountsMetadata {
-    /// Details of the fictional example company ("Example Biz Ltd."), taken
-    /// from the reference report's metadata.
-    fn default() -> Self {
-        AccountsMetadata {
-            directors: vec!["A Bloggs".into(), "B Smith".into(), "C Jones".into()],
-            contact_name: "Corporate Enquiries".into(),
-            address_lines: vec![
-                "123 Leadbarton Street".into(),
-                "Dumpston Trading Estate".into(),
-            ],
-            county: "Minchingshire".into(),
-            location: "Threapminchington".into(),
-            postcode: "QQ99 9ZZ".into(),
-            email: "corporate@example.org".into(),
-            phone_country: "+44".into(),
-            phone_area: "7900".into(),
-            phone_number: "0123456".into(),
-            website_url: "https://example.org/corporate".into(),
-            website_description: "Corporate website".into(),
-            vat_registration: "GB012345678".into(),
-            sic_codes: vec!["62020".into(), "62021".into()],
-            activities: "Computer security consultancy and development services".into(),
-            average_employees: vec![2, 1],
-            jurisdiction: "England and Wales".into(),
-            accountant_name: "Kirsty Furlong BSc FCA".into(),
-            accountant_business: "DSKL Chartered Accountants".into(),
-            accountant_address: "82 End Crescent Terrace, Threapminchington QQ99 9DF".into(),
-            auditor_name: "Bunchy McGlochlain BSc FCA".into(),
-            auditor_business: "Auditors-R-Us LLC".into(),
-            auditor_address: "123a High Avenue Street, Threapminchington QQ99 9AB".into(),
-            report_title: "Unaudited Micro-Entity Accounts".into(),
-            report_date: chrono::NaiveDate::from_ymd_opt(2021, 3, 1).unwrap(),
-            authorised_date: chrono::NaiveDate::from_ymd_opt(2021, 2, 1).unwrap(),
-            incorporation_date: chrono::NaiveDate::from_ymd_opt(2017, 4, 5).unwrap(),
-            signed_by: "B Smith".into(),
-            industry_sector_dimension: "uk-bus:M-ProfessionalScientificTechnicalActivities"
-                .into(),
-            accounting_standards_dimension: "uk-bus:Micro-entities".into(),
-            accounts_type_dimension: "uk-bus:AbridgedAccounts".into(),
-            accounts_status_dimension: "uk-bus:AuditExempt-NoAccountantsReport".into(),
-            legal_form_dimension: "uk-bus:PrivateLimitedCompanyLtd".into(),
-            country_dimension: "uk-geo:EnglandWales".into(),
-            contact_country_dimension: "uk-geo:UnitedKingdom".into(),
-            phone_type_dimension: "uk-bus:Landline".into(),
-        }
+impl AccountsMetadata {
+    /// The average monthly number of employees for a given calendar year
+    /// (0 when the year is absent from the data).
+    pub fn average_employees_for(&self, year: i32) -> u32 {
+        self.average_employees.get(&year.to_string()).copied().unwrap_or(0)
     }
 }
 
@@ -471,21 +431,11 @@ impl Frs105Accounts {
             ),
             employees_non_fraction(
                 "ctxt-0",
-                &metadata
-                    .average_employees
-                    .first()
-                    .copied()
-                    .unwrap_or(0)
-                    .to_string(),
+                &metadata.average_employees_for(period_end.year()).to_string(),
             ),
             employees_non_fraction(
                 "ctxt-9",
-                &metadata
-                    .average_employees
-                    .get(1)
-                    .copied()
-                    .unwrap_or(0)
-                    .to_string(),
+                &metadata.average_employees_for(prev_end.year()).to_string(),
             ),
             non_numeric("uk-core:DirectorSigningFinancialStatements", "ctxt-11", ""),
             non_numeric(
@@ -799,7 +749,7 @@ impl Frs105Accounts {
                 "img",
                 &[
                     ("alt", "Company logo"),
-                    ("src", &format!("data:image/png;base64,{}", LOGO_B64)),
+                    ("src", &format!("data:image/png;base64,{}", &metadata.logo_b64)),
                 ],
             ),
             div("company-name", vec![span(vec![span(vec![non_numeric(
@@ -1123,7 +1073,10 @@ impl Frs105Accounts {
                 "img",
                 &[
                     ("alt", "Director's signature"),
-                    ("src", &format!("data:image/png;base64,{}", SIGNATURE_B64)),
+                    ("src", &format!(
+                        "data:image/png;base64,{}",
+                        &self.metadata.signature_b64
+                    )),
                 ],
             ),
         ]));
@@ -1140,6 +1093,10 @@ impl Frs105Accounts {
     fn build_notes_page(&self, current_year: &str, prev_year: &str) -> XmlNode {
         let company = &self.company;
         let metadata = &self.metadata;
+        // Employee figures are indexed by calendar year in the metadata.
+        let employees_cur_year = company.accounting_period_end.year();
+        let employees_prev_year =
+            (company.accounting_period_start - chrono::Duration::days(1)).year();
 
         let company_note = elt("div", &[]).children(vec![elt("div", &[]).children(vec![
             elt("div", &[]).child(elt_text(
@@ -1217,23 +1174,13 @@ impl Frs105Accounts {
                     elt("td", &[("class", "data value")]).child(span(vec![span(vec![
                         employees_non_fraction(
                             "ctxt-0",
-                            &metadata
-                                .average_employees
-                                .first()
-                                .copied()
-                                .unwrap_or(0)
-                                .to_string(),
+                            &metadata.average_employees_for(employees_cur_year).to_string(),
                         ),
                     ])])),
                     elt("td", &[("class", "data value")]).child(span(vec![span(vec![
                         employees_non_fraction(
                             "ctxt-9",
-                            &metadata
-                                .average_employees
-                                .get(1)
-                                .copied()
-                                .unwrap_or(0)
-                                .to_string(),
+                            &metadata.average_employees_for(employees_prev_year).to_string(),
                         ),
                     ])])),
                 ]),
@@ -1490,7 +1437,7 @@ mod tests {
     use crate::test_utils::TestData;
 
     async fn load_example() -> (Company, GnucashBook) {
-        let company = TestData::default_company();
+        let company = example_company();
         let gnucash = GnucashBook::try_from_gnucash_file(
             TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
@@ -1500,10 +1447,102 @@ mod tests {
         (company, gnucash)
     }
 
+    /// The example company's identity fields from the JSON, mirroring the
+    /// constructor arguments of [`Company::new`]; the remaining JSON keys
+    /// are flattened into [`AccountsMetadata`].
+    #[derive(serde::Deserialize)]
+    struct CompanyData {
+        name: String,
+        tax_reference: String,
+        company_number: String,
+        accounting_period_start: chrono::NaiveDate,
+        accounting_period_end: chrono::NaiveDate,
+    }
+
+    /// The top-level shape of `input-company.json`: a nested `company`
+    /// identity block plus the flat metadata fields (incl. logo/signature).
+    #[derive(serde::Deserialize)]
+    struct ExampleCompanyData {
+        company: CompanyData,
+        #[serde(flatten)]
+        metadata: AccountsMetadata,
+    }
+
+    /// Load the example company's data file — the single source of truth for
+    /// the company identity, the report metadata and the logo/signature
+    /// assets.
+    fn load_example_data() -> ExampleCompanyData {
+        let json = std::fs::read_to_string("example_data/example2/input-company.json")
+            .expect("read example company data file");
+        serde_json::from_str(&json).expect("parse example company data file")
+    }
+
+    /// The example [`Company`] (identity + accounting period) from the JSON.
+    fn example_company() -> Company {
+        let data = load_example_data().company;
+        Company::new(
+            data.name,
+            data.tax_reference,
+            data.company_number,
+            data.accounting_period_start,
+            data.accounting_period_end,
+        )
+    }
+
+    /// The example report metadata (incl. logo/signature) from the JSON.
+    fn example_metadata() -> AccountsMetadata {
+        load_example_data().metadata
+    }
+
+    #[test]
+    fn test_example_company_data_from_json() {
+        // Company identity round-trips from the JSON.
+        let company = example_company();
+        assert_eq!(company.name, "Example Biz Ltd.");
+        assert_eq!(company.company_number, "12345678");
+        assert_eq!(company.tax_reference, "8596148860");
+        assert_eq!(
+            company.accounting_period_start,
+            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()
+        );
+        assert_eq!(
+            company.accounting_period_end,
+            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap()
+        );
+
+        // Must stay in sync with the hardcoded TestData company used by the
+        // corp-tax tests.
+        let t = TestData::default_company();
+        assert_eq!(company.name, t.name);
+        assert_eq!(company.company_number, t.company_number);
+        assert_eq!(company.tax_reference, t.tax_reference);
+        assert_eq!(company.accounting_period_start, t.accounting_period_start);
+        assert_eq!(company.accounting_period_end, t.accounting_period_end);
+
+        // Metadata round-trips from the same file.
+        let m = example_metadata();
+        assert_eq!(m.directors, vec!["A Bloggs", "B Smith", "C Jones"]);
+        assert_eq!(m.sic_codes, vec!["62020", "62021"]);
+        assert_eq!(
+            m.average_employees,
+            HashMap::from([("2020".to_string(), 2), ("2019".to_string(), 1)])
+        );
+        assert_eq!(
+            m.report_date,
+            chrono::NaiveDate::from_ymd_opt(2021, 3, 1).unwrap()
+        );
+        assert_eq!(
+            m.incorporation_date,
+            chrono::NaiveDate::from_ymd_opt(2017, 4, 5).unwrap()
+        );
+        assert!(!m.logo_b64.is_empty());
+        assert!(!m.signature_b64.is_empty());
+    }
+
     #[tokio::test]
     async fn test_accounts_from_example2() {
         let (company, gnucash) = load_example().await;
-        let accounts = Frs105Accounts::new(&gnucash, &company, &AccountsMetadata::default());
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata());
 
         // Balance-sheet values (whole-pence, computed from the ledger).
         assert_eq!(accounts.fixed_assets, [932.74, 633.10]);
@@ -1531,18 +1570,19 @@ mod tests {
         // Regenerate the fixture with:
         //   nix run .#racc-gnucash   # -> .cache/accts-micro-gnucash.html
         // then strip the reference's random `id="elt-*"` attributes and
-        // copy to example_data/example2/accts-micro.html.  The Rust output
-        // below must match it byte for byte.
+        // copy to example_data/example2/output-accounts.html.  The Rust
+        // output below must match it byte for byte.
         let (company, gnucash) = load_example().await;
-        let accounts = Frs105Accounts::new(&gnucash, &company, &AccountsMetadata::default());
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata());
         let out = accounts.to_ixbrl();
 
         // Write the Rust output for external validation (arelle).
         std::fs::create_dir_all("../../.cache").unwrap();
         std::fs::write("../../.cache/accts-micro-rust.html", &out).unwrap();
 
-        let expected = std::fs::read_to_string("example_data/example2/accts-micro.html")
-            .expect("read reference fixture");
+        let expected =
+            std::fs::read_to_string("example_data/example2/output-accounts.html")
+                .expect("read reference fixture");
         assert_eq!(
             out, expected,
             "accounts output must match the reference fixture"
@@ -1552,8 +1592,7 @@ mod tests {
     #[tokio::test]
     async fn test_accounts_ixbrl_structure() {
         let (company, gnucash) = load_example().await;
-        let out = Frs105Accounts::new(&gnucash, &company, &AccountsMetadata::default())
-            .to_ixbrl();
+        let out = Frs105Accounts::new(&gnucash, &company, &example_metadata()).to_ixbrl();
 
         // Header structure
         assert!(out.contains("<div class=\"hidden\"><ix:header><ix:hidden>"));

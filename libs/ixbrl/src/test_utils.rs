@@ -37,12 +37,12 @@ impl TestData {
     /// or `None` for unknown companies.  Paths are relative to the crate
     /// directory (Cargo runs tests from the package root).
     ///
-    /// Only `example_data/example2/example2.gnucash` is tied to a company
+    /// Only `example_data/example2/input.gnucash` is tied to a company
     /// number in the tests; `example_data/example1/example.gnucash` is used
     /// solely to exercise XML-format parsing, so it has no map entry.
     pub fn accounts_path(company_number: &str) -> Option<&'static str> {
         match company_number {
-            "12345678" => Some("example_data/example2/example2.gnucash"),
+            "12345678" => Some("example_data/example2/input.gnucash"),
             _ => None,
         }
     }
@@ -71,7 +71,7 @@ mod tests {
     fn accounts_path_maps_example_company() {
         assert_eq!(
             TestData::accounts_path(TestData::default_company_number()),
-            Some("example_data/example2/example2.gnucash")
+            Some("example_data/example2/input.gnucash")
         );
         assert_eq!(TestData::accounts_path("0"), None);
     }
