@@ -77,6 +77,29 @@
           };
         };
 
+        ownPkgs.number-parser = pythonVers.buildPythonPackage {
+          pname = "number-parser";
+          version = "0.3.2";
+          format = "setuptools";
+
+          src = pkgs.fetchurl {
+            url = "https://files.pythonhosted.org/packages/28/c1/1a3ea159327b442d2202fda38845124a51a3abe11637cbd3111479fd815f/number-parser-0.3.2.tar.gz";
+            hash = "sha256-dlDpGv1G3sL0A5b2LCuryEZFZ5ocqOzbUpK90lJoXWo=";
+          };
+
+          propagatedBuildInputs = [
+            pythonVers.attrs
+          ];
+
+          doCheck = false;
+
+          meta = {
+            description = "Convert natural language number expressions into ints and floats";
+            homepage = "https://github.com/scrapinghub/number-parser";
+            license = lib.licenses.bsd3;
+          };
+        };
+
         ownPkgs.ixbrl-parse = pythonVers.buildPythonPackage {
           pname = "ixbrl-parse";
           version = "0.11.0";
@@ -93,6 +116,9 @@
 
           propagatedBuildInputs = [
             pythonVers.lxml
+            pythonVers.requests
+            pythonVers.rdflib
+            ownPkgs.number-parser
           ];
 
           doCheck = false;
@@ -131,6 +157,12 @@
               ownPkgs.ixbrl-parse
             ];
 
+            # The dev shell exports a python3.13 PYTHONPATH (e.g. from arelle)
+            # which would shadow this python3.12 package's own site-packages at
+            # runtime (lxml's compiled extensions are version-specific), so the
+            # generated wrapper must not inherit it.
+            makeWrapperArgs = [ "--unset" "PYTHONPATH" ];
+
             pythonImportsCheck = [ "ixbrl_reporter" ];
 
             meta = {
@@ -163,6 +195,10 @@
             pythonVers.lxml
             ownPkgs.ixbrl-parse
           ];
+
+          # Same as ixbrl-reporter: the dev shell's python3.13 PYTHONPATH would
+          # shadow this python3.12 package's site-packages at runtime.
+          makeWrapperArgs = [ "--unset" "PYTHONPATH" ];
 
           # py-dmidecode is declared upstream but unused in the code, and is
           # Linux-only in nixpkgs, so it's omitted here.
