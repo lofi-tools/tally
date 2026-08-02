@@ -176,14 +176,19 @@
 
         ownPkgs.ct600-py = pythonVers.buildPythonPackage rec {
           pname = "ct600";
-          version = "1.4.3";
+          # v1.4.1 is the last release on the 2023 taxonomies (ct-comp 2023,
+          # FRC core 2023), matching the iXBRL emitted by ixbrl-reporter 1.2.1
+          # and this repo's Rust generators.  v1.4.2+ moved to the CT 2024 / FRC
+          # 2025 taxonomies and cannot parse those files (nor even its own
+          # bundled example).
+          version = "1.4.1";
           format = "pyproject";
 
           src = pkgs.fetchFromGitHub {
             owner = "cybermaggedon";
             repo = "ct600";
             rev = "v${version}";
-            hash = "sha256-Pn1f0n2JHF7e8XZgOIvC6jV0JOJseYX2vpHdRyG/ZVo=";
+            hash = "sha256-LUA1O1RhvXSXvXCxEGQRpumJH1je9jwE34ecQGwT0cc=";
           };
           nativeBuildInputs = [
             pythonVers.setuptools
@@ -211,6 +216,7 @@
             license = lib.licenses.gpl3Plus;
             platforms = lib.platforms.unix;
           };
+          passthru = { inherit src version; };
         };
 
         ref-ixbrl = ownPkgs.ixbrl-reporter;
@@ -261,7 +267,51 @@
             ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$HERE/.cache/corp-tax.html"
           '';
           validate = ''arelleCmdLine -f "${wd}/.cache/ct_return_example2.html" -v'';
-          rct600 = ''${ref-ct600} "$@" '';
+          rct600 = ''${bin.ref-ct600} "$@" '';
+
+          # Run the reference ct600 tool over the example2 pair: step 1
+          # generates the CT600 form-values YAML from the computations iXBRL,
+          # step 2 renders the CT message (--output-ct, no submission) into
+          # .cache.  Inputs default to the example2 pair but can be
+          # overridden:
+          #   rct600-run [--config F] [--accounts F] [--computations F] [--form-values F]
+          rct600-run = ''
+            set -e
+            HERE="${bash.wd}"
+            mkdir -p "$HERE/.cache"
+            CONFIG="${ref-ct600.src}/config.json"
+            ACCOUNTS="$HERE/.cache/accts-micro-gnucash.html"
+            COMPUTATIONS="$HERE/.cache/ct_return_example2.html"
+            FORM_VALUES="$HERE/.cache/form-values.yaml"
+            OUT="$HERE/.cache/ct600.xml"
+            while [ $# -gt 0 ]; do
+              case "$1" in
+                --config) CONFIG="''${2:?missing value for $1}"; shift 2 ;;
+                --accounts) ACCOUNTS="''${2:?missing value for $1}"; shift 2 ;;
+                --computations|--comps) COMPUTATIONS="''${2:?missing value for $1}"; shift 2 ;;
+                --form-values) FORM_VALUES="''${2:?missing value for $1}"; shift 2 ;;
+                *) echo "rct600-run: unknown option: $1" >&2; exit 1 ;;
+              esac
+            done
+            for f in "$CONFIG" "$ACCOUNTS" "$COMPUTATIONS"; do
+              [ -f "$f" ] || {
+                echo "rct600-run: missing input: $f" >&2
+                echo "  hint: run \`racc-gnucash\` first, or pass --config/--accounts/--computations" >&2
+                exit 1
+              }
+            done
+            echo "==> 1/2 form values -> $FORM_VALUES"
+            ${bin.ref-ct600} --computations "$COMPUTATIONS" --output-form-values > "$FORM_VALUES"
+            echo "==> 2/2 CT message (no submission) -> $OUT"
+            ${bin.ref-ct600} \
+              --config "$CONFIG" \
+              --accounts "$ACCOUNTS" \
+              --computations "$COMPUTATIONS" \
+              --form-values "$FORM_VALUES" \
+              --output-ct > "$OUT"
+            echo "Tip: fill boxes 975/980/985 (declaration name/date/status) in $FORM_VALUES before filing;"
+            echo "     note re-running this script regenerates that file from the computations."
+          '';
         };
 
         env = {
