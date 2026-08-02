@@ -2136,17 +2136,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_ct_return_from_example2() {
-        let gnucash =
-            crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
-                .await
-                .expect("open gnucash");
-        let company = crate::company::Company::new(
-            "Example Biz Ltd.",
-            "8596148860",
-            "12345678",
-            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
-        );
+        let company = crate::test_utils::TestData::default_company();
+        let gnucash = crate::GnucashBook::try_from_gnucash_file(
+            crate::test_utils::TestData::accounts_path(&company.company_number)
+                .expect("example company accounts path"),
+        )
+        .await
+        .expect("open gnucash");
         let ct = Frs105CorpTax::builder(&gnucash, &company)
             .add_rd_project(
                 "Project Iguana",
@@ -2168,11 +2164,11 @@ mod tests {
             )
             .build();
 
-        assert_eq!(ct.company.name, "Example Biz Ltd.");
-        assert_eq!(ct.company.tax_reference, "8596148860");
-        assert_eq!(ct.company.company_number, "12345678");
-        assert_eq!(ct.company.fy1_year, 2019);
-        assert_eq!(ct.company.fy2_year, 2020);
+        assert_eq!(ct.company.name, company.name);
+        assert_eq!(ct.company.tax_reference, company.tax_reference);
+        assert_eq!(ct.company.company_number, company.company_number);
+        assert_eq!(ct.company.fy1_year, company.fy1_year);
+        assert_eq!(ct.company.fy2_year, company.fy2_year);
 
         assert_eq!(ct.net_trading_profits, 748.0);
         assert_eq!(ct.fy1_profit, 186.0);
@@ -2189,8 +2185,8 @@ mod tests {
         let ixbrl = ct.to_ixbrl();
         assert!(ixbrl.contains("ct-comp:NetTradingProfits"));
         assert!(ixbrl.contains("ct-comp:TaxPayable"));
-        assert!(ixbrl.contains("Example Biz Ltd."));
-        assert!(ixbrl.contains("8596148860"));
+        assert!(ixbrl.contains(&company.name));
+        assert!(ixbrl.contains(&company.tax_reference));
 
         std::fs::create_dir_all("../../.cache").unwrap();
         std::fs::write("../../.cache/ct_return_example2.html", &ixbrl).unwrap();
@@ -2198,10 +2194,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_from_gnucash_file_sql() {
-        let gnucash =
-            crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
-                .await
-                .expect("open sqlite gnucash");
+        let company = crate::test_utils::TestData::default_company();
+        let gnucash = crate::GnucashBook::try_from_gnucash_file(
+            crate::test_utils::TestData::accounts_path(&company.company_number)
+                .expect("example company accounts path"),
+        )
+        .await
+        .expect("open sqlite gnucash");
         println!("{gnucash}");
     }
 
@@ -2229,17 +2228,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_rnd_worksheet_output() {
-        let gnucash =
-            crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
-                .await
-                .expect("open gnucash");
-        let company = crate::company::Company::new(
-            "Example Biz Ltd.",
-            "8596148860",
-            "12345678",
-            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
-        );
+        let company = crate::test_utils::TestData::default_company();
+        let gnucash = crate::GnucashBook::try_from_gnucash_file(
+            crate::test_utils::TestData::accounts_path(&company.company_number)
+                .expect("example company accounts path"),
+        )
+        .await
+        .expect("open gnucash");
         let ct = Frs105CorpTax::builder(&gnucash, &company)
             .add_rd_project(
                 "Project Iguana",
@@ -2266,11 +2261,11 @@ mod tests {
         assert_eq!(p.name, "Project Iguana");
         assert_eq!(p.items.len(), 3);
         assert_eq!(p.items[0].label, "Staffing Costs");
-        assert_eq!(p.items[0].values_by_fy[&2020], 465.0);
+        assert_eq!(p.items[0].values_by_fy[&company.fy2_year], 465.0);
         assert_eq!(p.items[1].label, "Software/Consumables");
-        assert_eq!(p.items[1].values_by_fy[&2020], 0.0);
+        assert_eq!(p.items[1].values_by_fy[&company.fy2_year], 0.0);
         assert_eq!(p.items[2].label, "External Workers");
-        assert_eq!(p.items[2].values_by_fy[&2020], 0.0);
+        assert_eq!(p.items[2].values_by_fy[&company.fy2_year], 0.0);
 
         let ixbrl = ct.to_ixbrl();
         assert!(ixbrl.contains("SME R&amp;D</h2>"));
@@ -2287,17 +2282,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_ixbrl_tag_structure_matches_reference() {
-        let gnucash =
-            crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
-                .await
-                .expect("open gnucash");
-        let company = crate::company::Company::new(
-            "Example Biz Ltd.",
-            "8596148860",
-            "12345678",
-            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
-        );
+        let company = crate::test_utils::TestData::default_company();
+        let gnucash = crate::GnucashBook::try_from_gnucash_file(
+            crate::test_utils::TestData::accounts_path(&company.company_number)
+                .expect("example company accounts path"),
+        )
+        .await
+        .expect("open gnucash");
         let ct = Frs105CorpTax::builder(&gnucash, &company)
             .add_rd_project(
                 "Project Iguana",
@@ -2486,17 +2477,13 @@ mod tests {
     }
 
     async fn build_example2_ct() -> Frs105CorpTax {
-        let gnucash =
-            crate::GnucashBook::try_from_gnucash_file("example_data/example2/example2.gnucash")
-                .await
-                .expect("open gnucash");
-        let company = crate::company::Company::new(
-            "Example Biz Ltd.",
-            "8596148860",
-            "12345678",
-            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
-        );
+        let company = crate::test_utils::TestData::default_company();
+        let gnucash = crate::GnucashBook::try_from_gnucash_file(
+            crate::test_utils::TestData::accounts_path(&company.company_number)
+                .expect("example company accounts path"),
+        )
+        .await
+        .expect("open gnucash");
         Frs105CorpTax::builder(&gnucash, &company)
             .add_rd_project(
                 "Project Iguana",
@@ -2626,11 +2613,11 @@ mod tests {
 
         assert_eq!(
             facts.non_numeric.get("ct-comp:CompanyName").unwrap(),
-            "Example Biz Ltd."
+            &ct.company.name
         );
         assert_eq!(
             facts.non_numeric.get("ct-comp:TaxReference").unwrap(),
-            "8596148860"
+            &ct.company.tax_reference
         );
 
         assert_eq!(
@@ -2701,32 +2688,26 @@ mod tests {
         std::fs::write("../../.cache/ct_return_example2.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
-        let company = crate::company::Company::new(
-            "Example Biz Ltd.",
-            "8596148860",
-            "12345678",
-            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
-        );
+        let company = crate::test_utils::TestData::default_company();
 
         let ct = Frs105CorpTax::from_parsed_facts(&facts, &company);
 
         // -- company fields ------------------------------------------------
 
-        assert_eq!(ct.company.name, "Example Biz Ltd.");
-        assert_eq!(ct.company.tax_reference, "8596148860");
-        assert_eq!(ct.company.company_number, "12345678");
-        assert_eq!(ct.company.fy1_year, 2019);
-        assert_eq!(ct.company.fy2_year, 2020);
-        assert_eq!(ct.company.fy1_rate, 19.0);
-        assert_eq!(ct.company.fy2_rate, 19.0);
+        assert_eq!(ct.company.name, company.name);
+        assert_eq!(ct.company.tax_reference, company.tax_reference);
+        assert_eq!(ct.company.company_number, company.company_number);
+        assert_eq!(ct.company.fy1_year, company.fy1_year);
+        assert_eq!(ct.company.fy2_year, company.fy2_year);
+        assert_eq!(ct.company.fy1_rate, company.fy1_rate);
+        assert_eq!(ct.company.fy2_rate, company.fy2_rate);
         assert_eq!(
             ct.company.accounting_period_start,
-            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()
+            company.accounting_period_start
         );
         assert_eq!(
             ct.company.accounting_period_end,
-            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap()
+            company.accounting_period_end
         );
 
         // -- profits & gains page -----------------------------------------
@@ -2780,15 +2761,25 @@ mod tests {
         // -- per-year hash maps ------------------------------------------
 
         assert_eq!(
-            *ct.profit_per_accounts_by_fy.get(&2020).unwrap_or(&0.0),
+            *ct.profit_per_accounts_by_fy
+                .get(&company.fy2_year)
+                .unwrap_or(&0.0),
             1804.94
         );
         assert_eq!(
-            *ct.profit_per_accounts_by_fy.get(&2019).unwrap_or(&0.0),
+            *ct.profit_per_accounts_by_fy
+                .get(&company.fy1_year)
+                .unwrap_or(&0.0),
             4837.88
         );
-        assert_eq!(*ct.aia_by_fy.get(&2020).unwrap_or(&0.0), 591.0);
-        assert_eq!(*ct.rnd_by_fy.get(&2020).unwrap_or(&0.0), 465.0);
+        assert_eq!(
+            *ct.aia_by_fy.get(&company.fy2_year).unwrap_or(&0.0),
+            591.0
+        );
+        assert_eq!(
+            *ct.rnd_by_fy.get(&company.fy2_year).unwrap_or(&0.0),
+            465.0
+        );
 
         // -- invariants ---------------------------------------------------
 

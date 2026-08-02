@@ -3,6 +3,8 @@ use std::fmt;
 pub mod company;
 pub mod ixbrl_fmt;
 pub mod reports;
+#[cfg(test)]
+pub mod test_utils;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountType {
