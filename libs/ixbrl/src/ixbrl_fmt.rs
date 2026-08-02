@@ -7,6 +7,10 @@ use std::io::Cursor;
 // XmlNode — generic XML node tree
 // ============================================================================
 
+/// One frame of the [`XmlNode::from_xml_string`] parser stack: an open
+/// element's (name, attributes, children-so-far).
+type ElementFrame = (String, Vec<(String, String)>, Vec<XmlNode>);
+
 /// A node in an XML / XHTML tree.
 ///
 /// An `Elem` may have zero or more children; the `Text` variant holds
@@ -139,6 +143,104 @@ impl XmlNode {
                     .expect("write text");
             }
         }
+    }
+
+    // -- Deserialization ----------------------------------------------------
+
+    /// Parse an XML / XHTML document into this intermediate representation.
+    ///
+    /// This is the inverse of [`Self::to_xml_string`]: it recovers the same
+    /// node tree that was used for serialisation, so reports can round-trip
+    /// through the IR.  The XML declaration, comments, processing
+    /// instructions and document type declarations are dropped; character
+    /// references (e.g. `&#160;`) are unescaped.
+    pub fn from_xml_string(input: &str) -> Result<XmlNode, String> {
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(input);
+        let mut buf = Vec::new();
+
+        // Stack of open elements: (name, attributes, children).  The root
+        // element is captured separately when its closing tag is read.
+        let mut stack: Vec<ElementFrame> = Vec::new();
+        let mut root: Option<XmlNode> = None;
+
+        fn push_node(stack: &mut [ElementFrame], node: XmlNode) {
+            if let Some(top) = stack.last_mut() {
+                top.2.push(node);
+            }
+        }
+
+        fn read_attrs(e: &quick_xml::events::BytesStart) -> Vec<(String, String)> {
+            e.attributes()
+                .filter_map(|a| a.ok())
+                .map(|a| {
+                    (
+                        String::from_utf8_lossy(a.key.as_ref()).to_string(),
+                        a.unescape_value().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        }
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    let attributes = read_attrs(&e);
+                    stack.push((name, attributes, Vec::new()));
+                }
+                Ok(Event::Empty(e)) => {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    let attributes = read_attrs(&e);
+                    push_node(
+                        &mut stack,
+                        XmlNode::Elem {
+                            name,
+                            attributes,
+                            children: Vec::new(),
+                        },
+                    );
+                }
+                Ok(Event::End(_)) => {
+                    let (name, attributes, children) =
+                        stack.pop().ok_or("unexpected closing tag")?;
+                    let node = XmlNode::Elem {
+                        name,
+                        attributes,
+                        children,
+                    };
+                    match stack.last_mut() {
+                        Some(parent) => parent.2.push(node),
+                        // The root element just closed.
+                        None => root = Some(node),
+                    }
+                }
+                Ok(Event::Text(t)) => {
+                    let text = t.unescape().map_err(|e| e.to_string())?;
+                    let text = text.trim();
+                    if !text.is_empty() {
+                        push_node(&mut stack, XmlNode::Text(text.to_string()));
+                    }
+                }
+                Ok(Event::CData(c)) => {
+                    let text = String::from_utf8_lossy(&c).to_string();
+                    if !text.trim().is_empty() {
+                        push_node(&mut stack, XmlNode::Text(text));
+                    }
+                }
+                Ok(Event::Eof) => break,
+                // Decl, PI, Comment, DocType: not part of the node tree.
+                Ok(_) => {}
+                Err(e) => return Err(e.to_string()),
+            }
+            buf.clear();
+        }
+
+        if !stack.is_empty() {
+            return Err("unbalanced elements".to_string());
+        }
+        root.ok_or("no root element".to_string())
     }
 }
 
@@ -831,62 +933,174 @@ pub const HTML_ATTRS: &[(&str, &str)] = &[
 ];
 
 impl ParsedIxBrlFacts {
+    /// Parse an iXBRL HTML document into parsed facts, first recovering the
+    /// [`XmlNode`] intermediate representation (the same one used for
+    /// serialisation) and then collecting the facts from it.
     pub fn from_html(html: &str) -> ParsedIxBrlFacts {
-        use quick_xml::Reader;
-        use quick_xml::events::Event;
+        let node = XmlNode::from_xml_string(html).unwrap_or_else(|_| XmlNode::Elem {
+            name: "html".to_string(),
+            attributes: Vec::new(),
+            children: Vec::new(),
+        });
+        Self::from_node(&node)
+    }
 
+    /// Collect the iXBRL facts from an [`XmlNode`] tree (the same
+    /// intermediate representation used for serialisation).
+    pub fn from_node(node: &XmlNode) -> ParsedIxBrlFacts {
         let mut facts = ParsedIxBrlFacts::default();
-        let mut reader = Reader::from_str(html);
-        let mut buf = Vec::new();
-
-        loop {
-            match reader.read_event_into(&mut buf) {
-                Ok(Event::Start(e)) => {
-                    let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                    let attrs: HashMap<String, String> = e
-                        .attributes()
-                        .filter_map(|a| a.ok())
-                        .map(|a| {
-                            (
-                                String::from_utf8_lossy(a.key.as_ref()).to_string(),
-                                String::from_utf8_lossy(&a.value).to_string(),
-                            )
-                        })
-                        .collect();
-
-                    let name = attrs.get("name").cloned();
-                    let ctx = attrs.get("contextRef").cloned();
-
-                    if let (Some(name), Some(ctx)) = (name, ctx)
-                        && (tag == "ix:nonFraction" || tag == "ix:nonNumeric")
-                    {
-                        let mut text_buf = Vec::new();
-                        if let Ok(Event::Text(text)) = reader.read_event_into(&mut text_buf) {
-                            let raw = text.unescape().unwrap_or_default().to_string();
-                            let val = raw.trim();
-                            if tag == "ix:nonFraction" {
-                                let cleaned = val.replace(',', "");
-                                if let Ok(v) = cleaned.parse::<f64>() {
-                                    facts.numeric.insert(name.clone(), v);
-                                    facts.numeric_by_ctx.insert((name, ctx), v);
-                                }
-                            } else {
-                                facts.non_numeric.insert(name.clone(), val.to_string());
-                                facts
-                                    .non_numeric_by_ctx
-                                    .insert((name, ctx), val.to_string());
-                            }
-                        }
-                    }
-                }
-                Ok(Event::Eof) => break,
-                Err(_) => break,
-                _ => {}
-            }
-            buf.clear();
-        }
-
+        collect_facts(node, &mut facts);
         facts
+    }
+}
+
+/// Collect `ix:nonFraction` / `ix:nonNumeric` facts from a node tree.
+fn collect_facts(node: &XmlNode, facts: &mut ParsedIxBrlFacts) {
+    if let XmlNode::Elem {
+        name,
+        attributes,
+        children,
+    } = node
+    {
+        if name == "ix:nonFraction" || name == "ix:nonNumeric" {
+            let fact_name = attr(attributes, "name");
+            let ctx = attr(attributes, "contextRef");
+            if let (Some(fact_name), Some(ctx)) = (fact_name, ctx) {
+                let value = direct_text(children);
+                if name == "ix:nonFraction" {
+                    let cleaned = value.replace(',', "");
+                    if let Ok(v) = cleaned.parse::<f64>() {
+                        facts.numeric.insert(fact_name.clone(), v);
+                        facts.numeric_by_ctx.insert((fact_name, ctx), v);
+                    }
+                } else {
+                    facts.non_numeric.insert(fact_name.clone(), value.clone());
+                    facts.non_numeric_by_ctx.insert((fact_name, ctx), value);
+                }
+            }
+        }
+        for child in children {
+            collect_facts(child, facts);
+        }
+    }
+}
+
+/// Extract the dimension members of every `xbrli:context` in the tree:
+/// context id -> (dimension name -> member value).
+pub fn xbrl_context_dimensions(node: &XmlNode) -> HashMap<String, HashMap<String, String>> {
+    let mut out = HashMap::new();
+    collect_contexts(node, &mut out);
+    out
+}
+
+fn collect_contexts(node: &XmlNode, out: &mut HashMap<String, HashMap<String, String>>) {
+    if let XmlNode::Elem {
+        name,
+        attributes,
+        children,
+    } = node
+    {
+        if name == "xbrli:context"
+            && let Some(id) = attr(attributes, "id")
+        {
+            let mut dims = HashMap::new();
+            for child in children {
+                collect_dims(child, &mut dims);
+            }
+            out.insert(id, dims);
+        }
+        for child in children {
+            collect_contexts(child, out);
+        }
+    }
+}
+
+fn collect_dims(node: &XmlNode, dims: &mut HashMap<String, String>) {
+    if let XmlNode::Elem {
+        name,
+        attributes,
+        children,
+    } = node
+    {
+        match name.as_str() {
+            "xbrldi:explicitMember" => {
+                if let Some(dim) = attr(attributes, "dimension") {
+                    dims.insert(dim, direct_text(children));
+                }
+            }
+            "xbrldi:typedMember" => {
+                if let Some(dim) = attr(attributes, "dimension") {
+                    dims.insert(dim, descendant_text(node));
+                }
+            }
+            _ => {}
+        }
+        for child in children {
+            collect_dims(child, dims);
+        }
+    }
+}
+
+/// The value of an attribute, if present.
+fn attr(attrs: &[(String, String)], key: &str) -> Option<String> {
+    attrs
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.clone())
+}
+
+/// The concatenated trimmed text of the direct `Text` children.
+fn direct_text(children: &[XmlNode]) -> String {
+    children
+        .iter()
+        .filter_map(|c| match c {
+            XmlNode::Text(t) => Some(t.trim().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The trimmed text of all descendants, concatenated (used for typed
+/// members, whose value lives in a nested element).
+fn descendant_text(node: &XmlNode) -> String {
+    match node {
+        XmlNode::Text(t) => t.trim().to_string(),
+        XmlNode::Elem { children, .. } => children
+            .iter()
+            .map(descendant_text)
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xml_node_round_trip_via_ir() {
+        let node = elt("html", &[("xmlns", "http://www.w3.org/1999/xhtml")]).children(vec![
+            elt("body", &[]).child(elt_text("div", &[("class", "x")], "hi & bye \u{00A0}!")),
+            el("br"),
+            elt("span", &[]),
+        ]);
+        let xml = node.to_xml_string();
+        let back = XmlNode::from_xml_string(&xml).expect("parse");
+        assert_eq!(format!("{:?}", node), format!("{:?}", back));
+    }
+
+    #[test]
+    fn from_xml_string_skips_declaration() {
+        let xml = "<?xml version='1.0' encoding='ASCII'?>\n<html><body><br/></body></html>";
+        let node = XmlNode::from_xml_string(xml).expect("parse");
+        assert_eq!(format!("{:?}", node), format!("{:?}", elt("html", &[]).child(
+            elt("body", &[]).child(el("br"))
+        )));
     }
 }
 

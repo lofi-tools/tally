@@ -1081,6 +1081,24 @@ impl Frs105CorpTax {
         }
     }
 
+    /// Deserialise a [`Frs105CorpTax`] from the [`XmlNode`] intermediate
+    /// representation (step 2 of the round trip: XML string -> `XmlNode` ->
+    /// `Frs105CorpTax`).
+    ///
+    /// See [`Self::from_parsed_facts`] for which fields are recoverable.
+    pub fn from_ixbrl_node(node: &XmlNode, company: &Company) -> Frs105CorpTax {
+        let facts = ParsedIxBrlFacts::from_node(node);
+        Self::from_parsed_facts(&facts, company)
+    }
+
+    /// Deserialise a [`Frs105CorpTax`] from its serialised iXBRL HTML, in
+    /// two steps: first into the [`XmlNode`] intermediate representation,
+    /// then into the struct.
+    pub fn from_ixbrl(html: &str, company: &Company) -> Result<Frs105CorpTax, String> {
+        let node = XmlNode::from_xml_string(html)?;
+        Ok(Self::from_ixbrl_node(&node, company))
+    }
+
     fn build_fact_text(&self, ref_num: &str, label: &str, value: &str) -> XmlNode {
         fact_wrapper(ref_num, label, span_text(value))
     }
@@ -2600,6 +2618,130 @@ mod tests {
             *ct.profit_per_accounts_by_fy.get(&fy2).unwrap_or(&0.0),
             ct.profit_before_tax
         );
+    }
+
+    #[tokio::test]
+    async fn test_corp_tax_full_round_trip() {
+        // Serialise, write the output to .cache, then deserialise in two
+        // steps (XML -> XmlNode -> Frs105CorpTax) and compare against the
+        // original for every field that is serialised to iXBRL.
+        let ct = build_example2_ct().await;
+        let html = ct.to_ixbrl();
+        std::fs::create_dir_all("../../.cache").unwrap();
+        std::fs::write("../../.cache/ct_roundtrip.html", &html).unwrap();
+
+        let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
+        let back = Frs105CorpTax::from_ixbrl_node(&node, &ct.company);
+
+        // -- company ---------------------------------------------------------
+
+        assert_eq!(back.company.name, ct.company.name);
+        assert_eq!(back.company.tax_reference, ct.company.tax_reference);
+        assert_eq!(back.company.company_number, ct.company.company_number);
+        assert_eq!(back.company.fy1_year, ct.company.fy1_year);
+        assert_eq!(back.company.fy2_year, ct.company.fy2_year);
+        assert_eq!(back.company.fy1_rate, ct.company.fy1_rate);
+        assert_eq!(back.company.fy2_rate, ct.company.fy2_rate);
+        assert_eq!(
+            back.company.accounting_period_start,
+            ct.company.accounting_period_start
+        );
+        assert_eq!(
+            back.company.accounting_period_end,
+            ct.company.accounting_period_end
+        );
+
+        // -- profits & gains page -------------------------------------------
+
+        assert_eq!(back.annual_investment_allowance, ct.annual_investment_allowance);
+        assert_eq!(back.adjusted_trading_profit, ct.adjusted_trading_profit);
+        assert_eq!(
+            back.trading_losses_brought_forward,
+            ct.trading_losses_brought_forward
+        );
+        assert_eq!(back.net_trading_profits, ct.net_trading_profits);
+        assert_eq!(back.net_chargeable_gains, ct.net_chargeable_gains);
+        assert_eq!(back.profits_before_deductions, ct.profits_before_deductions);
+        assert_eq!(back.profits_before_charges, ct.profits_before_charges);
+        assert_eq!(back.qualifying_donations, ct.qualifying_donations);
+        assert_eq!(back.group_relief, ct.group_relief);
+        assert_eq!(
+            back.group_relief_carried_forward,
+            ct.group_relief_carried_forward
+        );
+        assert_eq!(
+            back.profits_chargeable_to_corporation_tax,
+            ct.profits_chargeable_to_corporation_tax
+        );
+
+        // -- tax chargeable page --------------------------------------------
+
+        assert_eq!(back.fy1_profit, ct.fy1_profit);
+        assert_eq!(back.fy2_profit, ct.fy2_profit);
+        assert_eq!(back.fy1_tax, ct.fy1_tax);
+        assert_eq!(back.fy2_tax, ct.fy2_tax);
+        assert_eq!(
+            back.corporation_tax_chargeable,
+            ct.corporation_tax_chargeable
+        );
+        assert_eq!(back.prev_fy1_profit, ct.prev_fy1_profit);
+        assert_eq!(back.prev_fy2_profit, ct.prev_fy2_profit);
+        assert_eq!(back.prev_fy1_tax, ct.prev_fy1_tax);
+        assert_eq!(back.prev_fy2_tax, ct.prev_fy2_tax);
+        assert_eq!(
+            back.prev_corporation_tax_chargeable,
+            ct.prev_corporation_tax_chargeable
+        );
+        assert_eq!(back.prev_profit_chargeable, ct.prev_profit_chargeable);
+        assert_eq!(back.marginal_relief, ct.marginal_relief);
+        assert_eq!(
+            back.corporation_tax_chargeable_payable,
+            ct.corporation_tax_chargeable_payable
+        );
+        assert_eq!(
+            back.total_reliefs_deductions_tax,
+            ct.total_reliefs_deductions_tax
+        );
+        assert_eq!(back.net_corporation_tax_payable, ct.net_corporation_tax_payable);
+        assert_eq!(back.tax_chargeable, ct.tax_chargeable);
+        assert_eq!(back.tax_payable, ct.tax_payable);
+
+        // -- losses & R&D ---------------------------------------------------
+
+        assert_eq!(back.losses_of_trades_uk, ct.losses_of_trades_uk);
+        assert_eq!(
+            back.losses_from_miscellaneous,
+            ct.losses_from_miscellaneous
+        );
+        assert_eq!(
+            back.rnd_qualifying_expenditure,
+            ct.rnd_qualifying_expenditure
+        );
+        assert_eq!(back.rnd_enhanced_expenditure, ct.rnd_enhanced_expenditure);
+        assert_eq!(
+            back.creative_enhanced_expenditure,
+            ct.creative_enhanced_expenditure
+        );
+        assert_eq!(
+            back.rnd_creative_enhanced_total,
+            ct.rnd_creative_enhanced_total
+        );
+        assert_eq!(back.rnd_subcontracted_large, ct.rnd_subcontracted_large);
+        assert_eq!(back.partner_in_a_firm, ct.partner_in_a_firm);
+
+        // -- per-year maps that are serialised to iXBRL ----------------------
+
+        // The round trip goes through the formatted (2-decimal) facts, so
+        // compare each value in its rendered form.
+        let map_eq = |a: &HashMap<i32, f64>, b: &HashMap<i32, f64>| -> bool {
+            a.len() == b.len()
+                && a.iter().all(|(fy, v)| {
+                    format_f64(*v) == format_f64(b.get(fy).copied().unwrap_or(0.0))
+                })
+        };
+        assert!(map_eq(&back.profit_per_accounts_by_fy, &ct.profit_per_accounts_by_fy));
+        assert!(map_eq(&back.aia_by_fy, &ct.aia_by_fy));
+        assert!(map_eq(&back.rnd_by_fy, &ct.rnd_by_fy));
     }
 
     #[tokio::test]

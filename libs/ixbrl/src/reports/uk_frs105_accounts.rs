@@ -726,6 +726,225 @@ impl Frs105Accounts {
         format!("<?xml version='1.0' encoding='ASCII'?>\n{}", body)
     }
 
+    /// Deserialise a [`Frs105Accounts`] from the [`XmlNode`] intermediate
+    /// representation (step 2 of the round trip: XML string -> `XmlNode` ->
+    /// `Frs105Accounts`).
+    ///
+    /// The `company` parameter supplies fields that are not serialised to
+    /// iXBRL (`tax_reference`, `registration_date` and the corporation-tax
+    /// rate defaults); fields that *are* serialised (name, company number,
+    /// accounting-period dates) are recovered from the document and override
+    /// the supplied values.  Similarly, metadata fields that have no iXBRL
+    /// fact (`jurisdiction`, `signed_by`) come back empty.
+    ///
+    /// Balance-sheet values are rendered at whole pounds (`decimals = 0`),
+    /// so the round trip preserves them to the nearest pound; the sign is
+    /// recovered from the enclosing cell's `negative` class.
+    pub fn from_ixbrl_node(node: &XmlNode, company: &Company) -> Frs105Accounts {
+        let facts = ParsedIxBrlFacts::from_node(node);
+        let dims = xbrl_context_dimensions(node);
+
+        // Numeric / non-numeric fact lookups.
+        let num = |name: &str, ctx: &str| -> f64 {
+            facts
+                .numeric_by_ctx
+                .get(&(name.to_string(), ctx.to_string()))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let text = |name: &str| -> String {
+            facts.non_numeric.get(name).cloned().unwrap_or_default()
+        };
+        let parse_date = |raw: &str| -> chrono::NaiveDate {
+            let cleaned = raw.replace('\u{00A0}', " ");
+            chrono::NaiveDate::parse_from_str(&cleaned, "%d %B %Y")
+                .unwrap_or(company.accounting_period_start)
+        };
+
+        // -- company ----------------------------------------------------------
+
+        let period_start = parse_date(&text("uk-bus:StartDateForPeriodCoveredByReport"));
+        let period_end = parse_date(&text("uk-bus:EndDateForPeriodCoveredByReport"));
+        let prev_year = (period_start - chrono::Duration::days(1)).year();
+
+        let company = Company {
+            name: text("uk-bus:EntityCurrentLegalOrRegisteredName"),
+            tax_reference: company.tax_reference.clone(), // not serialised
+            company_number: text("uk-bus:UKCompaniesHouseRegisteredNumber"),
+            registration_date: company.registration_date,
+            accounting_period_start: period_start,
+            accounting_period_end: period_end,
+            fy1_year: company.fy1_year,
+            fy2_year: company.fy2_year,
+            fy1_rate: company.fy1_rate,
+            fy2_rate: company.fy2_rate,
+        };
+
+        // -- balance-sheet values (signed, whole pounds) ----------------------
+
+        let mut bs: HashMap<(String, String), f64> = HashMap::new();
+        signed_non_fractions(node, false, &mut bs);
+        let fact = |name: &str, ctx: &str| -> f64 {
+            bs.get(&(name.to_string(), ctx.to_string()))
+                .copied()
+                .unwrap_or(0.0)
+        };
+
+        // -- embedded images ---------------------------------------------------
+
+        let mut imgs: HashMap<String, String> = HashMap::new();
+        img_src_by_alt(node, &mut imgs);
+
+        // -- metadata -----------------------------------------------------------
+
+        let dim = |ctx: &str, dimension: &str| -> String {
+            dims.get(ctx)
+                .and_then(|m| m.get(dimension))
+                .cloned()
+                .unwrap_or_default()
+        };
+
+        let directors: Vec<String> = ["ctxt-10", "ctxt-11", "ctxt-12"]
+            .iter()
+            .map(|c| {
+                facts
+                    .non_numeric_by_ctx
+                    .get(&("uk-bus:NameEntityOfficer".to_string(), c.to_string()))
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .filter(|d| !d.is_empty())
+            .collect();
+
+        let address_lines: Vec<String> = [
+            "uk-bus:AddressLine1",
+            "uk-bus:AddressLine2",
+            "uk-bus:AddressLine3",
+        ]
+        .iter()
+        .map(|n| text(n))
+        .filter(|a| !a.is_empty())
+        .collect();
+
+        let sic_codes: Vec<String> = [
+            "uk-bus:SICCodeRecordedUKCompaniesHouse1",
+            "uk-bus:SICCodeRecordedUKCompaniesHouse2",
+            "uk-bus:SICCodeRecordedUKCompaniesHouse3",
+            "uk-bus:SICCodeRecordedUKCompaniesHouse4",
+        ]
+        .iter()
+        .map(|n| text(n))
+        .filter(|s| !s.is_empty())
+        .collect();
+
+        let metadata = AccountsMetadata {
+            directors,
+            contact_name: text("uk-bus:NameContactDepartmentOrPerson"),
+            address_lines,
+            county: text("uk-bus:CountyRegion"),
+            location: text("uk-bus:PrincipalLocation-CityOrTown"),
+            postcode: text("uk-bus:PostalCodeZip"),
+            email: text("uk-bus:E-mailAddress"),
+            phone_country: text("uk-bus:CountryCode"),
+            phone_area: text("uk-bus:AreaCode"),
+            phone_number: text("uk-bus:LocalNumber"),
+            website_url: text("uk-bus:WebsiteMainPageURL"),
+            website_description: text("uk-bus:DescriptionOrOtherInformationOnWebsite"),
+            vat_registration: text("uk-bus:VATRegistrationNumber"),
+            sic_codes,
+            activities: text("uk-bus:DescriptionPrincipalActivities"),
+            average_employees: HashMap::from([
+                (period_end.year().to_string(), num("uk-core:AverageNumberEmployeesDuringPeriod", "ctxt-0") as u32),
+                (prev_year.to_string(), num("uk-core:AverageNumberEmployeesDuringPeriod", "ctxt-9") as u32),
+            ]),
+            jurisdiction: String::new(), // not serialised to iXBRL
+            accountant_name: text("uk-accrep:NameAccountantResponsible"),
+            accountant_business: text("uk-bus:NameEntityAccountants"),
+            accountant_address: text("uk-accrep:NameOrLocationAccountantsOffice"),
+            auditor_name: text("uk-aurep:NameIndividualAuditor"),
+            auditor_business: text("uk-bus:NameEntityAuditors"),
+            auditor_address: text("uk-aurep:NameOrLocationOfficePerformingAudit"),
+            report_title: text("uk-bus:ReportTitle"),
+            report_date: parse_date(&text("uk-bus:BusinessReportPublicationDate")),
+            authorised_date: parse_date(&text("uk-core:DateAuthorisationFinancialStatementsForIssue")),
+            incorporation_date: parse_date(&text("uk-bus:DateFormationOrIncorporation")),
+            signed_by: String::new(), // not serialised to iXBRL
+            industry_sector_dimension: dim("ctxt-3", "uk-bus:MainIndustrySectorDimension"),
+            accounting_standards_dimension: dim("ctxt-4", "uk-bus:AccountingStandardsDimension"),
+            accounts_type_dimension: dim("ctxt-5", "uk-bus:AccountsTypeDimension"),
+            accounts_status_dimension: dim("ctxt-6", "uk-bus:AccountsStatusDimension"),
+            legal_form_dimension: dim("ctxt-7", "uk-bus:LegalFormEntityDimension"),
+            country_dimension: dim("ctxt-8", "uk-geo:CountriesRegionsDimension"),
+            contact_country_dimension: dim("ctxt-13", "uk-geo:CountriesRegionsDimension"),
+            phone_type_dimension: dim("ctxt-14", "uk-bus:PhoneNumberTypeDimension"),
+            logo_b64: imgs.get("Company logo").cloned().unwrap_or_default(),
+            signature_b64: imgs.get("Director's signature").cloned().unwrap_or_default(),
+        };
+
+        Frs105Accounts {
+            company,
+            metadata,
+            fixed_assets: [
+                fact("uk-core:FixedAssets", "ctxt-15"),
+                fact("uk-core:FixedAssets", "ctxt-16"),
+            ],
+            current_assets: [
+                fact("uk-core:CurrentAssets", "ctxt-15"),
+                fact("uk-core:CurrentAssets", "ctxt-16"),
+            ],
+            prepayments_and_accrued_income: [
+                fact(
+                    "uk-core:PrepaymentsAccruedIncomeNotExpressedWithinCurrentAssetSubtotal",
+                    "ctxt-15",
+                ),
+                fact(
+                    "uk-core:PrepaymentsAccruedIncomeNotExpressedWithinCurrentAssetSubtotal",
+                    "ctxt-16",
+                ),
+            ],
+            creditors_within_1_year: [
+                fact("uk-core:Creditors", "ctxt-17"),
+                fact("uk-core:Creditors", "ctxt-18"),
+            ],
+            net_current_assets: [
+                fact("uk-core:NetCurrentAssetsLiabilities", "ctxt-15"),
+                fact("uk-core:NetCurrentAssetsLiabilities", "ctxt-16"),
+            ],
+            total_assets_less_liabilities: [
+                fact("uk-core:TotalAssetsLessCurrentLiabilities", "ctxt-15"),
+                fact("uk-core:TotalAssetsLessCurrentLiabilities", "ctxt-16"),
+            ],
+            creditors_after_1_year: [
+                fact("uk-core:Creditors", "ctxt-19"),
+                fact("uk-core:Creditors", "ctxt-20"),
+            ],
+            provisions_for_liabilities: [
+                fact("uk-core:ProvisionsForLiabilitiesBalanceSheetSubtotal", "ctxt-15"),
+                fact("uk-core:ProvisionsForLiabilitiesBalanceSheetSubtotal", "ctxt-16"),
+            ],
+            accruals_and_deferred_income: [
+                fact("uk-core:AccruedLiabilitiesDeferredIncome", "ctxt-15"),
+                fact("uk-core:AccruedLiabilitiesDeferredIncome", "ctxt-16"),
+            ],
+            net_assets: [
+                fact("uk-core:NetAssetsLiabilities", "ctxt-15"),
+                fact("uk-core:NetAssetsLiabilities", "ctxt-16"),
+            ],
+            capital_and_reserves: [
+                fact("uk-core:Equity", "ctxt-15"),
+                fact("uk-core:Equity", "ctxt-16"),
+            ],
+        }
+    }
+
+    /// Deserialise a [`Frs105Accounts`] from its serialised iXBRL HTML, in
+    /// two steps: first into the [`XmlNode`] intermediate representation,
+    /// then into the struct.
+    pub fn from_ixbrl(html: &str, company: &Company) -> Result<Frs105Accounts, String> {
+        let node = XmlNode::from_xml_string(html)?;
+        Ok(Self::from_ixbrl_node(&node, company))
+    }
+
     // -- Page builders --------------------------------------------------------
 
     /// Title page: company number, logo, company name, report title and the
@@ -1384,6 +1603,88 @@ fn bs_cell(name: &str, ctx: &str, value: f64) -> XmlNode {
     }
 }
 
+/// Collect every `ix:nonFraction` fact with the sign recovered from the
+/// enclosing `td` cell: a cell whose class contains `negative` renders the
+/// value in parentheses, so the fact is stored negated.
+fn signed_non_fractions(
+    node: &XmlNode,
+    in_negative_cell: bool,
+    out: &mut HashMap<(String, String), f64>,
+) {
+    if let XmlNode::Elem {
+        name,
+        attributes,
+        children,
+    } = node
+    {
+        let is_negative_cell = name == "td"
+            && attributes
+                .iter()
+                .any(|(k, v)| k == "class" && v.contains("negative"));
+        let negative = in_negative_cell || is_negative_cell;
+
+        if name == "ix:nonFraction" {
+            let fact_name = attributes
+                .iter()
+                .find(|(k, _)| k == "name")
+                .map(|(_, v)| v.clone());
+            let ctx = attributes
+                .iter()
+                .find(|(k, _)| k == "contextRef")
+                .map(|(_, v)| v.clone());
+            let value: String = children
+                .iter()
+                .filter_map(|c| match c {
+                    XmlNode::Text(t) => Some(t.trim().to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let cleaned = value.replace(',', "");
+            if let (Some(fact_name), Some(ctx), Ok(v)) =
+                (fact_name, ctx, cleaned.parse::<f64>())
+            {
+                let v = if negative { -v } else { v };
+                out.insert((fact_name, ctx), v);
+            }
+        }
+        for child in children {
+            signed_non_fractions(child, negative, out);
+        }
+    }
+}
+
+/// Collect the base64 payload of every `<img>` by its `alt` text.
+fn img_src_by_alt(node: &XmlNode, out: &mut HashMap<String, String>) {
+    if let XmlNode::Elem {
+        name,
+        attributes,
+        children,
+    } = node
+    {
+        if name == "img" {
+            let alt = attributes
+                .iter()
+                .find(|(k, _)| k == "alt")
+                .map(|(_, v)| v.clone());
+            let src = attributes
+                .iter()
+                .find(|(k, _)| k == "src")
+                .map(|(_, v)| v.clone());
+            if let (Some(alt), Some(src)) = (alt, src) {
+                let b64 = src
+                    .strip_prefix("data:image/png;base64,")
+                    .unwrap_or(&src)
+                    .to_string();
+                out.insert(alt, b64);
+            }
+        }
+        for child in children {
+            img_src_by_alt(child, out);
+        }
+    }
+}
+
 /// Format a value as whole pounds with thousands separators and no decimals.
 fn format_f64_0(v: f64) -> String {
     let n = v.round() as i64;
@@ -1616,6 +1917,176 @@ mod tests {
         assert!(out.contains("1. Company information"));
         assert!(out.contains("2. Employees"));
         assert!(out.contains("AverageNumberEmployeesDuringPeriod"));
+    }
+
+    #[tokio::test]
+    async fn test_accounts_ixbrl_round_trip() {
+        // Serialise, write the output to .cache, then deserialise in two
+        // steps (XML -> XmlNode -> Frs105Accounts) and compare against the
+        // original.
+        let (company, gnucash) = load_example().await;
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata());
+        let html = accounts.to_ixbrl();
+
+        std::fs::create_dir_all("../../.cache").unwrap();
+        std::fs::write("../../.cache/accts-micro-roundtrip.html", &html).unwrap();
+
+        let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
+        let back = Frs105Accounts::from_ixbrl_node(&node, &company);
+
+        // Balance-sheet values are rendered at whole pounds (decimals = 0),
+        // so the round trip preserves them to the nearest pound (the sign
+        // is recovered from the cell class).
+        let round = |a: [f64; 2]| [a[0].round(), a[1].round()];
+        assert_eq!(round(back.fixed_assets), round(accounts.fixed_assets));
+        assert_eq!(round(back.current_assets), round(accounts.current_assets));
+        assert_eq!(
+            round(back.prepayments_and_accrued_income),
+            round(accounts.prepayments_and_accrued_income)
+        );
+        assert_eq!(
+            round(back.creditors_within_1_year),
+            round(accounts.creditors_within_1_year)
+        );
+        assert_eq!(
+            round(back.net_current_assets),
+            round(accounts.net_current_assets)
+        );
+        assert_eq!(
+            round(back.total_assets_less_liabilities),
+            round(accounts.total_assets_less_liabilities)
+        );
+        assert_eq!(
+            round(back.creditors_after_1_year),
+            round(accounts.creditors_after_1_year)
+        );
+        assert_eq!(
+            round(back.provisions_for_liabilities),
+            round(accounts.provisions_for_liabilities)
+        );
+        assert_eq!(
+            round(back.accruals_and_deferred_income),
+            round(accounts.accruals_and_deferred_income)
+        );
+        assert_eq!(round(back.net_assets), round(accounts.net_assets));
+        assert_eq!(
+            round(back.capital_and_reserves),
+            round(accounts.capital_and_reserves)
+        );
+
+        // Company identity round-trips.
+        assert_eq!(back.company.name, accounts.company.name);
+        assert_eq!(back.company.company_number, accounts.company.company_number);
+        assert_eq!(back.company.tax_reference, accounts.company.tax_reference);
+        assert_eq!(
+            back.company.accounting_period_start,
+            accounts.company.accounting_period_start
+        );
+        assert_eq!(
+            back.company.accounting_period_end,
+            accounts.company.accounting_period_end
+        );
+
+        // Metadata fields that are serialised to iXBRL round-trip.
+        assert_eq!(back.metadata.directors, accounts.metadata.directors);
+        assert_eq!(
+            back.metadata.contact_name,
+            accounts.metadata.contact_name
+        );
+        assert_eq!(
+            back.metadata.address_lines,
+            accounts.metadata.address_lines
+        );
+        assert_eq!(back.metadata.county, accounts.metadata.county);
+        assert_eq!(back.metadata.location, accounts.metadata.location);
+        assert_eq!(back.metadata.postcode, accounts.metadata.postcode);
+        assert_eq!(back.metadata.email, accounts.metadata.email);
+        assert_eq!(back.metadata.phone_country, accounts.metadata.phone_country);
+        assert_eq!(back.metadata.phone_area, accounts.metadata.phone_area);
+        assert_eq!(back.metadata.phone_number, accounts.metadata.phone_number);
+        assert_eq!(back.metadata.website_url, accounts.metadata.website_url);
+        assert_eq!(
+            back.metadata.website_description,
+            accounts.metadata.website_description
+        );
+        assert_eq!(
+            back.metadata.vat_registration,
+            accounts.metadata.vat_registration
+        );
+        assert_eq!(back.metadata.sic_codes, accounts.metadata.sic_codes);
+        assert_eq!(back.metadata.activities, accounts.metadata.activities);
+        assert_eq!(
+            back.metadata.average_employees,
+            accounts.metadata.average_employees
+        );
+        assert_eq!(
+            back.metadata.accountant_name,
+            accounts.metadata.accountant_name
+        );
+        assert_eq!(
+            back.metadata.accountant_business,
+            accounts.metadata.accountant_business
+        );
+        assert_eq!(
+            back.metadata.accountant_address,
+            accounts.metadata.accountant_address
+        );
+        assert_eq!(back.metadata.auditor_name, accounts.metadata.auditor_name);
+        assert_eq!(
+            back.metadata.auditor_business,
+            accounts.metadata.auditor_business
+        );
+        assert_eq!(
+            back.metadata.auditor_address,
+            accounts.metadata.auditor_address
+        );
+        assert_eq!(back.metadata.report_title, accounts.metadata.report_title);
+        assert_eq!(back.metadata.report_date, accounts.metadata.report_date);
+        assert_eq!(
+            back.metadata.authorised_date,
+            accounts.metadata.authorised_date
+        );
+        assert_eq!(
+            back.metadata.incorporation_date,
+            accounts.metadata.incorporation_date
+        );
+        assert_eq!(
+            back.metadata.industry_sector_dimension,
+            accounts.metadata.industry_sector_dimension
+        );
+        assert_eq!(
+            back.metadata.accounting_standards_dimension,
+            accounts.metadata.accounting_standards_dimension
+        );
+        assert_eq!(
+            back.metadata.accounts_type_dimension,
+            accounts.metadata.accounts_type_dimension
+        );
+        assert_eq!(
+            back.metadata.accounts_status_dimension,
+            accounts.metadata.accounts_status_dimension
+        );
+        assert_eq!(
+            back.metadata.legal_form_dimension,
+            accounts.metadata.legal_form_dimension
+        );
+        assert_eq!(
+            back.metadata.country_dimension,
+            accounts.metadata.country_dimension
+        );
+        assert_eq!(
+            back.metadata.contact_country_dimension,
+            accounts.metadata.contact_country_dimension
+        );
+        assert_eq!(
+            back.metadata.phone_type_dimension,
+            accounts.metadata.phone_type_dimension
+        );
+        assert_eq!(back.metadata.logo_b64, accounts.metadata.logo_b64);
+        assert_eq!(
+            back.metadata.signature_b64,
+            accounts.metadata.signature_b64
+        );
     }
 
     #[test]
