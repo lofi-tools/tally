@@ -1,15 +1,15 @@
-use thiserror::Error;
+use snafu::Snafu;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Snafu)]
 pub enum Ct600Error {
-    #[error("{0}")]
-    XmlError(String),
+    #[snafu(display("{message}"))]
+    XmlError { message: String },
 
-    #[error("{0}")]
-    ConfigError(String),
+    #[snafu(display("{message}"))]
+    ConfigError { message: String },
 
-    #[error("{0}")]
-    C14nError(String),
+    #[snafu(display("{message}"))]
+    C14nError { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, Ct600Error>;

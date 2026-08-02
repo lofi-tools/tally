@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::LazyLock;
-use thiserror::Error;
+use snafu::Snafu;
 
 use crate::companies_house::{
     ApiResult, CompaniesHouseClient, CompaniesHouseError, CompanyProfile, CompanyType,
@@ -118,18 +118,18 @@ fn read_profile(dir: &Path, company_number: &str) -> Option<CompanyProfile> {
 }
 
 /// Errors returned by [`TestClient`].
-#[derive(Debug, Error)]
+#[derive(Debug, Snafu)]
 pub enum TestClientErr {
     /// No data available for the company: no cache entry, no default
     /// fixture, and no live API client configured.
-    #[error(
+    #[snafu(display(
         "no data for company {company_number}: no cache entry, no fixture, and no live API client configured"
-    )]
+    ))]
     NoData { company_number: String },
 
     /// The live API request failed.
-    #[error(transparent)]
-    CompaniesHouse(#[from] CompaniesHouseError),
+    #[snafu(transparent)]
+    CompaniesHouse { source: CompaniesHouseError },
 }
 
 /// A Companies House test client.

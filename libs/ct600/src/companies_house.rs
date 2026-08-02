@@ -14,27 +14,28 @@
 use std::{env::VarError, result::Result};
 
 use serde::{Deserialize, Serialize};
+use snafu::Snafu;
 
 use crate::form::CompanyFormValues;
 use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
 
 /// Errors returned by the Companies House API client.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Snafu)]
 pub enum CompaniesHouseError {
     /// The HTTP request could not be sent.
-    #[error("request failed: {0}")]
-    RequestFailed(reqwest::Error),
+    #[snafu(display("request failed: {source}"))]
+    RequestFailed { source: reqwest::Error },
 
     /// The API returned a non-success status code.
-    #[error("GET {url} returned HTTP {status}")]
+    #[snafu(display("GET {url} returned HTTP {status}"))]
     HttpStatus {
         url: String,
         status: reqwest::StatusCode,
     },
 
     /// The response body could not be decoded as JSON.
-    #[error("failed to decode response: {0}")]
-    DecodeFailed(reqwest::Error),
+    #[snafu(display("failed to decode response: {source}"))]
+    DecodeFailed { source: reqwest::Error },
 }
 
 pub type ApiResult<T> = Result<T, CompaniesHouseError>;
@@ -93,7 +94,7 @@ impl CompaniesHouseClient {
             .basic_auth(&self.api_key, Some("")) //  Companies House API takes the username as the API key
             .send()
             .await
-            .map_err(CompaniesHouseError::RequestFailed)?;
+            .map_err(|source| CompaniesHouseError::RequestFailed { source })?;
 
         let status = response.status();
         if !status.is_success() {
@@ -103,7 +104,7 @@ impl CompaniesHouseClient {
         response
             .json::<CompanyProfile>()
             .await
-            .map_err(CompaniesHouseError::DecodeFailed)
+            .map_err(|source| CompaniesHouseError::DecodeFailed { source })
     }
 
     /// Fetch the company profile for the tax computation's company number and

@@ -312,7 +312,9 @@ pub trait Message {
     fn to_xml(&self) -> Result<String> {
         let envelope = self.create_message()?;
         let xml = quick_xml::se::to_string(&envelope)
-            .map_err(|e| Ct600Error::XmlError(format!("Serialization error: {}", e)))?;
+            .map_err(|e| Ct600Error::XmlError {
+                message: format!("Serialization error: {}", e),
+            })?;
         Ok(format!(r#"<?xml version="1.0" encoding="UTF-8"?>{}"#, xml))
     }
 
@@ -327,7 +329,9 @@ pub trait Message {
 
     fn to_iso_date(date_str: &str) -> Result<String> {
         let date = NaiveDate::parse_from_str(date_str, "%d %B %Y")
-            .map_err(|e| Ct600Error::ConfigError(format!("Invalid date format: {}", e)))?;
+            .map_err(|e| Ct600Error::ConfigError {
+                message: format!("Invalid date format: {}", e),
+            })?;
         Ok(date.format("%Y-%m-%d").to_string())
     }
 
@@ -532,7 +536,9 @@ impl GovTalkSubmissionRequest {
 
         let xml = w.into_string();
         let canonical = canonicalize(&xml, C14nMode::Inclusive, None, &[] as &[String])
-            .map_err(|e| Ct600Error::C14nError(e.to_string()))?;
+            .map_err(|e| Ct600Error::C14nError {
+                message: e.to_string(),
+            })?;
 
         let mut hasher = Sha1::new();
         hasher.update(&canonical);
@@ -902,7 +908,9 @@ impl Message for GovTalkDeleteResponse {
 
 pub fn decode_govtalk_message(xml: &str) -> Result<GovTalkMessage> {
     let envelope: GovTalkEnvelope = quick_xml::de::from_str(xml)
-        .map_err(|e| Ct600Error::XmlError(format!("Failed to parse XML: {}", e)))?;
+        .map_err(|e| Ct600Error::XmlError {
+            message: format!("Failed to parse XML: {}", e),
+        })?;
 
     let function = envelope.header.message_details.function.clone();
     let qualifier = envelope.header.message_details.qualifier.clone();
@@ -930,10 +938,12 @@ pub fn decode_govtalk_message(xml: &str) -> Result<GovTalkMessage> {
         ("delete", "response") => Ok(GovTalkMessage::DeleteResponse(GovTalkDeleteResponse {
             params,
         })),
-        _ => Err(Ct600Error::XmlError(format!(
-            "Unknown message type: function={}, qualifier={}",
-            function, qualifier
-        ))),
+        _ => Err(Ct600Error::XmlError {
+            message: format!(
+                "Unknown message type: function={}, qualifier={}",
+                function, qualifier
+            ),
+        }),
     }
 }
 

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use snafu::Snafu;
+
 pub mod company;
 pub mod ixbrl_fmt;
 pub mod reports;
@@ -92,32 +94,24 @@ pub struct GnucashBook {
     raw_splits: Vec<RawSplit>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Snafu)]
 pub enum GnucashError {
-    Io(std::io::Error),
-    Rucash(rucash::Error),
-}
+    #[snafu(display("IO error: {source}"))]
+    Io { source: std::io::Error },
 
-impl fmt::Display for GnucashError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            GnucashError::Io(e) => write!(f, "IO error: {e}"),
-            GnucashError::Rucash(e) => write!(f, "GnuCash parse error: {e}"),
-        }
-    }
+    #[snafu(display("GnuCash parse error: {source}"))]
+    Rucash { source: rucash::Error },
 }
-
-impl std::error::Error for GnucashError {}
 
 impl From<std::io::Error> for GnucashError {
     fn from(e: std::io::Error) -> Self {
-        GnucashError::Io(e)
+        GnucashError::Io { source: e }
     }
 }
 
 impl From<rucash::Error> for GnucashError {
     fn from(e: rucash::Error) -> Self {
-        GnucashError::Rucash(e)
+        GnucashError::Rucash { source: e }
     }
 }
 
@@ -376,10 +370,12 @@ impl GnucashBook {
                 Ok(GnucashBook::try_from_book(&book).await?)
             }
         } else {
-            Err(GnucashError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("unsupported file extension for {path}"),
-            )))
+            Err(GnucashError::Io {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unsupported file extension for {path}"),
+                ),
+            })
         }
     }
 
