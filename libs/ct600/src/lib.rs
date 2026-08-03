@@ -11,6 +11,8 @@ mod error;
 pub use error::{Ct600Error, Result};
 pub mod companies_house;
 pub use companies_house::{CompaniesHouseClient, CompanyType};
+pub mod ct600_return;
+pub use ct600_return::Ct600Return;
 pub mod form;
 pub use form::{BoxValue, CompanyFormValues, Ct600FormValues, FieldValue};
 #[cfg(test)]
