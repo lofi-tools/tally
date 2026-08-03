@@ -10,7 +10,7 @@
       inputs.my-nix.flakeModules.rust
       (inputs.my-nix.lib.findFlakePartFilesRec ./.)
     ];
-    perSystem = { pkgs, system, ... }:
+    perSystem = { pkgs, system, l, ... }:
       let
         buildTimeDeps = [ pkgs.pkg-config ];
         runtimeDeps = [ ];
@@ -219,6 +219,83 @@
           passthru = { inherit src version; };
         };
 
+        # HMRC Local Test Service (LTS) 8.3, with the CT600 RIM artefacts
+        # bundled at build time.  The LTS Update Manager would normally
+        # download the artefact zips from the services feed
+        # (https://www.tpvs.hmrc.gov.uk/tools/v2/services.xml) and install
+        # them into RIMArtefacts/<4-level term dir>, registering each service
+        # in validatorConfig.xml; this derivation does exactly that (the feed
+        # lists CT v3.9 -> CT/CT600/2014-2015 v2/3.99 and CT v1.994 ->
+        # CT/CT600/2015-2016 v3/1.994, both under the CT/5 service uri, so
+        # the newest is registered).
+        ownPkgs.hmrc-lts = pkgs.stdenv.mkDerivation rec {
+          pname = "hmrc-lts";
+          version = "8.3";
+          dontUnpack = true;
+          src = pkgs.fetchurl {
+            url = "https://www.tpvs.hmrc.gov.uk/tools/v2/LTS8.3.zip";
+            hash = "sha256-QjUull+MTuHRFWU4YGGKtFFx333zYk80/4XEcpmQVnQ=";
+          };
+          ct2009 = pkgs.fetchurl {
+            url = "https://www.tpvs.hmrc.gov.uk/tools/v2/ct_ct600_v3-9.zip";
+            hash = "sha256-VyPnRUeFawcA51FeZrG/oxgzc6G6Rl+EnUH05oiAVcc=";
+          };
+          ct2014 = pkgs.fetchurl {
+            url = "https://www.tpvs.hmrc.gov.uk/tools/v2/ct_ct600_v1-994.zip";
+            hash = "sha256-a6lR6DDll8aYEfGJCJzQufiQGAtzrYRd16/O8D5UPzU=";
+          };
+          nativeBuildInputs = [ pkgs.unzip pkgs.python3 ];
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out"
+            ${pkgs.unzip}/bin/unzip -q "$src" 'HMRCTools/*' -d "$out"
+            rm -rf "$out/__MACOSX" "$out/HMRCTools/.DS_Store"
+
+            # Install the CT600 RIM artefacts into the same 4-level directory
+            # layout the Update Manager would produce from the feed terms.
+            mkdir -p "$out/HMRCTools/RIMArtefacts/CT/CT600/2014-2015 v2/3.99" \
+                     "$out/HMRCTools/RIMArtefacts/CT/CT600/2015-2016 v3/1.994"
+            (cd "$out/HMRCTools/RIMArtefacts/CT/CT600/2014-2015 v2/3.99" && ${pkgs.unzip}/bin/unzip -q "$ct2009")
+            (cd "$out/HMRCTools/RIMArtefacts/CT/CT600/2015-2016 v3/1.994" && ${pkgs.unzip}/bin/unzip -q "$ct2014")
+
+            # Register the CT service in validatorConfig.xml, mirroring the
+            # Update Manager's ConfigUpdate step when installing an artefact.
+            ${pkgs.python3}/bin/python3 -c '
+            import sys
+            p = sys.argv[1]
+            xml = open(p, encoding="utf-8", errors="replace").read()
+            svc = "\t\t<Service uri=\"http://www.govtalk.gov.uk/taxation/CT/5\">\n" \
+                  "\t\t\t<TotalErrorCap>100</TotalErrorCap>\n" \
+                  "\t\t\t<ValidationType>COMPLETE</ValidationType>\n" \
+                  "\t\t\t<RIMArtefactsDirectory>CT/CT600/2015-2016 v3/1.994</RIMArtefactsDirectory>\n" \
+                  "\t\t</Service>\n\t"
+            assert "\t</Envelope>" in xml, "Envelope close not found"
+            xml = xml.replace("\t</Envelope>", svc + "\t</Envelope>")
+            open(p, "w", encoding="utf-8").write(xml)
+            print("registered CT service in validatorConfig.xml")
+            ' "$out/HMRCTools/LTS/resources/config/NonConfigurable/validatorConfig.xml"
+
+            # Default the web server port to 8081 (matches the ct600
+            # config-test.json url http://localhost:8081/).
+            ${pkgs.python3}/bin/python3 -c '
+            import sys
+            p = sys.argv[1]
+            xml = open(p, encoding="utf-8", errors="replace").read()
+            assert "default=\"5665\"" in xml, "port default not found"
+            xml = xml.replace("default=\"5665\"", "default=\"8081\"")
+            open(p, "w", encoding="utf-8").write(xml)
+            print("LTS port default set to 8081")
+            ' "$out/HMRCTools/LTS/resources/config/UserConfigurable/LTSConfig.xml"
+
+            runHook postInstall
+          '';
+          meta = {
+            description = "HMRC Local Test Service 8.3 with bundled CT600 RIM artefacts";
+            homepage = "https://www.tpvs.hmrc.gov.uk/tools/v2/";
+            platforms = lib.platforms.unix;
+          };
+        };
+
         ref-ixbrl = ownPkgs.ixbrl-reporter;
         ref-ct600 = ownPkgs.ct600-py;
 
@@ -312,6 +389,69 @@
             echo "Tip: fill boxes 975/980/985 (declaration name/date/status) in $FORM_VALUES before filing;"
             echo "     note re-running this script regenerates that file from the computations."
           '';
+
+          # Start the HMRC Local Test Service (with bundled CT artefacts) and
+          # submit the CT600 message to it, in a zellij session (via
+          # l.mkZmux): the "lts" tab runs the server in the foreground (its
+          # logs stay visible; its cleanup kills any stale instance first),
+          # the "submit" tab waits for it to come up on :8081, POSTs
+          # .cache/ct600.xml to /LTS/LTSPostServlet and prints the GovTalk
+          # validation response.  The LTS writes logs/ + temp/ into its own
+          # directory, so a writable copy (per store path) is kept under
+          # $XDG_CACHE_HOME/hmrc-lts.
+          test-lts = '' ${l.mkZmux [
+            {
+              name = "lts";
+              command = ''
+                set -e
+                HERE="${bash.wd}"
+                LTS="${ownPkgs.hmrc-lts}"
+                CACHE_ROOT="''${XDG_CACHE_HOME:-$HOME/.cache}/hmrc-lts"
+                CACHE="$CACHE_ROOT/$(basename "$LTS")"
+                if [ ! -d "$CACHE/LTS" ]; then
+                  mkdir -p "$CACHE"
+                  cp -r "$LTS/HMRCTools"/. "$CACHE/"
+                  chmod -R u+w "$CACHE"
+                fi
+                export PATH="${pkgs.jdk21}/bin:$PATH"
+                cd "$CACHE/LTS"
+                echo "LTS starting on http://localhost:8081/LTS ..."
+                LTS_HOME="$PWD" sh RunLTSStandalone.sh
+              '';
+              cleanup = "${bin.rip} LTSStandalone";
+            }
+            {
+              name = "submit";
+              command = ''
+                set -e
+                HERE="${bash.wd}"
+                PORT=8081
+                FILE="$HERE/.cache/ct600.xml"
+                [ -f "$FILE" ] || {
+                  echo "hmrc-lts-submit: missing input: $FILE" >&2
+                  echo "  hint: run \`rct600-run\` first" >&2
+                  exit 1
+                }
+                echo "waiting for LTS on :$PORT ..."
+                UP=0
+                for i in $(seq 1 90); do
+                  if curl -s -o /dev/null "http://localhost:$PORT/LTS"; then UP=1; break; fi
+                  sleep 1
+                done
+                [ "$UP" = 1 ] || { echo "LTS not up after 90s" >&2; exit 1; }
+                echo "==> submitting $FILE to http://localhost:$PORT/LTS/LTSPostServlet"
+                curl -s -w '\n(http_code=%{http_code})\n' -H 'Content-Type: application/x-binary' \
+                  --data-binary @"$FILE" "http://localhost:$PORT/LTS/LTSPostServlet" | tr -d '\r'
+                echo
+              '';
+            }
+          ]}
+          echo "zellij session closed (tabs: lts, submit); the LTS has been stopped."
+          echo "Re-run \`nix run .#hmrc-lts-submit\` to start again, or \`nix run .#hmrc-lts-stop\` to kill the server directly."
+          '';
+
+          # Kill the Local Test Service (also the lts tab's cleanup hook).
+          kill-lts = ''${bin.rip} LTSStandalone'';
         };
 
         env = {
