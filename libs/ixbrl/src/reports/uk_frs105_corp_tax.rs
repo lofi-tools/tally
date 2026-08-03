@@ -2206,8 +2206,8 @@ mod tests {
         assert!(ixbrl.contains(&company.name));
         assert!(ixbrl.contains(&company.tax_reference));
 
-        std::fs::create_dir_all("../../.cache").unwrap();
-        std::fs::write("../../.cache/ct_return_example2.html", &ixbrl).unwrap();
+        std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
+        std::fs::write("../../.cache/rust-ixbrl/ct_return_example2.html", &ixbrl).unwrap();
     }
 
     #[tokio::test]
@@ -2622,13 +2622,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_corp_tax_full_round_trip() {
-        // Serialise, write the output to .cache, then deserialise in two
-        // steps (XML -> XmlNode -> Frs105CorpTax) and compare against the
-        // original for every field that is serialised to iXBRL.
+        // Serialise, write the output to .cache/rust-ixbrl, then deserialise
+        // in two steps (XML -> XmlNode -> Frs105CorpTax) and compare against
+        // the original for every field that is serialised to iXBRL.
         let ct = build_example2_ct().await;
         let html = ct.to_ixbrl();
-        std::fs::create_dir_all("../../.cache").unwrap();
-        std::fs::write("../../.cache/ct_roundtrip.html", &html).unwrap();
+        std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
+        std::fs::write("../../.cache/rust-ixbrl/ct_roundtrip.html", &html).unwrap();
 
         let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
         let back = Frs105CorpTax::from_ixbrl_node(&node, &ct.company);
@@ -2749,8 +2749,8 @@ mod tests {
         // Ensure the cache file exists (test may run in parallel)
         let ct = build_example2_ct().await;
         let html = ct.to_ixbrl();
-        std::fs::create_dir_all("../../.cache").unwrap();
-        std::fs::write("../../.cache/ct_return_example2.html", &html).unwrap();
+        std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
+        std::fs::write("../../.cache/rust-ixbrl/ct_return_example2.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         assert_eq!(
@@ -2806,8 +2806,8 @@ mod tests {
     async fn test_from_ixbrl_worksheet_fy_split() {
         let ct = build_example2_ct().await;
         let html = ct.to_ixbrl();
-        std::fs::create_dir_all("../../.cache").unwrap();
-        std::fs::write("../../.cache/ct_return_example2.html", &html).unwrap();
+        std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
+        std::fs::write("../../.cache/rust-ixbrl/ct_return_example2.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let fy1_cur = facts.numeric_by_ctx.get(&(
@@ -2826,8 +2826,8 @@ mod tests {
     async fn test_from_parsed_facts() {
         let ct = build_example2_ct().await;
         let html = ct.to_ixbrl();
-        std::fs::create_dir_all("../../.cache").unwrap();
-        std::fs::write("../../.cache/ct_return_example2.html", &html).unwrap();
+        std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
+        std::fs::write("../../.cache/rust-ixbrl/ct_return_example2.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let company = crate::test_utils::TestData::default_company();

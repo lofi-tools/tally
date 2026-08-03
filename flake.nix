@@ -314,36 +314,38 @@
           rixsrc = ''printf "%s\n" ${ref-ixbrl.src}'';
           racc = ''
             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
-            ${bin.ref-ixbrl} ${ref-ixbrl.src}/config.yaml report ixbrl > $HERE/.cache/accts-micro.html '';
+            mkdir -p "$HERE/.cache/py-ixbrl-reporter"
+            ${bin.ref-ixbrl} ${ref-ixbrl.src}/config.yaml report ixbrl > $HERE/.cache/py-ixbrl-reporter/accts-micro.html '';
 
           # Run the reference accounts report on the example GnuCash book.
           racc-gnucash = ''
             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
-            mkdir -p "$HERE/.cache"
+            mkdir -p "$HERE/.cache/py-ixbrl-reporter"
             ${pkgs.gawk}/bin/awk -v file="$HERE/libs/ixbrl/example_data/example2/input.gnucash" '
               /^accounts:/ { print "accounts:"; print "  kind: piecash"; print "  file: " file; f=1; next }
               /^report:/ { f=0 }
               !f
-            ' config.yaml > "$HERE/.cache/config-gnucash.yaml"
-            ${bin.ref-ixbrl} "$HERE/.cache/config-gnucash.yaml" report ixbrl > "$HERE/.cache/accts-micro-gnucash.html"
+            ' config.yaml > "$HERE/.cache/py-ixbrl-reporter/config-gnucash.yaml"
+            ${bin.ref-ixbrl} "$HERE/.cache/py-ixbrl-reporter/config-gnucash.yaml" report ixbrl > "$HERE/.cache/py-ixbrl-reporter/accts-micro-gnucash.html"
           '';
 
           # Run the reference accounts report on the example CSV accounts.
           racc-csv = ''
             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
-            mkdir -p "$HERE/.cache"
+            mkdir -p "$HERE/.cache/py-ixbrl-reporter"
             ${pkgs.gawk}/bin/awk -v file="$HERE/libs/ixbrl/example_data/example3.csv" '
               /^accounts:/ { print "accounts:"; print "  kind: csv"; print "  file: " file; f=1; next }
               /^report:/ { f=0 }
               !f
-            ' config.yaml > "$HERE/.cache/config-csv.yaml"
-            ${bin.ref-ixbrl} "$HERE/.cache/config-csv.yaml" report ixbrl > "$HERE/.cache/accts-micro-csv.html"
+            ' config.yaml > "$HERE/.cache/py-ixbrl-reporter/config-csv.yaml"
+            ${bin.ref-ixbrl} "$HERE/.cache/py-ixbrl-reporter/config-csv.yaml" report ixbrl > "$HERE/.cache/py-ixbrl-reporter/accts-micro-csv.html"
           '';
           report = ''
             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
-            ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$HERE/.cache/corp-tax.html"
+            mkdir -p "$HERE/.cache/py-ixbrl-reporter"
+            ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$HERE/.cache/py-ixbrl-reporter/corp-tax.html"
           '';
-          validate = ''arelleCmdLine -f "${wd}/.cache/ct_return_example2.html" -v'';
+          validate = ''arelleCmdLine -f "${wd}/.cache/rust-ixbrl/ct_return_example2.html" -v'';
           rct600 = ''${bin.ref-ct600} "$@" '';
 
           # Run the reference ct600 tool over the example2 pair: step 1
@@ -355,12 +357,12 @@
           rct600-run = ''
             set -e
             HERE="${bash.wd}"
-            mkdir -p "$HERE/.cache"
+            mkdir -p "$HERE/.cache/py-ixbrl-reporter" "$HERE/.cache/rust-ixbrl" "$HERE/.cache/py-ct600"
             CONFIG="${ref-ct600.src}/config.json"
-            ACCOUNTS="$HERE/.cache/accts-micro-gnucash.html"
-            COMPUTATIONS="$HERE/.cache/ct_return_example2.html"
-            FORM_VALUES="$HERE/.cache/form-values.yaml"
-            OUT="$HERE/.cache/ct600.xml"
+            ACCOUNTS="$HERE/.cache/py-ixbrl-reporter/accts-micro-gnucash.html"
+            COMPUTATIONS="$HERE/.cache/rust-ixbrl/ct_return_example2.html"
+            FORM_VALUES="$HERE/.cache/py-ct600/form-values.yaml"
+            OUT="$HERE/.cache/py-ct600/ct600.xml"
             while [ $# -gt 0 ]; do
               case "$1" in
                 --config) CONFIG="''${2:?missing value for $1}"; shift 2 ;;
@@ -390,15 +392,35 @@
             echo "     note re-running this script regenerates that file from the computations."
           '';
 
+          # Regenerate the Rust-generated CT600 message (from the ct600
+          # crate's generator) into .cache/rust-ct600/ct600-rust.xml, by
+          # running the generator test that writes it.  Runs in the devShell
+          # (needs cargo).
+          rct600-rust = ''
+            set -e
+            set -o pipefail
+            HERE="${bash.wd}"; cd "$HERE"
+            # Remove any stale message first so a failed regeneration cannot
+            # pass the existence check against an old file.
+            rm -f .cache/rust-ct600/ct600-rust.xml
+            cargo test -p ct600 --lib ct600_return_from_example2_matches_reference 2>&1 | tail -20
+            [ -f .cache/rust-ct600/ct600-rust.xml ] || {
+              echo "rct600-rust: failed to generate .cache/rust-ct600/ct600-rust.xml" >&2
+              exit 1
+            }
+            echo "==> wrote .cache/rust-ct600/ct600-rust.xml (our Rust ct600 generator)"
+          '';
+
           # Start the HMRC Local Test Service (with bundled CT artefacts) and
           # submit the CT600 message to it, in a zellij session (via
           # l.mkZmux): the "lts" tab runs the server in the foreground (its
           # logs stay visible; its cleanup kills any stale instance first),
           # the "submit" tab waits for it to come up on :8081, POSTs
-          # .cache/ct600.xml to /LTS/LTSPostServlet and prints the GovTalk
-          # validation response.  The LTS writes logs/ + temp/ into its own
-          # directory, so a writable copy (per store path) is kept under
-          # $XDG_CACHE_HOME/hmrc-lts.
+          # .cache/rust-ct600/ct600-rust.xml (generated by our Rust ct600
+          # generator) to /LTS/LTSPostServlet and prints the GovTalk
+          # validation response.
+          # The LTS writes logs/ + temp/ into its own directory, so a writable
+          # copy (per store path) is kept under $XDG_CACHE_HOME/hmrc-lts.
           test-lts = '' ${l.mkZmux [
             {
               name = "lts";
@@ -426,10 +448,10 @@
                 set -e
                 HERE="${bash.wd}"
                 PORT=8081
-                FILE="$HERE/.cache/ct600.xml"
+                FILE="$HERE/.cache/rust-ct600/ct600-rust.xml"
                 [ -f "$FILE" ] || {
                   echo "hmrc-lts-submit: missing input: $FILE" >&2
-                  echo "  hint: run \`rct600-run\` first" >&2
+                  echo "  hint: run \`nix develop -c rct600-rust\` to regenerate it from the Rust ct600 generator" >&2
                   exit 1
                 }
                 echo "waiting for LTS on :$PORT ..."
