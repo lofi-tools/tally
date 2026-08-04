@@ -1,6 +1,6 @@
 # ct600
 
-CT600 corporation-tax return builder and GovTalk messages.  The Companies House client and company resolution live in `ixbrl::clients`; this crate re-exports them and adds the CT600 adapters.
+CT600 corporation-tax return builder, GovTalk messages, and the HMRC Corporation Tax online client.  The Companies House client and company resolution live in `ixbrl::clients`; this crate re-exports them and adds the CT600 adapters.
 
 ## Inputs → Outputs
 
@@ -11,6 +11,46 @@ CT600 corporation-tax return builder and GovTalk messages.  The Companies House 
 | `Frs105CorpTax` | `companies_house::CompaniesHouseFormValues::company_form_values()` → `CompanyFormValues` (CT600 company header boxes) |
 | `GovTalkParams` | `govtalk::GovTalkSubmissionRequest` / `…Acknowledgement` / `…Poll` / `…Error` / `…Response` / `…DeleteRequest` / `…DeleteResponse`; `decode_govtalk_message()` parses responses |
 | `CompanyProfile` | cached fetch via `ixbrl::clients::CompaniesHouseClient::get_company_profile_cached()` → `companies-house-{number}.json` |
+| `Ct600Return` + `HmrcCorpTaxConfig` | `clients::HmrcCorpTaxClient::submit_and_poll()` → the full Document Submission Protocol lifecycle: submit → acknowledge → poll → response → delete |
+
+## Filing with HMRC
+
+`clients::HmrcCorpTaxClient` submits a [`Ct600Return`](crate::Ct600Return)
+through the HMRC *Transaction Engine* (the Corporation Tax online service),
+using the Document Submission Protocol: the GovTalk message is POSTed to the
+submission endpoint, the acknowledgement carries a correlation ID and poll
+interval, the client polls the response endpoint until a final response
+(success or error) arrives, then sends the delete request.
+
+Endpoints (from the official “How to use the test service” guidance and the
+Transaction Engine DSP):
+
+- **External Test Service (ETS)**: `https://test-transaction-engine.tax.service.gov.uk`
+- **Live**: `https://transaction-engine.tax.service.gov.uk`
+
+A **Test-in-live** submission uses the live endpoints with the message class
+`HMRC-CT-CT600-TIL` (full validation, no registration).
+
+Config constructors: `HmrcCorpTaxConfig::test_from_env()` (ETS),
+`::live_from_env()` (live), `::test_in_live_from_env()` (Test-in-live), with
+`with_*` overrides.  The config embeds the `ixbrl::clients::Config` (company
+resolution / Companies House / cache), so one config drives the whole
+pipeline.
+
+Filing environment variables (`HmrcCorpTaxConfig`):
+
+- `HMRC_CT_USERNAME` / `HMRC_CT_PASSWORD` — the gateway credentials issued by
+  the Software Developers Support Team (SDST);
+- `HMRC_CT_VENDOR_ID` — the 4-digit vendor ID (`ChannelRouting` `URI`);
+- `HMRC_CT_SUBMISSION_URL` / `HMRC_CT_POLL_URL` — endpoint overrides;
+- `HMRC_CT_CLASS` — message class override (`HMRC-CT-CT600-TIL` for TIL);
+- `HMRC_CT_GATEWAY_TEST` — `1`/`true` for the test services;
+- `HMRC_CT_SOFTWARE` / `HMRC_CT_SOFTWARE_VERSION`;
+- `HMRC_CT_POLL_TIMEOUT` / `HMRC_CT_POLL_INTERVAL` (seconds).
+
+The submission message is built from the `Ct600Return` with the client's
+credentials, and the IRmark is computed from the message body (C14N + SHA-1,
+base64) and injected before sending.
 
 ## Minimum configuration
 
@@ -42,3 +82,7 @@ Companies House resolution (client + config in `ixbrl::clients`, re-exported her
   values as above.
 - The element-structure check compares against `.cache/py-ct600/ct600.xml`
   when present and skips otherwise.
+- The HMRC client is tested against an in-process GovTalk stub gateway:
+  submission → acknowledgement → poll → response → delete, plus the message
+  build (envelope overrides + IRmark injection), config resolution, and
+  gateway-error surfacing.

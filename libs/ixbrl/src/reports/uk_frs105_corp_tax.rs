@@ -1968,7 +1968,6 @@ impl Frs105CorpTax {
     }
 }
 
-/// Format a date for iXBRL output with non-breaking spaces.
 /*
 ============================================================================
 CT600 form value accessors
@@ -2136,6 +2135,7 @@ impl Frs105CorpTax {
     }
 }
 
+/// Format a date for iXBRL output with non-breaking spaces.
 fn format_date(d: &chrono::NaiveDate) -> String {
     let day = d.format("%d").to_string();
     let month = d.format("%B").to_string();

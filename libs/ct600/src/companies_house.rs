@@ -50,8 +50,9 @@ pub trait CompaniesHouseFormValues {
 
 impl CompaniesHouseFormValues for CompaniesHouseClient {
     async fn company_form_values(&self, tax: &Frs105CorpTax) -> ApiResult<CompanyFormValues> {
-        let Some(company_number) =
-            self.config().enrichment_number(tax.company_name(), tax.company_number())
+        let Some(company_number) = self
+            .config()
+            .enrichment_number(tax.company_name(), tax.company_number())
         else {
             return Ok(CompanyFormValues::from_tax(tax));
         };
@@ -125,7 +126,10 @@ mod tests {
         );
         let tax = TestData::sample_tax();
 
-        let values = client.company_form_values(&tax).await.expect("no lookup needed");
+        let values = client
+            .company_form_values(&tax)
+            .await
+            .expect("no lookup needed");
 
         assert_eq!(values.company_name, "Acme Ltd");
         assert_eq!(values.company_number, "9876543");
@@ -146,7 +150,10 @@ mod tests {
         );
         let tax = tax_without_company_details();
 
-        let values = client.company_form_values(&tax).await.expect("enrich from cache");
+        let values = client
+            .company_form_values(&tax)
+            .await
+            .expect("enrich from cache");
 
         assert_eq!(values.company_name, profile.company_name);
         assert_eq!(values.company_number, profile.company_number);

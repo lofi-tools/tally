@@ -1075,36 +1075,6 @@ fn descendant_text(node: &XmlNode) -> String {
 }
 
 // ============================================================================
-// Tests
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn xml_node_round_trip_via_ir() {
-        let node = elt("html", &[("xmlns", "http://www.w3.org/1999/xhtml")]).children(vec![
-            elt("body", &[]).child(elt_text("div", &[("class", "x")], "hi & bye \u{00A0}!")),
-            el("br"),
-            elt("span", &[]),
-        ]);
-        let xml = node.to_xml_string();
-        let back = XmlNode::from_xml_string(&xml).expect("parse");
-        assert_eq!(format!("{:?}", node), format!("{:?}", back));
-    }
-
-    #[test]
-    fn from_xml_string_skips_declaration() {
-        let xml = "<?xml version='1.0' encoding='ASCII'?>\n<html><body><br/></body></html>";
-        let node = XmlNode::from_xml_string(xml).expect("parse");
-        assert_eq!(format!("{:?}", node), format!("{:?}", elt("html", &[]).child(
-            elt("body", &[]).child(el("br"))
-        )));
-    }
-}
-
-// ============================================================================
 // Utility: number formatting
 // ============================================================================
 
@@ -1132,4 +1102,34 @@ pub fn format_f64(v: f64) -> String {
         result.insert(0, '-');
     }
     result
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xml_node_round_trip_via_ir() {
+        let node = elt("html", &[("xmlns", "http://www.w3.org/1999/xhtml")]).children(vec![
+            elt("body", &[]).child(elt_text("div", &[("class", "x")], "hi & bye \u{00A0}!")),
+            el("br"),
+            elt("span", &[]),
+        ]);
+        let xml = node.to_xml_string();
+        let back = XmlNode::from_xml_string(&xml).expect("parse");
+        assert_eq!(format!("{:?}", node), format!("{:?}", back));
+    }
+
+    #[test]
+    fn from_xml_string_skips_declaration() {
+        let xml = "<?xml version='1.0' encoding='ASCII'?>\n<html><body><br/></body></html>";
+        let node = XmlNode::from_xml_string(xml).expect("parse");
+        assert_eq!(format!("{:?}", node), format!("{:?}", elt("html", &[]).child(
+            elt("body", &[]).child(el("br"))
+        )));
+    }
 }

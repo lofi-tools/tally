@@ -34,8 +34,12 @@ pub struct GovTalkEnvelope {
     pub header: Header,
     #[serde(rename = "GovTalkDetails")]
     pub govtalk_details: GovTalkDetails,
-    #[serde(rename = "Body")]
-    pub body: Body,
+    #[serde(
+        rename = "Body",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub body: Option<Body>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,12 +85,12 @@ pub struct MessageDetails {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseEndpoint {
     #[serde(
-        rename = "PollInterval",
+        rename = "@PollInterval",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub poll_interval: Option<String>,
-    #[serde(rename = "$value", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "$text", default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
 }
 
@@ -122,12 +126,24 @@ pub struct Authentication {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GovTalkDetails {
-    #[serde(rename = "Keys")]
-    pub keys: Keys,
-    #[serde(rename = "TargetDetails")]
-    pub target_details: TargetDetails,
-    #[serde(rename = "ChannelRouting")]
-    pub channel_routing: ChannelRouting,
+    #[serde(
+        rename = "Keys",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub keys: Option<Keys>,
+    #[serde(
+        rename = "TargetDetails",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub target_details: Option<TargetDetails>,
+    #[serde(
+        rename = "ChannelRouting",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub channel_routing: Option<ChannelRouting>,
     #[serde(
         rename = "GovTalkErrors",
         default,
@@ -138,16 +154,20 @@ pub struct GovTalkDetails {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Keys {
-    #[serde(rename = "Key")]
-    pub key: Key,
+    #[serde(
+        rename = "Key",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub key: Option<Key>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Key {
-    #[serde(rename = "@Type")]
-    pub r#type: String,
-    #[serde(rename = "$value")]
-    pub value: String,
+    #[serde(rename = "@Type", default)]
+    pub r#type: Option<String>,
+    #[serde(rename = "$text", default)]
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,8 +178,8 @@ pub struct TargetDetails {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelRouting {
-    #[serde(rename = "Channel")]
-    pub channel: Channel,
+    #[serde(rename = "Channel", default)]
+    pub channel: Option<Channel>,
     #[serde(rename = "Timestamp", default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
 }
@@ -378,24 +398,42 @@ fn params_from_envelope(envelope: &GovTalkEnvelope) -> Result<GovTalkParams> {
             .email_address
             .clone()
             .unwrap_or_default(),
-        tax_reference: envelope.govtalk_details.keys.key.value.clone(),
-        vendor_id: envelope.govtalk_details.channel_routing.channel.uri.clone(),
+        tax_reference: envelope
+            .govtalk_details
+            .keys
+            .as_ref()
+            .and_then(|k| k.key.as_ref())
+            .and_then(|k| k.value.clone())
+            .unwrap_or_default(),
+        vendor_id: envelope
+            .govtalk_details
+            .channel_routing
+            .as_ref()
+            .and_then(|c| c.channel.as_ref())
+            .map(|c| c.uri.clone())
+            .unwrap_or_default(),
         software: envelope
             .govtalk_details
             .channel_routing
-            .channel
-            .product
-            .clone(),
+            .as_ref()
+            .and_then(|c| c.channel.as_ref())
+            .map(|c| c.product.clone())
+            .unwrap_or_default(),
         software_version: envelope
             .govtalk_details
             .channel_routing
-            .channel
-            .version
-            .clone(),
+            .as_ref()
+            .and_then(|c| c.channel.as_ref())
+            .map(|c| c.version.clone())
+            .unwrap_or_default(),
         ..Default::default()
     };
 
-    if let Some(ref ts) = envelope.govtalk_details.channel_routing.timestamp
+    if let Some(ts) = envelope
+        .govtalk_details
+        .channel_routing
+        .as_ref()
+        .and_then(|c| c.timestamp.as_ref())
         && let Ok(dt) = DateTime::parse_from_rfc3339(ts)
     {
         params.timestamp = Some(dt.with_timezone(&Local));
@@ -413,13 +451,18 @@ fn params_from_envelope(envelope: &GovTalkEnvelope) -> Result<GovTalkParams> {
         params.error_location = errors.error.location.clone().unwrap_or_default();
     }
 
-    if let Some(ref body) = envelope.body.ir_envelope
-        && let Some(ref mark) = body.ir_mark
+    if let Some(body) = envelope.body.as_ref()
+        && let Some(ir_envelope) = body.ir_envelope.as_ref()
+        && let Some(mark) = ir_envelope.ir_mark.as_ref()
     {
         params.irmark = mark.value.clone();
     }
 
-    if let Some(ref success) = envelope.body.success_response {
+    if let Some(success) = envelope
+        .body
+        .as_ref()
+        .and_then(|b| b.success_response.as_ref())
+    {
         params.success_response_message = success.message.clone();
     }
 
@@ -458,23 +501,34 @@ fn build_header(params: &GovTalkParams) -> Header {
 
 fn build_govtalk_details(params: &GovTalkParams) -> GovTalkDetails {
     GovTalkDetails {
-        keys: Keys {
-            key: Key {
-                r#type: "UTR".to_string(),
-                value: params.tax_reference.clone(),
-            },
-        },
-        target_details: TargetDetails {
+        keys: Some(Keys {
+            key: Some(Key {
+                r#type: Some("UTR".to_string()),
+                value: Some(params.tax_reference.clone()),
+            }),
+        }),
+        target_details: Some(TargetDetails {
             organisation: "HMRC".to_string(),
-        },
-        channel_routing: ChannelRouting {
-            channel: Channel {
+        }),
+        channel_routing: Some(ChannelRouting {
+            channel: Some(Channel {
                 uri: params.vendor_id.clone(),
                 product: params.software.clone(),
                 version: params.software_version.clone(),
-            },
+            }),
             timestamp: params.timestamp.as_ref().map(|ts| ts.to_rfc3339()),
-        },
+        }),
+        govtalk_errors: None,
+    }
+}
+
+/// The minimal `GovTalkDetails` used by poll / ack / response / delete
+/// messages: an empty `<Keys/>`, matching the reference tool exactly.
+fn minimal_govtalk_details() -> GovTalkDetails {
+    GovTalkDetails {
+        keys: Some(Keys { key: None }),
+        target_details: None,
+        channel_routing: None,
         govtalk_errors: None,
     }
 }
@@ -495,7 +549,7 @@ impl GovTalkSubmissionRequest {
             envelope_version: "2.0".to_string(),
             header: build_header(&self.params),
             govtalk_details: build_govtalk_details(&self.params),
-            body: Body {
+            body: Some(Body {
                 ir_envelope: Some(IRenvelope {
                     ir_header: IRHeader {
                         ir_mark: IRMark {
@@ -510,7 +564,7 @@ impl GovTalkSubmissionRequest {
                     content: self.params.ir_envelope_content.clone(),
                 }),
                 success_response: None,
-            },
+            }),
         })
     }
 
@@ -620,11 +674,11 @@ impl Message for GovTalkSubmissionAcknowledgement {
         Ok(GovTalkEnvelope {
             envelope_version: "2.0".to_string(),
             header,
-            govtalk_details: build_govtalk_details(&self.params),
-            body: Body {
+            govtalk_details: minimal_govtalk_details(),
+            body: Some(Body {
                 ir_envelope: None,
                 success_response: None,
-            },
+            }),
         })
     }
 }
@@ -669,11 +723,8 @@ impl Message for GovTalkSubmissionPoll {
         Ok(GovTalkEnvelope {
             envelope_version: "2.0".to_string(),
             header: build_header(&self.params),
-            govtalk_details: build_govtalk_details(&self.params),
-            body: Body {
-                ir_envelope: None,
-                success_response: None,
-            },
+            govtalk_details: minimal_govtalk_details(),
+            body: None,
         })
     }
 }
@@ -715,7 +766,7 @@ impl<'de> Deserialize<'de> for GovTalkSubmissionError {
 
 impl Message for GovTalkSubmissionError {
     fn create_message(&self) -> Result<GovTalkEnvelope> {
-        let mut details = build_govtalk_details(&self.params);
+        let mut details = minimal_govtalk_details();
         details.govtalk_errors = Some(GovTalkErrors {
             error: Error {
                 raised_by: "Gateway".to_string(),
@@ -734,10 +785,7 @@ impl Message for GovTalkSubmissionError {
             envelope_version: "2.0".to_string(),
             header,
             govtalk_details: details,
-            body: Body {
-                ir_envelope: None,
-                success_response: None,
-            },
+            body: None,
         })
     }
 }
@@ -787,13 +835,13 @@ impl Message for GovTalkSubmissionResponse {
         Ok(GovTalkEnvelope {
             envelope_version: "2.0".to_string(),
             header,
-            govtalk_details: build_govtalk_details(&self.params),
-            body: Body {
+            govtalk_details: minimal_govtalk_details(),
+            body: Some(Body {
                 ir_envelope: None,
                 success_response: Some(SuccessResponse {
                     message: self.params.success_response_message.clone(),
                 }),
-            },
+            }),
         })
     }
 }
@@ -838,11 +886,8 @@ impl Message for GovTalkDeleteRequest {
         Ok(GovTalkEnvelope {
             envelope_version: "2.0".to_string(),
             header: build_header(&self.params),
-            govtalk_details: build_govtalk_details(&self.params),
-            body: Body {
-                ir_envelope: None,
-                success_response: None,
-            },
+            govtalk_details: minimal_govtalk_details(),
+            body: None,
         })
     }
 }
@@ -892,11 +937,11 @@ impl Message for GovTalkDeleteResponse {
         Ok(GovTalkEnvelope {
             envelope_version: "2.0".to_string(),
             header,
-            govtalk_details: build_govtalk_details(&self.params),
-            body: Body {
+            govtalk_details: minimal_govtalk_details(),
+            body: Some(Body {
                 ir_envelope: None,
                 success_response: None,
-            },
+            }),
         })
     }
 }
