@@ -792,219 +792,22 @@ fn set_irmarks(node: &mut XmlNode, irmark: &str) {
 }
 
 // ============================================================================
-// Test support: an in-process GovTalk stub gateway
-// ============================================================================
-
-#[cfg(test)]
-use crate::govtalk::{
-    GovTalkDeleteResponse, GovTalkSubmissionAcknowledgement, GovTalkSubmissionError,
-    GovTalkSubmissionResponse,
-};
-
-#[cfg(test)]
-struct StubGateway {
-    base: String,
-    reject_polls: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    deletions: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-}
-
-#[cfg(test)]
-impl StubGateway {
-    async fn spawn() -> Self {
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind stub");
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let reject_polls = std::sync::Arc::new(AtomicBool::new(false));
-        let deletions = std::sync::Arc::new(AtomicUsize::new(0));
-        let reject = reject_polls.clone();
-        let del = deletions.clone();
-
-        tokio::spawn(async move {
-            loop {
-                let (mut socket, _) = match listener.accept().await {
-                    Ok(pair) => pair,
-                    Err(_) => break,
-                };
-                let reject = reject.clone();
-                let del = del.clone();
-                tokio::spawn(async move {
-                    let mut buf = vec![0u8; 16384];
-                    let n = match socket.read(&mut buf).await {
-                        Ok(n) if n > 0 => n,
-                        _ => return,
-                    };
-                    let request = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let response = route(&request, reject.load(Ordering::Relaxed), &del);
-                    let _ = socket
-                        .write_all(
-                            format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                                response.len(),
-                                response
-                            )
-                            .as_bytes(),
-                        )
-                        .await;
-                });
-            }
-        });
-
-        Self {
-            base,
-            reject_polls,
-            deletions,
-        }
-    }
-
-    fn deleted(&self) -> bool {
-        self.deletions.load(std::sync::atomic::Ordering::Relaxed) > 0
-    }
-}
-
-#[cfg(test)]
-fn route(request: &str, reject_polls: bool, deletions: &std::sync::atomic::AtomicUsize) -> String {
-    if request.contains("Qualifier>request") && request.contains("Function>submit") {
-        // Submission request -> acknowledgement with a correlation ID.
-        let params = GovTalkParams {
-            class: CLASS_LIVE.to_string(),
-            function: "submit".to_string(),
-            qualifier: "acknowledgement".to_string(),
-            correlation_id: "CORR-1".to_string(),
-            response_endpoint: String::new(),
-            poll_interval: "1".to_string(),
-            ..Default::default()
-        };
-        GovTalkSubmissionAcknowledgement::new(params)
-            .to_xml()
-            .expect("ack")
-    } else if request.contains("Qualifier>poll") {
-        if reject_polls {
-            let params = GovTalkParams {
-                class: CLASS_LIVE.to_string(),
-                function: "submit".to_string(),
-                qualifier: "error".to_string(),
-                correlation_id: "CORR-1".to_string(),
-                error_number: "1001".to_string(),
-                error_type: "business".to_string(),
-                error_text: "Box 145 is invalid".to_string(),
-                ..Default::default()
-            };
-            GovTalkSubmissionError::new(params).to_xml().expect("error")
-        } else {
-            let params = GovTalkParams {
-                class: CLASS_LIVE.to_string(),
-                function: "submit".to_string(),
-                qualifier: "response".to_string(),
-                correlation_id: "CORR-1".to_string(),
-                success_response_message: "Submission processed successfully".to_string(),
-                ..Default::default()
-            };
-            GovTalkSubmissionResponse::new(params)
-                .to_xml()
-                .expect("response")
-        }
-    } else if request.contains("Function>delete") {
-        deletions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let params = GovTalkParams {
-            class: CLASS_LIVE.to_string(),
-            function: "delete".to_string(),
-            qualifier: "response".to_string(),
-            correlation_id: "CORR-1".to_string(),
-            ..Default::default()
-        };
-        GovTalkDeleteResponse::new(params).to_xml().expect("delete")
-    } else {
-        String::new()
-    }
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ct600_return::{CompanyInformation, Declaration, FinancialYear, ReturnInfoSummary};
     use crate::govtalk::{GovTalkSubmissionAcknowledgement, GovTalkSubmissionError};
-    use chrono::NaiveDate;
-
-    /// A minimal but complete `Ct600Return` for message-building tests.
-    fn sample_return() -> Ct600Return {
-        Ct600Return {
-            envelope: EnvelopeConfig::default(),
-            contact: Default::default(),
-            sender: "Company".to_string(),
-            company: CompanyInformation {
-                company_name: "Acme Ltd".to_string(),
-                registration_number: "12345678".to_string(),
-                reference: "8596148860".to_string(),
-                company_type: 1,
-                period_start: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-                period_end: NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
-            },
-            return_info: ReturnInfoSummary {
-                this_period_accounts: true,
-                this_period_computations: true,
-            },
-            turnover: 11218.0,
-            trading_profits: 748.0,
-            net_trading_profits: 748.0,
-            profits_before_other_deductions: 748.0,
-            profits_before_charges_and_group_relief: 748.0,
-            chargeable_profits: 748.0,
-            fy1: FinancialYear {
-                year: 2024,
-                profit: 186.0,
-                tax_rate: 19.0,
-                tax: 35.34,
-            },
-            fy2: FinancialYear {
-                year: 2025,
-                profit: 562.0,
-                tax_rate: 19.0,
-                tax: 106.78,
-            },
-            corporation_tax: 142.12,
-            net_corporation_tax_chargeable: 142.12,
-            net_corporation_tax_liability: 142.12,
-            tax_chargeable: 142.12,
-            tax_payable: 142.12,
-            tax_payable_including_restitution_tax: 142.12,
-            sme_claim: true,
-            rnd_enhanced_expenditure: Some(465.0),
-            rnd_and_creative_enhanced_expenditure: Some(465.0),
-            aia_capital_allowances: 591.0,
-            payment_address_lines: vec!["1 High Street".to_string()],
-            payment_recipient: "Acme Ltd".to_string(),
-            payment_nominee_reference: "8596148860".to_string(),
-            declaration: Declaration {
-                name: Some("Jane Doe".to_string()),
-                date: Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()),
-                status: Some("Director".to_string()),
-            },
-            computation_document: Some("<html/>".to_string()),
-            accounts_document: Some("<html/>".to_string()),
-        }
-    }
-
-    fn test_config() -> HmrcCorpTaxConfig {
-        HmrcCorpTaxConfig::test_from_env()
-            .with_username("testuser")
-            .with_password("testpass")
-            .with_vendor_id("1234")
-    }
+    use crate::test_utils::{StubGateway, TestData};
 
     /// The built message carries the configured credentials, the test gateway
     /// flag, and a non-empty IRmark injected into every `ct:IRmark` element.
     #[test]
     fn build_submission_xml_overrides_envelope_and_injects_irmark() {
-        let client = HmrcCorpTaxClient::new(test_config().with_unreachable_endpoints());
+        let client = HmrcCorpTaxClient::new(TestData::test_config().with_unreachable_endpoints());
         let xml = client
-            .build_submission_xml(&sample_return())
+            .build_submission_xml(&TestData::sample_return())
             .expect("build");
 
         assert!(xml.contains("<Class>HMRC-CT-CT600</Class>"));
@@ -1038,16 +841,16 @@ mod tests {
     /// message body changes.
     #[test]
     fn irmark_is_deterministic_and_body_sensitive() {
-        let client = HmrcCorpTaxClient::new(test_config().with_unreachable_endpoints());
+        let client = HmrcCorpTaxClient::new(TestData::test_config().with_unreachable_endpoints());
         let xml1 = client
-            .build_submission_xml(&sample_return())
+            .build_submission_xml(&TestData::sample_return())
             .expect("build");
         let xml2 = client
-            .build_submission_xml(&sample_return())
+            .build_submission_xml(&TestData::sample_return())
             .expect("build");
         assert_eq!(irmark_of(&xml1), irmark_of(&xml2));
 
-        let mut other = sample_return();
+        let mut other = TestData::sample_return();
         other.turnover += 1.0;
         let xml3 = client.build_submission_xml(&other).expect("build");
         assert_ne!(irmark_of(&xml1), irmark_of(&xml3));
@@ -1059,9 +862,9 @@ mod tests {
     /// The envelope timestamp is in the header, so the body hash is stable.
     #[test]
     fn irmark_matches_reference_tool() {
-        let client = HmrcCorpTaxClient::new(test_config().with_unreachable_endpoints());
+        let client = HmrcCorpTaxClient::new(TestData::test_config().with_unreachable_endpoints());
         let xml = client
-            .build_submission_xml(&sample_return())
+            .build_submission_xml(&TestData::sample_return())
             .expect("build");
         assert_eq!(irmark_of(&xml), "FFRGJ9wKKopilSidXDMBBZ5AXAY=");
     }
@@ -1170,13 +973,13 @@ mod tests {
         let stub = StubGateway::spawn().await;
 
         let client = HmrcCorpTaxClient::new(
-            test_config()
+            TestData::test_config()
                 .with_submission_url(format!("{}/submission", stub.base))
                 .with_poll_url(format!("{}/poll", stub.base)),
         );
 
         let outcome = client
-            .submit_and_poll(&sample_return())
+            .submit_and_poll(&TestData::sample_return())
             .await
             .expect("lifecycle");
         assert_eq!(outcome.correlation_id, "CORR-1");
@@ -1192,13 +995,13 @@ mod tests {
             .store(true, std::sync::atomic::Ordering::Relaxed);
 
         let client = HmrcCorpTaxClient::new(
-            test_config()
+            TestData::test_config()
                 .with_submission_url(format!("{}/submission", stub.base))
                 .with_poll_url(format!("{}/poll", stub.base))
                 .with_poll_timeout(Duration::from_secs(10)),
         );
 
-        let receipt = client.submit(&sample_return()).await.expect("submit");
+        let receipt = client.submit(&TestData::sample_return()).await.expect("submit");
         match client.poll(&receipt).await {
             Err(HmrcCorpTaxError::SubmissionError { text, .. }) => {
                 assert_eq!(text, "Box 145 is invalid");
