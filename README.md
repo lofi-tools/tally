@@ -89,64 +89,76 @@ currently has no tests.
 
 ## tally-cli configuration
 
-### Command-line flags
+All the flags, config-file keys and defaults baked into the message are
+documented in the [tally-cli README](apps/tally-cli/README.md#configuration).
+In short:
 
-All flags are required; there is no environment-variable fallback for them.
+- every command-line flag is required and has no environment-variable fallback;
+- the company-identity fields in the config are **optional** — the name is
+  resolved from Companies House at runtime when an API key is configured (the
+  registration date too, when the config carries no identity details at all),
+  the company number falls back on `COMPANY_NUMBER`, and anything still
+  missing fails with a clear error listing the missing fields;
+- the Corporation Tax reference (UTR) comes from the `UNIQUE_TAXPAYER_REF`
+  environment variable (winning) or the config's `company.tax_reference`; the
+  return period cannot be resolved from Companies House and must always be in
+  the config file;
+- the flat accounts-metadata fields are all required (copy them from the
+  example config below).
 
-| Flag | Meaning |
-|------|---------|
-| `--config-path <config>` | JSON config: company identity + accounts metadata (see below) |
-| `--book <book>` | GnuCash ledger (`input.gnucash`) |
-| `--out <dir>` | output directory; the CT600 GovTalk message is written to `<dir>/ct600.xml` |
+### Example configs
 
-### Config file
+**With a Companies House API key** — the company block only needs the return
+period; the name and registration number are resolved from the company's
+profile at runtime (`COMPANY_NUMBER` provides the lookup number), and the UTR
+comes from `UNIQUE_TAXPAYER_REF`:
 
-A JSON file with the same shape as
-`libs/ixbrl/example_data/example2/input-company.json` (use it as a template): a nested
-`company` identity block plus the flat accounts-metadata fields.
+```bash
+export COMPANIES_HOUSE_API_KEY="your-api-key"   # or COMPANIES_HOUSE_API_KEY_TEST
+export COMPANY_NUMBER=12345678
+export UNIQUE_TAXPAYER_REF=8596148860
+```
 
-| Key | Type | Meaning |
-|-----|------|---------|
-| `company.name` | string | company name |
-| `company.tax_reference` | string | Corporation Tax reference (UTR) |
-| `company.company_number` | string | Companies House registration number |
-| `company.accounting_period_start` | date | start of the return period (`YYYY-MM-DD`) |
-| `company.accounting_period_end` | date | end of the return period (`YYYY-MM-DD`) |
-| `directors`, `sic_codes`, `address_lines`, `email`, ... | — | accounts metadata (all `AccountsMetadata` fields from `libs/ixbrl`) |
+<!--```json
+{
+  "company": {
+    "accounting_period_start": "2020-01-01",
+    "accounting_period_end": "2020-12-31"
+  },
+  "directors": ["A Bloggs"],
+  "contact_name": "Corporate Enquiries",
+  "address_lines": ["123 Leadbarton Street"],
+  "county": "Minchingshire",
+  "location": "Threapminchington",
+  "postcode": "QQ99 9ZZ",
+  "email": "corporate@example.org",
+  "website_url": "https://example.org/corporate",
+  "sic_codes": ["62020"],
+  "activities": "Computer security consultancy",
+  "jurisdiction": "England and Wales",
+  "...": "remaining required accounts-metadata fields — copy them from libs/ixbrl/example_data/example2/input-company.json"
+}
+```-->
 
-All fields are required — the parser applies no defaults, so copy the example config
-and edit it.
+**Without an API key** — the company block must be complete, because nothing
+can be resolved at runtime:
 
-### Defaults baked into the produced message
+```json
+{
+  "company": {
+    "name": "Example Biz Ltd.",
+    "tax_reference": "8596148860",
+    "company_number": "12345678",
+    "accounting_period_start": "2020-01-01",
+    "accounting_period_end": "2020-12-31"
+  },
+  "directors": ["A Bloggs"],
+  "...": "remaining required accounts-metadata fields (as in the example above)"
+}
+```
 
-These come from the libraries' `Default` implementations and have no config hook yet:
-
-| Field | Default |
-|-------|---------|
-| GovTalk envelope | class `HMRC-CT-CT600`, `GatewayTest` 1, username `CTUser100` / password `password`, vendor `1234`, software `ct600` 1.0.0 |
-| Principal contact | `Ms Sarah McAcre`, sarah@example.org |
-| Financial years / rates | FY1 2019, FY2 2020, both 19% (`Company::new` defaults) |
-| Declaration (boxes 975 / 985) | contact name / `Director`; box 980 (date) = today |
-
-### Environment variables (library-level)
-
-Producing the CT600 needs none. The underlying libraries read a few variables for live
-Companies House resolution and HMRC submission (future features):
-
-| Variable | Used for |
-|----------|----------|
-| `COMPANY_NUMBER` | company resolution when no full company override is given |
-| `COMPANIES_HOUSE_API_KEY` / `COMPANIES_HOUSE_API_KEY_TEST` | live / sandbox Companies House lookups |
-| `CT600_CACHE_DIR` | company-profile cache directory (default `<repo>/.cache/api_responses`) |
-| `HMRC_CT_*` | HMRC submission credentials (not used when producing the return) |
-
-The Companies House client (`ixbrl::clients::CompaniesHouseClient`) caches fetched
-company profiles under `.cache/api_responses/companies-house-<number>.json` (override
-with `CT600_CACHE_DIR`) and serves from the cache when available.  Company resolution
-follows a strict order: a full company override wins, otherwise the cached response for
-the configured company number (`COMPANY_NUMBER`) is used, otherwise the profile is
-fetched from the live API.  The CT600 `company_form_values` adapter (in `libs/ct600`)
-fills the header boxes from the resolved profile.
+The UTR can also come from `UNIQUE_TAXPAYER_REF`, which wins over
+`company.tax_reference`.
 
 ## Links
 

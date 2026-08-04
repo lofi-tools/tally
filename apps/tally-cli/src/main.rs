@@ -11,40 +11,32 @@
 //! * `--config-path` — a JSON config file describing the company and the
 //!   accounts metadata (same shape as
 //!   `libs/ixbrl/example_data/example2/input-company.json`: a nested
-//!   `company` identity block plus the flat [`AccountsMetadata`] fields);
+//!   `company` identity block plus the flat accounts-metadata fields).  The
+//!   file becomes a [`config::FileConfig`] and is merged with the captured
+//!   environment ([`config::RawEnvConfig`]) and the subcommand's CLI values
+//!   into a [`config::ResolvedConfig`] by [`config::Ct600Config::resolve`]:
+//!   every identity field is optional — the company name is resolved from
+//!   Companies House at runtime when an API key is configured (the
+//!   registration date too, when the config carries no identity details at
+//!   all), the company number falls back on `COMPANY_NUMBER`, the
+//!   Corporation Tax reference (UTR) comes from `UNIQUE_TAXPAYER_REF`
+//!   (winning) or `company.tax_reference`, and anything still missing is
+//!   reported clearly (see [`config`]);
 //! * `--book` — the GnuCash ledger (`input.gnucash`);
 //! * `--out` — the output directory; the CT600 GovTalk message is written
 //!   to `<out>/ct600.xml`.
 
+mod config;
+
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use chrono::NaiveDate;
+use config::{Ct600Config, RawEnvConfig};
 use ct600::Ct600Return;
-use ixbrl::company::Company;
-use ixbrl::reports::uk_frs105_accounts::{AccountsMetadata, Frs105Accounts};
+use ixbrl::clients::CompaniesHouseClientType;
+use ixbrl::reports::uk_frs105_accounts::Frs105Accounts;
 use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
 use ixbrl::GnucashBook;
-use serde::Deserialize;
-
-/// The top-level shape of the config file: a nested `company` identity
-/// block plus the flat accounts-metadata fields (incl. logo/signature).
-#[derive(Deserialize)]
-struct Config {
-    company: CompanyConfig,
-    #[serde(flatten)]
-    metadata: AccountsMetadata,
-}
-
-/// The company identity block of the config file.
-#[derive(Deserialize)]
-struct CompanyConfig {
-    name: String,
-    tax_reference: String,
-    company_number: String,
-    accounting_period_start: NaiveDate,
-    accounting_period_end: NaiveDate,
-}
 
 /// The `tally` subcommands.
 enum Command {
@@ -71,47 +63,43 @@ impl Command {
     async fn run(&self) -> Result<()> {
         match self {
             Command::Ct600 => {
-                let args = Ct600Args::parse_args()?;
+                let args = parse_ct600_args()?;
                 run_ct600(args).await
             }
         }
     }
 }
 
-/// Parsed arguments for the `ct600` subcommand.
-struct Ct600Args {
-    config_path: PathBuf,
-    book_path: PathBuf,
-    out_dir: PathBuf,
-}
+/// Parse the `ct600` flags into the subcommand's [`Ct600Config`].
+///
+/// `--config-path` is required here (the config file cannot be read without
+/// it); `--book` and `--out` are optional because the resolution stage
+/// ([`config::Ct600Config::resolve`]) is what reports them missing, alongside
+/// any other still-unresolved config.
+fn parse_ct600_args() -> Result<Ct600Config> {
+    let mut rest = std::env::args().skip(2); // skip program + subcommand
+    let mut config_path = None;
+    let mut book_path = None;
+    let mut out_dir = None;
 
-impl Ct600Args {
-    /// Parse the `ct600` flags (`--config-path`, `--book`, `--out`).
-    fn parse_args() -> Result<Ct600Args> {
-        let mut rest = std::env::args().skip(2); // skip program + subcommand
-        let mut config_path = None;
-        let mut book_path = None;
-        let mut out_dir = None;
-
-        while let Some(arg) = rest.next() {
-            match arg.as_str() {
-                "--config-path" => config_path = Some(next_value(&mut rest, &arg)?),
-                "--book" => book_path = Some(next_value(&mut rest, &arg)?),
-                "--out" => out_dir = Some(next_value(&mut rest, &arg)?),
-                "-h" | "--help" => {
-                    println!("{USAGE}");
-                    std::process::exit(0);
-                }
-                other => bail!("unknown argument '{other}'\n\n{USAGE}"),
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--config-path" => config_path = Some(next_value(&mut rest, &arg)?),
+            "--book" => book_path = Some(next_value(&mut rest, &arg)?),
+            "--out" => out_dir = Some(next_value(&mut rest, &arg)?),
+            "-h" | "--help" => {
+                println!("{USAGE}");
+                std::process::exit(0);
             }
+            other => bail!("unknown argument '{other}'\n\n{USAGE}"),
         }
-
-        Ok(Ct600Args {
-            config_path: config_path.context("missing --config-path")?,
-            book_path: book_path.context("missing --book")?,
-            out_dir: out_dir.context("missing --out")?,
-        })
     }
+
+    Ok(Ct600Config {
+        config_path: config_path.context("missing --config-path")?,
+        book_path,
+        out_dir,
+    })
 }
 
 const USAGE: &str = "\
@@ -146,36 +134,47 @@ fn next_value(rest: &mut impl Iterator<Item = String>, flag: &str) -> Result<Pat
 }
 
 /// The `ct600` subcommand: config + GnuCash book -> CT600 message.
-async fn run_ct600(args: Ct600Args) -> Result<()> {
-    let config_json = std::fs::read_to_string(&args.config_path)
-        .with_context(|| format!("read config '{}'", args.config_path.display()))?;
-    let config: Config = serde_json::from_str(&config_json)
-        .with_context(|| format!("parse config '{}'", args.config_path.display()))?;
+async fn run_ct600(args: Ct600Config) -> Result<()> {
+    // Parse and enrich the subcommand's inputs: the company identity is
+    // resolved from the config file, the captured environment, and Companies
+    // House; anything still missing errors with an explanation (see
+    // `config`).
+    let resolved = args.resolve(&RawEnvConfig::from_env()).await?;
 
-    let company = Company::new(
-        config.company.name,
-        config.company.tax_reference,
-        config.company.company_number,
-        config.company.accounting_period_start,
-        config.company.accounting_period_end,
+    // Print the resolved values for this run.
+    println!("resolved: company '{}'", resolved.company.name);
+    println!("  company number: {}", resolved.company.company_number);
+    println!("  tax reference (UTR): {}", resolved.company.tax_reference);
+    println!("  registration date: {}", resolved.company.registration_date);
+    println!(
+        "  return period: {} to {}",
+        resolved.company.accounting_period_start, resolved.company.accounting_period_end
     );
+    println!("  book: {}", resolved.book_path.display());
+    println!("  out: {}", resolved.out_dir.display());
+    let api = match resolved.companies_house_client_type {
+        Some(CompaniesHouseClientType::Live) => "live",
+        Some(CompaniesHouseClientType::Sandbox) => "sandbox",
+        None => "none",
+    };
+    println!("  Companies House API: {api}");
 
-    let book_path = args.book_path.to_string_lossy().into_owned();
+    let book_path = resolved.book_path.to_string_lossy().into_owned();
     let book = GnucashBook::try_from_gnucash_file(&book_path)
         .await
         .with_context(|| format!("load GnuCash book '{book_path}'"))?;
 
     // FRS 105 inputs to the return.
-    let accounts = Frs105Accounts::new(&book, &company, &config.metadata);
-    let corp_tax = Frs105CorpTax::builder(&book, &company).build();
+    let accounts = Frs105Accounts::new(&book, &resolved.company, &resolved.metadata);
+    let corp_tax = Frs105CorpTax::builder(&book, &resolved.company).build();
 
     // The CT600 GovTalk message.
     let filing = Ct600Return::from_inputs(&accounts, &corp_tax);
     let xml = filing.to_xml();
 
-    std::fs::create_dir_all(&args.out_dir)
-        .with_context(|| format!("create output directory '{}'", args.out_dir.display()))?;
-    let out_path = args.out_dir.join("ct600.xml");
+    std::fs::create_dir_all(&resolved.out_dir)
+        .with_context(|| format!("create output directory '{}'", resolved.out_dir.display()))?;
+    let out_path = resolved.out_dir.join("ct600.xml");
     std::fs::write(&out_path, xml)
         .with_context(|| format!("write '{}'", out_path.display()))?;
     println!("wrote {}", out_path.display());

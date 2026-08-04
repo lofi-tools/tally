@@ -5,7 +5,10 @@ use snafu::Snafu;
 pub mod clients;
 pub mod company;
 pub mod ixbrl_fmt;
-pub mod reports;
+pub mod reports {
+    pub mod uk_frs105_accounts;
+    pub mod uk_frs105_corp_tax;
+}
 #[cfg(test)]
 pub mod test_utils;
 

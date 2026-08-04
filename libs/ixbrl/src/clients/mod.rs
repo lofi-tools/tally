@@ -11,7 +11,8 @@
 
 pub mod companies_house;
 pub use companies_house::{
-    ApiResult, CompaniesHouseClient, CompaniesHouseError, CompanyProfile, CompanyType, Config,
+    ApiResult, CompaniesHouseClient, CompaniesHouseClientType, CompaniesHouseError, CompanyProfile,
+    CompanyType, Config,
 };
 
 /// Test fixtures and offline test clients for the company clients.
