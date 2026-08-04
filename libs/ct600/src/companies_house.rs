@@ -1,133 +1,20 @@
-//! Companies House public API client.
+//! CT600 adapters over the ixbrl Companies House client.
 //!
-//! A minimal client for the Companies House API
-//! (<https://developer.company-information.service.gov.uk/>), authenticated
-//! with HTTP basic access authentication.
-//!
-//! The API key is sent as the basic-auth *username* and the password is left
-//! blank, e.g. for an API key `my_api_key`:
-//!
-//! ```text
-//! Authorization: Basic bXlfYXBpX2tleTo=
-//! ```
+//! The Companies House client, its layered configuration and the company
+//! resolution chain live in `ixbrl::clients::companies_house`.  This module
+//! adds the CT600-specific derivations on top: the company header boxes
+//! ([`CompanyFormValues`]) from a profile + tax computation, and the
+//! enrichment gating ([`CompaniesHouseFormValues`]) for those boxes.
 
-use std::{env::VarError, result::Result};
-
-use serde::{Deserialize, Serialize};
-use snafu::Snafu;
-
-use crate::form::CompanyFormValues;
+use ixbrl::clients::{ApiResult, CompaniesHouseClient, CompanyProfile, CompanyType};
 use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
 
-/// Errors returned by the Companies House API client.
-#[derive(Debug, Snafu)]
-pub enum CompaniesHouseError {
-    /// The HTTP request could not be sent.
-    #[snafu(display("request failed: {source}"))]
-    RequestFailed { source: reqwest::Error },
-
-    /// The API returned a non-success status code.
-    #[snafu(display("GET {url} returned HTTP {status}"))]
-    HttpStatus {
-        url: String,
-        status: reqwest::StatusCode,
-    },
-
-    /// The response body could not be decoded as JSON.
-    #[snafu(display("failed to decode response: {source}"))]
-    DecodeFailed { source: reqwest::Error },
-}
-
-pub type ApiResult<T> = Result<T, CompaniesHouseError>;
-
-/// A client for the Companies House public API.
-///
-/// All requests are authenticated with the API key using HTTP basic
-/// authentication (username = API key, empty password).
-#[derive(Debug, Clone)]
-pub struct CompaniesHouseClient {
-    base_url: &'static str,
-    http: reqwest::Client,
-    api_key: String,
-}
-
-impl CompaniesHouseClient {
-    /// Create a new client using the given API key.
-    pub fn test_client_from_env() -> Result<Self, VarError> {
-        const API_BASE_URL_TEST: &str = "https://api-sandbox.company-information.service.gov.uk";
-        Ok(Self {
-            base_url: API_BASE_URL_TEST,
-            http: reqwest::Client::new(),
-            api_key: std::env::var("COMPANIES_HOUSE_API_KEY_TEST")?,
-        })
-    }
-    pub fn live_from_env() -> Result<Self, VarError> {
-        /// Base URL of the Companies House public API.
-        const API_BASE_URL: &str = "https://api.company-information.service.gov.uk";
-
-        Ok(Self {
-            base_url: API_BASE_URL,
-            http: reqwest::Client::new(),
-            api_key: std::env::var("COMPANIES_HOUSE_API_KEY")?,
-        })
-    }
-
-    /// A client pointed at an unreachable address with a placeholder API
-    /// key, for tests that must never reach the network.
-    #[cfg(test)]
-    pub(crate) fn offline() -> Self {
-        Self {
-            base_url: "http://127.0.0.1:1",
-            http: reqwest::Client::new(),
-            api_key: "unused".to_string(),
-        }
-    }
-
-    /// Fetch the company profile for the given company number.
-    ///
-    /// `GET /company/{companyNumber}`
-    pub async fn get_company_profile(&self, company_number: &str) -> ApiResult<CompanyProfile> {
-        let url = format!("{}/company/{company_number}", self.base_url);
-        let response = self
-            .http
-            .get(&url)
-            .basic_auth(&self.api_key, Some("")) //  Companies House API takes the username as the API key
-            .send()
-            .await
-            .map_err(|source| CompaniesHouseError::RequestFailed { source })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            return Err(CompaniesHouseError::HttpStatus { url, status });
-        }
-
-        response
-            .json::<CompanyProfile>()
-            .await
-            .map_err(|source| CompaniesHouseError::DecodeFailed { source })
-    }
-
-    /// Fetch the company profile for the tax computation's company number and
-    /// combine it with the tax-derived values into the company header boxes
-    /// (1, 2, 3, 4, 30 and 35).
-    ///
-    /// Companies House supplies boxes 1 (name), 2 (registration number) and 4
-    /// (type of company, mapped from the register's company type); the tax
-    /// reference (3) and the return period (30/35) come from the tax
-    /// computation.
-    pub async fn company_form_values(&self, tax: &Frs105CorpTax) -> ApiResult<CompanyFormValues> {
-        let profile = self.get_company_profile(tax.company_number()).await?;
-        Ok(CompanyFormValues::from_profile_and_tax(&profile, tax))
-    }
-}
+use crate::form::CompanyFormValues;
 
 impl CompanyFormValues {
     /// Build the CT600 company header boxes from a Companies House profile
     /// and the tax computation.
-    pub(crate) fn from_profile_and_tax(
-        profile: &CompanyProfile,
-        tax: &Frs105CorpTax,
-    ) -> Self {
+    pub(crate) fn from_profile_and_tax(profile: &CompanyProfile, tax: &Frs105CorpTax) -> Self {
         Self {
             company_name: profile.company_name.clone(),
             company_number: profile.company_number.clone(),
@@ -144,146 +31,128 @@ impl CompanyFormValues {
     }
 }
 
-/// The CT600 box 4 "Type of company" options, as defined in the HMRC CT600
-/// guide.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompanyType {
-    PrivateCompanyLimitedByShares,
-    PrivateCompanyLimitedByGuarantee,
-    PrivateUnlimitedCompany,
-    PublicLimitedCompany,
-    OldPublicCompany,
-    PrivateCompanyLimitedBySharesExempt,
-    LimitedLiabilityPartnership,
-}
-
-impl CompanyType {
-    /// Parse a Companies House company type string into a [`CompanyType`].
-    ///
-    /// Returns `None` for types not recognised.
-    pub fn parse_str(s: &str) -> Option<Self> {
-        match s {
-            "ltd" => Some(Self::PrivateCompanyLimitedByShares),
-            "private-limited-guarant-nsc" => Some(Self::PrivateCompanyLimitedByGuarantee),
-            "private-unlimited" | "unltd" => Some(Self::PrivateUnlimitedCompany),
-            "plc" => Some(Self::PublicLimitedCompany),
-            "old-public-company" => Some(Self::OldPublicCompany),
-            "private-limited-shares-section-30-exemption" => {
-                Some(Self::PrivateCompanyLimitedBySharesExempt)
-            }
-            "llp" => Some(Self::LimitedLiabilityPartnership),
-            _ => None,
-        }
-    }
-
-    /// The CT600 box 4 code for this company type.
-    pub fn code(self) -> u8 {
-        match self {
-            Self::PrivateCompanyLimitedByShares => 1,
-            Self::PrivateCompanyLimitedByGuarantee => 2,
-            Self::PrivateUnlimitedCompany => 3,
-            Self::PublicLimitedCompany => 4,
-            Self::OldPublicCompany => 5,
-            Self::PrivateCompanyLimitedBySharesExempt => 6,
-            Self::LimitedLiabilityPartnership => 9,
-        }
-    }
-}
-
-/// Company profile returned by `GET /company/{companyNumber}`.
+/// CT600 company-header enrichment over the ixbrl Companies House client.
 ///
-/// Only the commonly used fields are modelled; all optional fields are
-/// tolerated when absent from the response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompanyProfile {
-    pub company_number: String,
-    pub company_name: String,
-    #[serde(default)]
-    pub company_status: Option<String>,
-    #[serde(default)]
-    pub company_status_detail: Option<String>,
-    #[serde(default)]
-    pub date_of_creation: Option<String>,
-    #[serde(default)]
-    pub date_of_dissolution: Option<String>,
-    #[serde(rename = "type", default)]
-    pub company_type: Option<String>,
-    #[serde(default)]
-    pub jurisdiction: Option<String>,
-    #[serde(default)]
-    pub registered_office_address: Option<RegisteredOfficeAddress>,
-    #[serde(default)]
-    pub accounts: Option<Accounts>,
-    #[serde(default)]
-    pub confirmation_statement: Option<ConfirmationStatement>,
-    #[serde(default)]
-    pub sic_codes: Option<Vec<String>>,
-    #[serde(default)]
-    pub undeliverable_registered_office_address: Option<bool>,
-    #[serde(default)]
-    pub links: Option<CompanyLinks>,
+/// The Companies House lookup is skipped when the caller supplied complete
+/// company details (a non-empty name and registration number): the header
+/// boxes are then derived from the tax computation alone.  Otherwise — when
+/// a company number is configured (the `COMPANY_NUMBER` environment variable)
+/// and the company details are absent — the profile is fetched (cache-first,
+/// see [`ixbrl::clients::CompaniesHouseClient::get_company_profile_cached`])
+/// and boxes 1 (name), 2 (registration number) and 4 (type of company) are
+/// enriched from it.  The tax reference (3) and the return period (30/35)
+/// always come from the tax computation.
+pub trait CompaniesHouseFormValues {
+    /// The company header boxes for the tax computation, enriched from
+    /// Companies House when the caller's company details are absent.
+    async fn company_form_values(&self, tax: &Frs105CorpTax) -> ApiResult<CompanyFormValues>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegisteredOfficeAddress {
-    #[serde(default)]
-    pub address_line_1: Option<String>,
-    #[serde(default)]
-    pub address_line_2: Option<String>,
-    #[serde(default)]
-    pub care_of: Option<String>,
-    #[serde(default)]
-    pub country: Option<String>,
-    #[serde(default)]
-    pub locality: Option<String>,
-    #[serde(default)]
-    pub po_box: Option<String>,
-    #[serde(default)]
-    pub postal_code: Option<String>,
-    #[serde(default)]
-    pub premises: Option<String>,
-    #[serde(default)]
-    pub region: Option<String>,
+impl CompaniesHouseFormValues for CompaniesHouseClient {
+    async fn company_form_values(&self, tax: &Frs105CorpTax) -> ApiResult<CompanyFormValues> {
+        let Some(company_number) =
+            self.config().enrichment_number(tax.company_name(), tax.company_number())
+        else {
+            return Ok(CompanyFormValues::from_tax(tax));
+        };
+        let profile = self.get_company_profile_cached(&company_number).await?;
+        Ok(CompanyFormValues::from_profile_and_tax(&profile, tax))
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Accounts {
-    #[serde(default)]
-    pub next_accounts: Option<NextAccounts>,
-    #[serde(default)]
-    pub next_due: Option<String>,
-    #[serde(default)]
-    pub overdue: Option<bool>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NextAccounts {
-    #[serde(default)]
-    pub period_end_on: Option<String>,
-    #[serde(default)]
-    pub period_start_on: Option<String>,
-    #[serde(default)]
-    pub due_on: Option<String>,
-}
+    use chrono::NaiveDate;
+    use ixbrl::clients::test_utils::TestData;
+    use ixbrl::ixbrl_fmt::ParsedIxBrlFacts;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfirmationStatement {
-    #[serde(default)]
-    pub last_made_up_to: Option<String>,
-    #[serde(default)]
-    pub next_due: Option<String>,
-    #[serde(default)]
-    pub next_made_up_to: Option<String>,
-    #[serde(default)]
-    pub overdue: Option<bool>,
-}
+    fn seed_cache(cache_dir: &Path, profile: &CompanyProfile) {
+        std::fs::create_dir_all(cache_dir).unwrap();
+        std::fs::write(
+            cache_dir.join(format!("companies-house-{}.json", profile.company_number)),
+            serde_json::to_vec(profile).unwrap(),
+        )
+        .unwrap();
+    }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompanyLinks {
-    #[serde(default)]
-    pub filing_history: Option<String>,
-    #[serde(default)]
-    pub officers: Option<String>,
-    #[serde(default)]
-    pub self_link: Option<String>,
+    /// A tax computation with no company name / number, so the enrichment
+    /// path of [`CompaniesHouseFormValues::company_form_values`] runs.
+    fn tax_without_company_details() -> Frs105CorpTax {
+        let company = ixbrl::company::Company::new(
+            "",
+            "",
+            "",
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
+        );
+        Frs105CorpTax::from_parsed_facts(&ParsedIxBrlFacts::default(), &company)
+    }
+
+    #[test]
+    fn test_company_form_values_from_profile_and_tax() {
+        let profile = TestData::default_company();
+        let tax = TestData::sample_tax();
+
+        let values = CompanyFormValues::from_profile_and_tax(&profile, &tax);
+
+        assert_eq!(values.company_name, profile.company_name);
+        assert_eq!(values.company_number, profile.company_number);
+        assert_eq!(
+            values.type_of_company,
+            profile
+                .company_type
+                .as_deref()
+                .and_then(CompanyType::parse_str)
+                .map(CompanyType::code)
+                .unwrap_or(0),
+        );
+        assert_eq!(values.tax_reference, tax.tax_reference());
+        assert_eq!(values.start, tax.start());
+        assert_eq!(values.end, tax.end());
+    }
+
+    /// Complete company inputs: the header boxes come from the tax alone and
+    /// no Companies House lookup happens (the client is keyless, so any
+    /// lookup would attempt the network and fail).
+    #[tokio::test]
+    async fn company_form_values_complete_inputs_needs_no_lookup() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let client = CompaniesHouseClient::new(
+            ixbrl::clients::Config::default().with_cache_dir(cache_dir.path()),
+        );
+        let tax = TestData::sample_tax();
+
+        let values = client.company_form_values(&tax).await.expect("no lookup needed");
+
+        assert_eq!(values.company_name, "Acme Ltd");
+        assert_eq!(values.company_number, "9876543");
+        assert_eq!(values.tax_reference, "1234567890");
+    }
+
+    /// Absent company inputs + configured number: enriched from the cached
+    /// profile (cache-first, no network).
+    #[tokio::test]
+    async fn company_form_values_enriches_from_cached_profile() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let profile = TestData::sample_company();
+        seed_cache(cache_dir.path(), &profile);
+        let client = CompaniesHouseClient::new(
+            ixbrl::clients::Config::default()
+                .with_company_number(TestData::sample_company_number())
+                .with_cache_dir(cache_dir.path()),
+        );
+        let tax = tax_without_company_details();
+
+        let values = client.company_form_values(&tax).await.expect("enrich from cache");
+
+        assert_eq!(values.company_name, profile.company_name);
+        assert_eq!(values.company_number, profile.company_number);
+        // The tax reference and period always come from the tax computation.
+        assert_eq!(values.tax_reference, tax.tax_reference());
+        assert_eq!(values.start, tax.start());
+        assert_eq!(values.end, tax.end());
+    }
 }

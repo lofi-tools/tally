@@ -31,7 +31,7 @@ The project works as a sequence of stages:
 | Crate | Stage | Purpose |
 |-------|-------|---------|
 | [DEPRECATED] `apps/mk-accounts` | 1–2 | Fetches transactions, builds the accounts structure, computes P&L and balance sheet |
-| `libs/ixbrl` | 3 | GnuCash parser + iXBRL taxonomy definitions (FRS-105, FRS-102, etc.) |
+| `libs/ixbrl` | 1, 3 | GnuCash parser + iXBRL taxonomy definitions (FRS-105, FRS-102, etc.) + Companies House client / company resolution (`ixbrl::clients`) |
 | `libs/ct600` | 4 | HMRC GovTalk XML message builder/parser for CT600 submission |
 
 ## Developer quickstart
@@ -54,10 +54,21 @@ cargo test -p ct600
 cargo check --workspace
 ```
 
-The ct600 tests run fully offline out of the box: the Companies House
-endpoints serve from hardcoded fictional mock responses in
-`libs/ct600/src/test_utils.rs`, so `cargo test -p ct600` needs no API key,
-no network and no cached responses on a fresh checkout.
+The tests run fully offline out of the box: the Companies House endpoints
+serve from hardcoded fictional mock responses in
+`libs/ixbrl/src/clients/test_utils.rs`, so `cargo test -p ixbrl` and
+`cargo test -p ct600` need no API key, no network and no cached responses
+on a fresh checkout.
+
+The Companies House client (`ixbrl::clients::CompaniesHouseClient`) caches
+fetched company profiles under
+`.cache/api_responses/companies-house-<number>.json` (override with
+`CT600_CACHE_DIR`) and serves from the cache when available.  Company
+resolution follows a strict order: a full company override wins, otherwise
+the cached response for the configured company number (`COMPANY_NUMBER`) is
+used, otherwise the profile is fetched from the live API.  The CT600
+`company_form_values` adapter (in `libs/ct600`) fills the header boxes from
+the resolved profile.
 
 ## Links
 

@@ -566,69 +566,7 @@ fn format_date(d: &NaiveDate) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ixbrl::company::Company;
-    use ixbrl::ixbrl_fmt::ParsedIxBrlFacts;
-
-    fn sample_tax() -> Frs105CorpTax {
-        let mut facts = ParsedIxBrlFacts::default();
-        facts
-            .non_numeric
-            .insert("ct-comp:CompanyName".to_string(), "Acme Ltd".to_string());
-        facts
-            .non_numeric
-            .insert("ct-comp:TaxReference".to_string(), "1234567890".to_string());
-        facts.non_numeric.insert(
-            "ct-comp:FinancialYear1CoveredByTheReturn".to_string(),
-            "2025".to_string(),
-        );
-        facts.non_numeric.insert(
-            "ct-comp:FinancialYear2CoveredByTheReturn".to_string(),
-            "2026".to_string(),
-        );
-        facts.non_numeric.insert(
-            "ct-comp:PeriodOfAccountStartDate".to_string(),
-            "1 January 2025".to_string(),
-        );
-        facts.non_numeric.insert(
-            "ct-comp:PeriodOfAccountEndDate".to_string(),
-            "31 December 2025".to_string(),
-        );
-        for (name, ctx, v) in [
-            ("ct-comp:NetTradingProfits", "ctxt-3", 12345.0),
-            ("ct-comp:FY1AmountOfProfitChargeableAtFirstRate", "ctxt-3", 6000.0),
-            ("ct-comp:FY2AmountOfProfitChargeableAtFirstRate", "ctxt-3", 6345.0),
-            ("ct-comp:FY1FirstRateOfTax", "ctxt-1", 19.0),
-            ("ct-comp:FY2FirstRateOfTax", "ctxt-1", 19.0),
-            ("ct-comp:FY1TaxAtFirstRate", "ctxt-3", 1140.0),
-            ("ct-comp:FY2TaxAtFirstRate", "ctxt-3", 1205.55),
-            ("ct-comp:CorporationTaxChargeable", "ctxt-3", 2345.55),
-            ("ct-comp:TaxChargeable", "ctxt-3", 2345.55),
-            ("ct-comp:TaxPayable", "ctxt-3", 2345.55),
-            ("ct-comp:MainPoolAnnualInvestmentAllowance", "ctxt-2", 1000.0),
-            (
-                "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
-                "ctxt-4",
-                5000.0,
-            ),
-        ] {
-            facts
-                .numeric_by_ctx
-                .insert((name.to_string(), ctx.to_string()), v);
-        }
-
-        let company = Company::new(
-            "Acme Ltd",
-            "1234567890",
-            "9876543",
-            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
-        );
-        Frs105CorpTax::from_parsed_facts(&facts, &company)
-    }
-
-    fn sample_values() -> Ct600FormValues {
-        Ct600FormValues::from_tax(&sample_tax())
-    }
+    use crate::test_utils::sample_values;
 
     fn by_number(map: &BTreeMap<u16, BoxValue>, n: u16) -> &BoxValue {
         map.get(&n).unwrap_or_else(|| panic!("box {n} missing"))
