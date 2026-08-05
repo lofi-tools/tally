@@ -821,10 +821,14 @@ pub struct NextAccountingPeriod {
     pub deadline_to_file_companies_house_accounts: NaiveDate,
 }
 
-/// Resolve the next accounting period from the company's registration-date
-/// periods (the default), overlaid with the profile's own expectation when
-/// available.
-fn next_accounting_period_from(
+/// The next accounting period to file, from an already-fetched profile: the
+/// profile's `next_accounts` expectation when present, else the
+/// registration-date schedule for today.
+///
+/// Pure (no fetch), so callers holding the profile — e.g. the `tally` CLI —
+/// use it to avoid a second lookup; [`CompaniesHouseClient::next_accounting_period`]
+/// is the fetch-first wrapper.
+pub fn next_accounting_period_from(
     company: &Company,
     accounts: Option<&Accounts>,
 ) -> NextAccountingPeriod {
@@ -947,7 +951,10 @@ impl CompanyFormValues {
 pub trait CompaniesHouseFormValues {
     /// The company header boxes for the tax computation, enriched from
     /// Companies House when the caller's company details are absent.
-    async fn company_form_values(&self, tax: &Frs105CorpTax) -> ApiResult<CompanyFormValues>;
+    fn company_form_values(
+        &self,
+        tax: &Frs105CorpTax,
+    ) -> impl Future<Output = ApiResult<CompanyFormValues>>;
 }
 
 impl CompaniesHouseFormValues for CompaniesHouseClient {
@@ -1833,8 +1840,14 @@ mod tests {
             .await
             .expect("next period from profile");
 
-        assert_eq!(next.period.start, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
-        assert_eq!(next.period.end, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
+        assert_eq!(
+            next.period.start,
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
+        );
+        assert_eq!(
+            next.period.end,
+            NaiveDate::from_ymd_opt(2025, 12, 31).unwrap()
+        );
         assert_eq!(
             next.deadline_to_file_companies_house_accounts,
             NaiveDate::from_ymd_opt(2026, 9, 30).unwrap()
@@ -1918,7 +1931,10 @@ mod tests {
             next.deadline_to_file_companies_house_accounts,
             NaiveDate::from_ymd_opt(2026, 10, 15).unwrap()
         );
-        assert_eq!(next.period.end, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
+        assert_eq!(
+            next.period.end,
+            NaiveDate::from_ymd_opt(2025, 12, 31).unwrap()
+        );
     }
 
     /// A `next_accounts` block with only `period_start_on` anchors the period
@@ -1953,7 +1969,10 @@ mod tests {
             .await
             .expect("anchored period");
 
-        assert_eq!(next.period.start, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+        assert_eq!(
+            next.period.start,
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
+        );
         // The registration-date period containing 2025-01-01.
         let anchored =
             company.accounting_period_containing(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
@@ -2149,7 +2168,10 @@ mod live_tests {
             .await
             .expect("resolve the next accounting period");
 
-        assert!(next.period.start < next.period.end, "the period is ordered start < end");
+        assert!(
+            next.period.start < next.period.end,
+            "the period is ordered start < end"
+        );
         assert!(
             next.deadline_to_file_hmrc_ct600 >= next.period.end,
             "the CT600 deadline is on or after the period end"

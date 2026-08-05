@@ -17,7 +17,7 @@ pub use clients::{
 pub mod companies_house;
 pub use companies_house::{
     ApiResult, CompaniesHouseClient, CompaniesHouseClientType, CompaniesHouseError, CompanyProfile,
-    CompanyType, Config,
+    CompanyType, Config, next_accounting_period_from,
 };
 pub mod ct600_return;
 pub use ct600_return::Ct600Return;

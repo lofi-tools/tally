@@ -8,23 +8,14 @@
 //! tally ct600 --config-path <config> --book <book> --out <dir>
 //! ```
 //!
-//! * `--config-path` — a JSON config file describing the company and the
-//!   accounts (same shape as
-//!   `libs/ixbrl/example_data/example2/input_config.json`: a nested
-//!   `company` identity + profile block and an `accounts` sub-object).  A
-//!   [`config::ConfigBuilder`] loads it with the captured environment
-//!   ([`config::EnvVars`]) and the subcommand's CLI values
-//!   ([`config::CliArgs`]) and resolves them into a strict
-//!   [`config::ResolvedInputs`]: every identity field is optional — the
-//!   company name is resolved from Companies House at runtime when an API
-//!   key is configured (the registration date too, when the config carries
-//!   no identity details at all), the company number comes from
-//!   `COMPANY_NUMBER` (winning) or `company.company_number`, the Corporation
-//!   Tax reference (UTR) comes from `UNIQUE_TAXPAYER_REF` (winning) or
-//!   `company.tax_reference`, the return period is the config's
-//!   `accounts.period` or is deduced from `--accounts-made-up-to`, defaulting
-//!   to the next accounting period from Companies House, and the first
-//!   still-missing input errors with how to resolve it (see [`config`]);
+//! * `--config-path` — the JSON config (see
+//!   `libs/ixbrl/example_data/example2/input_config.json`).  A
+//!   [`config::ConfigBuilder`] merges it with the captured environment
+//!   ([`config::EnvVars`]) and the CLI values ([`config::CliArgs`]) into a
+//!   strict [`config::ResolvedInputs`]: identity fields that the config
+//!   leaves out are filled from the environment / Companies House, and the
+//!   first still-missing input errors with how to resolve it (see
+//!   [`config`]);
 //! * `--book` — the GnuCash ledger (`input.gnucash`);
 //! * `--out` — the output directory; the CT600 GovTalk message is written
 //!   to `<out>/ct600.xml`.
@@ -74,11 +65,6 @@ impl Command {
 }
 
 /// Parse the `ct600` flags into the subcommand's [`CliArgs`].
-///
-/// `--config-path` is required here (the config file cannot be read without
-/// it); `--book` and `--out` are optional because the resolution stage
-/// ([`config::ConfigBuilder::build`]) is what reports them missing, alongside
-/// any other still-unresolved config.
 fn parse_ct600_args() -> Result<CliArgs> {
     let mut rest = std::env::args().skip(2); // skip program + subcommand
     let mut config_path = None;
@@ -155,19 +141,14 @@ fn next_date(rest: &mut impl Iterator<Item = String>, flag: &str) -> Result<Naiv
 
 /// The `ct600` subcommand: config + GnuCash book -> CT600 message.
 async fn run_ct600(args: CliArgs) -> Result<()> {
-    // Load the subcommand's inputs (the environment and the config file,
-    // with the CLI values taking precedence) and resolve them: the company
-    // identity and return period are enriched from Companies House when a
-    // client is configured; anything still missing errors with an
-    // explanation (see `config`).
+    // Resolve the config (see `config`).
     let resolved = ConfigBuilder::from_cli(args)?.build().await?;
 
-    // Print the resolved values for this run.
+    // Print the resolved values.
     println!("resolved: company '{}'", resolved.company.name);
     println!("  company number: {}", resolved.company.company_number);
     println!("  tax reference (UTR): {}", resolved.company.tax_reference);
-    // The epoch is the unset sentinel: the registration date is only known
-    // once resolved from Companies House.
+    // The epoch is the unset sentinel.
     let registration_date = if resolved.company.registration_date == NaiveDate::default() {
         "unknown (resolve it with a Companies House API key)".to_string()
     } else {
