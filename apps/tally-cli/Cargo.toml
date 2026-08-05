@@ -17,5 +17,10 @@ chrono = { workspace = true, features = ["serde"] }
 # errors
 anyhow.workspace = true
 # internal
-ct600 = { path = "../../libs/ct600" }
+# default-features = false: ct600's only feature is `api_tests` (live
+# Companies House integration tests, a default of ct600 itself).  Kept off
+# here so `cargo test --workspace --no-default-features` runs fully offline
+# — otherwise this dependency would re-activate ct600's default features
+# during workspace feature unification.
+ct600 = { path = "../../libs/ct600", default-features = false }
 ixbrl = { path = "../../libs/ixbrl" }

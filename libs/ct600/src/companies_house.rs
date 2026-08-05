@@ -12,8 +12,8 @@
 //! for those boxes.
 //!
 //! The offline test fixtures ([`test_utils`]) and the live API tests
-//! ([`live_tests`], gated behind the `api_tests` feature) live alongside the
-//! client.
+//! ([`live_tests`], part of the default-enabled `api_tests` feature) live
+//! alongside the client.
 
 use crate::form::CompanyFormValues;
 use chrono::{Datelike, Months, NaiveDate};
@@ -2003,26 +2003,28 @@ mod tests {
 }
 
 // ============================================================================
-// Live API tests (gated behind the `api_tests` feature)
+// Live API tests (part of the default-enabled `api_tests` feature)
 // ============================================================================
 
 /// Live Companies House API tests.
 ///
 /// These tests exercise the real (or sandbox) Companies House API and are
-/// **ignored by default**, so `cargo test` on a fresh clone stays fully
-/// offline.  Run them with:
+/// part of the default-enabled `api_tests` feature, so a plain
+/// `cargo test -p ct600` runs them.  They need an API key and a
+/// `COMPANY_NUMBER`; without them they fail with a clear message:
 ///
 /// ```bash
 /// export COMPANIES_HOUSE_API_KEY="your-api-key"           # live API
 /// # or
 /// export COMPANIES_HOUSE_SANDBOX_API_KEY="your-api-key"   # sandbox API
 /// export COMPANY_NUMBER="00000006"                        # a company that exists in the API you chose
-/// cargo test -p ct600 --features api_tests
+/// cargo test -p ct600
 /// ```
 ///
-/// Without the feature the tests are reported as ignored with the reason
-/// "requires a Companies House API key and COMPANY_NUMBER"; with the feature
-/// but no key (or no `COMPANY_NUMBER`) they fail with a clear message.
+/// To run fully offline (a fresh clone without a key), disable the feature
+/// with `cargo test -p ct600 --no-default-features`: the tests are then
+/// reported as ignored with the reason "requires a Companies House API key
+/// and COMPANY_NUMBER".
 #[cfg(test)]
 mod live_tests {
     use super::*;

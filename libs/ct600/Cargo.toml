@@ -5,10 +5,11 @@ edition = "2024"
 
 [features]
 # Live Companies House API integration tests (in `src/companies_house.rs`,
-# the `live_tests` module).  Off by default so `cargo test` runs fully
-# offline on a fresh clone; enable with
-# `cargo test -p ct600 --features api_tests` to run the tests that hit
-# the real (or sandbox) API (needs a key + `COMPANY_NUMBER`).
+# the `live_tests` module).  Enabled by default so `cargo test` exercises the
+# real (or sandbox) API (needs a key + `COMPANY_NUMBER`); disable with
+# `cargo test -p ct600 --no-default-features` to run fully offline — the
+# live tests are then reported as ignored.
+default = ["api_tests"]
 api_tests = []
 
 [dependencies]
