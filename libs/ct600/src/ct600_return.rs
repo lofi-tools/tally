@@ -918,7 +918,7 @@ fn parse_yesno(raw: &str, path: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ixbrl::reports::uk_frs105_accounts::AccountsMetadata;
+    use ixbrl::company::CompanyProfile;
     use std::collections::HashMap;
 
     fn example2_company() -> ixbrl::company::Company {
@@ -931,13 +931,21 @@ mod tests {
     }
 
     /// The example company's set of accounts: the 2020 calendar-year return
-    /// period and the default financial-year tax parameters.
+    /// period, the default financial-year tax parameters and the report
+    /// metadata (title, dates, employee counts; the ct600 message only uses
+    /// these for the attached accounts iXBRL rendering).
     fn example2_accounts_meta() -> ixbrl::company::AccountsMeta {
         ixbrl::company::AccountsMeta {
             period: Some(ixbrl::company::AccountingPeriod {
                 start: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
                 end: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
             }),
+            report_title: "Unaudited Micro-Entity Accounts".into(),
+            report_date: NaiveDate::from_ymd_opt(2021, 3, 1).unwrap(),
+            authorised_date: NaiveDate::from_ymd_opt(2021, 2, 1).unwrap(),
+            incorporation_date: NaiveDate::from_ymd_opt(2017, 4, 5).unwrap(),
+            signed_by: "B Smith".into(),
+            average_employees: HashMap::from([("2020".to_string(), 2), ("2019".to_string(), 1)]),
             ..ixbrl::company::AccountsMeta::default()
         }
     }
@@ -981,16 +989,16 @@ mod tests {
         Frs105Accounts::new(
             &gnucash,
             &company,
-            &example2_metadata(),
+            &example2_profile(),
             &example2_accounts_meta(),
         )
     }
 
-    /// A metadata with the example2 company details (directors, SIC codes,
-    /// employee counts); the ct600 message itself only uses this for the
-    /// attached accounts iXBRL rendering.
-    fn example2_metadata() -> AccountsMetadata {
-        AccountsMetadata {
+    /// The example2 company profile (directors, SIC codes, contacts); the
+    /// ct600 message itself only uses this for the attached accounts iXBRL
+    /// rendering.
+    fn example2_profile() -> CompanyProfile {
+        CompanyProfile {
             directors: vec!["A Bloggs".into(), "B Smith".into(), "C Jones".into()],
             contact_name: String::new(),
             address_lines: vec!["123 Leadbarton Street".into()],
@@ -1006,7 +1014,6 @@ mod tests {
             vat_registration: String::new(),
             sic_codes: vec!["62020".into(), "62021".into()],
             activities: String::new(),
-            average_employees: HashMap::from([("2020".to_string(), 2), ("2019".to_string(), 1)]),
             jurisdiction: "England and Wales".into(),
             accountant_name: String::new(),
             accountant_business: String::new(),
@@ -1014,21 +1021,12 @@ mod tests {
             auditor_name: String::new(),
             auditor_business: String::new(),
             auditor_address: String::new(),
-            report_title: "Unaudited Micro-Entity Accounts".into(),
-            report_date: NaiveDate::from_ymd_opt(2021, 3, 1).unwrap(),
-            authorised_date: NaiveDate::from_ymd_opt(2021, 2, 1).unwrap(),
-            incorporation_date: NaiveDate::from_ymd_opt(2017, 4, 5).unwrap(),
-            signed_by: "B Smith".into(),
             industry_sector_dimension: String::new(),
-            accounting_standards_dimension: String::new(),
-            accounts_type_dimension: String::new(),
-            accounts_status_dimension: String::new(),
             legal_form_dimension: String::new(),
             country_dimension: String::new(),
             contact_country_dimension: String::new(),
             phone_type_dimension: String::new(),
-            logo_b64: String::new(),
-            signature_b64: String::new(),
+            logo_b64: None,
         }
     }
 

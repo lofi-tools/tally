@@ -903,6 +903,7 @@ impl Frs105CorpTax {
             fy2_year,
             fy1_rate: num("ct-comp:FY1FirstRateOfTax", "ctxt-1"),
             fy2_rate: num("ct-comp:FY2FirstRateOfTax", "ctxt-1"),
+            ..AccountsMeta::default()
         };
 
         let fy1 = accounts.fy1_year;

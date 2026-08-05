@@ -30,7 +30,7 @@ Produce the CT600 Corporation Tax return a UK limited company files with HMRC
 
 ```bash
 tally ct600 \
-  --config-path libs/ixbrl/example_data/example2/input-company.json \
+  --config-path libs/ixbrl/example_data/example2/input_config.json \
   --book libs/ixbrl/example_data/example2/input.gnucash \
   --out .cache/ct600
   # -> writes .cache/ct600/ct600.xml
@@ -58,7 +58,7 @@ flags, config, and defaults.
 
    ```bash
    cargo run -p tally-cli -- ct600 \
-     --config-path libs/ixbrl/example_data/example2/input-company.json \
+     --config-path libs/ixbrl/example_data/example2/input_config.json \
      --book libs/ixbrl/example_data/example2/input.gnucash \
      --out .cache/ct600
      # -> writes .cache/ct600/ct600.xml
@@ -145,16 +145,19 @@ In short:
   `--accounts-made-up-to` flag) gives the period; otherwise it defaults to
   the company's next accounting period to file, resolved from the Companies
   House profile;
-- the flat accounts-metadata fields are all required and have no defaults
-  (copy them from the example config below).
+- the company's descriptive profile fields (`company.*`: directors,
+  contacts, accountant/auditor, SIC codes, ...) and the accounts' report
+  metadata (`accounts.*`: report title, dates, employee counts, ...) are
+  all required and have no defaults (copy them from the example config
+  below); the company logo (`company.logo_b64`) is the one optional asset.
 
 ### Example configs
 
-**With a Companies House API key** — the company block can be nearly empty:
-the name, registration number and the next accounting period to file (the
-return period) are resolved from the company's profile at runtime
-(`COMPANY_NUMBER` provides the lookup number), and the UTR comes from
-`UNIQUE_TAXPAYER_REF`:
+**With a Companies House API key** — the company block only needs the
+required profile fields; the identity can be left out: the name, registration
+number and the next accounting period to file (the return period) are
+resolved from the company's profile at runtime (`COMPANY_NUMBER` provides
+the lookup number), and the UTR comes from `UNIQUE_TAXPAYER_REF`:
 
 ```bash
 export COMPANIES_HOUSE_API_KEY="your-api-key"   # or COMPANIES_HOUSE_SANDBOX_API_KEY
@@ -164,25 +167,27 @@ export UNIQUE_TAXPAYER_REF=8596148860
 
 <!--```json
 {
-  "company": {},
+  "company": {
+    "directors": ["A Bloggs"],
+    "contact_name": "Corporate Enquiries",
+    "address_lines": ["123 Leadbarton Street"],
+    "county": "Minchingshire",
+    "location": "Threapminchington",
+    "postcode": "QQ99 9ZZ",
+    "email": "corporate@example.org",
+    "website_url": "https://example.org/corporate",
+    "sic_codes": ["62020"],
+    "activities": "Computer security consultancy",
+    "jurisdiction": "England and Wales",
+    "...": "remaining required company.* profile fields — copy them from libs/ixbrl/example_data/example2/input_config.json"
+  },
   "accounts": {
     "period": {
       "start": "2020-01-01",
       "end": "2020-12-31"
-    }
-  },
-  "directors": ["A Bloggs"],
-  "contact_name": "Corporate Enquiries",
-  "address_lines": ["123 Leadbarton Street"],
-  "county": "Minchingshire",
-  "location": "Threapminchington",
-  "postcode": "QQ99 9ZZ",
-  "email": "corporate@example.org",
-  "website_url": "https://example.org/corporate",
-  "sic_codes": ["62020"],
-  "activities": "Computer security consultancy",
-  "jurisdiction": "England and Wales",
-  "...": "remaining required accounts-metadata fields — copy them from libs/ixbrl/example_data/example2/input-company.json"
+    },
+    "...": "remaining required accounts.* report fields — copy them from libs/ixbrl/example_data/example2/input_config.json"
+  }
 }
 ```-->
 
@@ -194,16 +199,17 @@ can be resolved at runtime:
   "company": {
     "name": "Example Biz Ltd.",
     "tax_reference": "8596148860",
-    "company_number": "12345678"
+    "company_number": "12345678",
+    "directors": ["A Bloggs"],
+    "...": "remaining required company.* profile fields (as in the example above)"
   },
   "accounts": {
     "period": {
       "start": "2020-01-01",
       "end": "2020-12-31"
-    }
-  },
-  "directors": ["A Bloggs"],
-  "...": "remaining required accounts-metadata fields (as in the example above)"
+    },
+    "...": "remaining required accounts.* report fields (as in the example above)"
+  }
 }
 ```
 

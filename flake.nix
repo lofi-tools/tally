@@ -313,7 +313,7 @@
             HERE="${bash.wd}"
             mkdir -p "$HERE/.cache/ct600"
             cargo run -p tally-cli -- ct600 \
-              --config-path "$HERE/libs/ixbrl/example_data/example2/input-company.json" \
+              --config-path "$HERE/libs/ixbrl/example_data/example2/input_config.json" \
               --book "$HERE/libs/ixbrl/example_data/example2/input.gnucash" \
               --out "$HERE/.cache/ct600"
           '';

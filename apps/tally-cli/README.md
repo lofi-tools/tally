@@ -49,28 +49,33 @@ is optional.  There is no environment-variable fallback.
 ### Config file
 
 A JSON file with the same shape as
-`libs/ixbrl/example_data/example2/input-company.json` (use it as a template): a
-nested `company` identity block, an `accounts` sub-object and the flat
-accounts-metadata fields.
+`libs/ixbrl/example_data/example2/input_config.json` (use it as a template): a nested
+`company` block (identity + descriptive profile) and an `accounts` sub-object
+(period + report metadata).  This is also the config the tests and the
+`tally-example2` script run against.
 
 | Key | Type | Default |
 |-----|------|---------|
 | `company.name` | string (optional) | resolved from Companies House when an API key is configured |
 | `company.tax_reference` | string (required) | `UNIQUE_TAXPAYER_REF` environment variable wins when set; it cannot be resolved from Companies House, so one of the two must be present |
 | `company.company_number` | string (optional) | `COMPANY_NUMBER` environment variable |
+| `company.directors`, `company.contact_name`, `company.address_lines`, `company.email`, `company.accountant_name`, `company.auditor_name`, ... | required | — |
+| `company.logo_b64` | string (optional) | none — the logo is only embedded on the title page when present |
 | `accounts.period.start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts.accounts_made_up_to` or the Companies House next period |
 | `accounts.period.end` | date (optional) | none — see `accounts.period.start` |
 | `accounts.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
 | `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 |
 | `accounts.fy1_rate` / `fy2_rate` | number (optional) | 19 / 19 (percent) |
-| `directors`, `sic_codes`, `address_lines`, `email`, ... | required | — |
+| `accounts.report_title`, `accounts.report_date`, `accounts.signed_by`, `accounts.average_employees`, ... | required | — |
+| `accounts.signature_b64` | string (required) | none — base64 image of the director's signature, embedded on the statement of financial position (an empty string is accepted but renders an empty image) |
 
-The company-identity fields and the `accounts` sub-object are all optional in
-the config file (see
+The company-identity fields, the return period and the financial-year
+parameters are all optional in the config file (see
 [Resolving the company identity](#resolving-the-company-identity) for how the
-missing ones are filled in and what must always be present).  The flat
-accounts-metadata fields are all required — the parser applies no defaults, so
-copy the example config and edit it.
+missing ones are filled in and what must always be present).  The company
+profile fields (`company.*`) and the report metadata (`accounts.*`) are all
+required — the parser applies no defaults, so copy the example config and edit
+it.  The company logo (`company.logo_b64`) is the one optional asset.
 
 ### Defaults baked into the message
 
@@ -85,8 +90,9 @@ From the libraries' `Default` implementations (no config hook yet):
 
 ### Resolving the company identity
 
-The `company` block's fields are all optional, but the resolved identity must
-be complete before the return can be built:
+The `company` block's *identity* fields are all optional (the profile fields
+are required), but the resolved identity must be complete before the return
+can be built:
 
 - the **company name** is filled in from the company's Companies House
   profile when an API key is configured (`COMPANIES_HOUSE_API_KEY`, or
@@ -138,15 +144,19 @@ used, otherwise the profile is fetched from the live API.
 
 ## Minimum configuration
 
-A config file containing the accounts metadata, plus a Corporation Tax
+A config file carrying the required `company.*` profile fields (directors,
+contacts, accountant/auditor, ...) and `accounts.*` report fields (report
+title, dates, employee counts, ...) — copy
+`libs/ixbrl/example_data/example2/input_config.json` — plus a Corporation Tax
 reference — either a `UNIQUE_TAXPAYER_REF` environment variable or the
 config's `company.tax_reference` — and either a company number or a
 `COMPANY_NUMBER` environment variable.  The company name and return period
 are only needed when no Companies House API key is configured: with a key,
 the name and the next accounting period to file are resolved from the
 company's profile at runtime (the period can also be given explicitly or
-deduced from `--accounts-made-up-to`).  The envelope credentials / contact
-details default to the reference tool's values (see above).
+deduced from `--accounts-made-up-to`).  The company logo is optional.  The
+envelope credentials / contact details default to the reference tool's
+values (see above).
 
 ## Building and running
 
@@ -156,7 +166,7 @@ cargo build -p tally-cli
 
 # Produce the example CT600 message
 cargo run -p tally-cli -- ct600 \
-  --config-path libs/ixbrl/example_data/example2/input-company.json \
+  --config-path libs/ixbrl/example_data/example2/input_config.json \
   --book libs/ixbrl/example_data/example2/input.gnucash \
   --out .cache/ct600
 ```

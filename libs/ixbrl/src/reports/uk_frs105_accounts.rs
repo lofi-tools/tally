@@ -1,7 +1,7 @@
 //! Unaudited micro-entity accounts (FRS 105).
 //!
 //! Maps a [`GnucashBook`] (the ledger) plus company details (a [`Company`],
-//! an [`AccountsMeta`] and an [`AccountsMetadata`]) to the
+//! a [`CompanyProfile`] and an [`AccountsMeta`]) to the
 //! "Unaudited Micro-Entity Accounts" iXBRL document: a title page, a
 //! company-information page, the statement of financial position and the
 //! notes to the accounts.
@@ -25,107 +25,9 @@ use std::collections::HashMap;
 
 use chrono::Datelike;
 
-use crate::company::{AccountingPeriod, AccountsMeta, Company};
+use crate::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use crate::ixbrl_fmt::*;
 use crate::GnucashBook;
-
-/// Company details required by the accounts report that are not part of
-/// [`Company`] (directors, addresses, accountant/auditor, VAT number, SIC
-/// codes, employees, report dates, taxonomy dimension values, ...), plus
-/// the base64-encoded logo and signature assets used on the report pages.
-///
-/// Deserialisable from the example company's data file
-/// (`example_data/example2/input-company.json`), which the tests load as
-/// the single source of truth.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct AccountsMetadata {
-    /// Names of the directors, in order (used for the officer contexts).
-    pub directors: Vec<String>,
-    /// Contact department / person name.
-    pub contact_name: String,
-    /// Registered-office address lines (one fact per line).
-    pub address_lines: Vec<String>,
-    /// County / region of the registered office.
-    pub county: String,
-    /// City / town of the registered office.
-    pub location: String,
-    /// Registered-office postcode.
-    pub postcode: String,
-    /// Contact e-mail address.
-    pub email: String,
-    /// Telephone country code (e.g. "+44").
-    pub phone_country: String,
-    /// Telephone area code.
-    pub phone_area: String,
-    /// Telephone local number.
-    pub phone_number: String,
-    /// Website main page URL.
-    pub website_url: String,
-    /// Website description.
-    pub website_description: String,
-    /// VAT registration number.
-    pub vat_registration: String,
-    /// SIC codes registered with Companies House.
-    pub sic_codes: Vec<String>,
-    /// Summary of business activities.
-    pub activities: String,
-    /// Average monthly number of employees, indexed by calendar year
-    /// (e.g. `"2020" -> 2`, `"2019" -> 1`; JSON object keys are strings).
-    pub average_employees: HashMap<String, u32>,
-    /// Jurisdiction, e.g. "England and Wales".
-    pub jurisdiction: String,
-    /// Accountant's name.
-    pub accountant_name: String,
-    /// Accountant's firm.
-    pub accountant_business: String,
-    /// Accountant's office address.
-    pub accountant_address: String,
-    /// Auditor's name.
-    pub auditor_name: String,
-    /// Auditor's firm.
-    pub auditor_business: String,
-    /// Auditor's office address.
-    pub auditor_address: String,
-    /// Report title, shown on the title page.
-    pub report_title: String,
-    /// Date the report was published / issued.
-    pub report_date: chrono::NaiveDate,
-    /// Date the financial statements were authorised for issue.
-    pub authorised_date: chrono::NaiveDate,
-    /// Date of incorporation / formation.
-    pub incorporation_date: chrono::NaiveDate,
-    /// Name of the director who signed the report.
-    pub signed_by: String,
-    /// Taxonomy dimension value for the industry sector.
-    pub industry_sector_dimension: String,
-    /// Taxonomy dimension value for the accounting standards.
-    pub accounting_standards_dimension: String,
-    /// Taxonomy dimension value for the accounts type.
-    pub accounts_type_dimension: String,
-    /// Taxonomy dimension value for the accounts status.
-    pub accounts_status_dimension: String,
-    /// Taxonomy dimension value for the legal form.
-    pub legal_form_dimension: String,
-    /// Taxonomy dimension value for the country of formation.
-    pub country_dimension: String,
-    /// Taxonomy dimension value for the contact country.
-    pub contact_country_dimension: String,
-    /// Taxonomy dimension value for the phone-number type.
-    pub phone_type_dimension: String,
-    /// Base64-encoded company logo, embedded on the title page.
-    pub logo_b64: String,
-    /// Base64-encoded director's signature, embedded on the statement of
-    /// financial position.
-    pub signature_b64: String,
-}
-
-impl AccountsMetadata {
-    /// The average monthly number of employees for a given calendar year
-    /// (0 when the year is absent from the data).
-    pub fn average_employees_for(&self, year: i32) -> u32 {
-        self.average_employees.get(&year.to_string()).copied().unwrap_or(0)
-    }
-}
 
 /// The unaudited micro-entity accounts (FRS 105) statement of financial
 /// position.
@@ -136,10 +38,12 @@ impl AccountsMetadata {
 pub struct Frs105Accounts {
     /// The company the accounts are prepared for.
     pub company: Company,
-    /// Additional company details used by the report.
-    pub metadata: AccountsMetadata,
-    /// The set of accounts: the return period and the financial-year tax
-    /// parameters (resolved before the report is built).
+    /// The company's descriptive profile (directors, contacts, accountant/
+    /// auditor, ...) from the config's `company.*` sub-object.
+    pub profile: CompanyProfile,
+    /// The set of accounts: the return period, the financial-year tax
+    /// parameters and the report metadata (resolved before the report is
+    /// built).
     pub accounts: AccountsMeta,
     /// Tangible / fixed assets.
     pub fixed_assets: [f64; 2],
@@ -172,7 +76,7 @@ impl Frs105Accounts {
     pub fn new(
         gnucash: &GnucashBook,
         company: &Company,
-        metadata: &AccountsMetadata,
+        profile: &CompanyProfile,
         accounts_meta: &AccountsMeta,
     ) -> Self {
         let accounts = gnucash.raw_accounts();
@@ -316,7 +220,7 @@ impl Frs105Accounts {
 
         Frs105Accounts {
             company: company.clone(),
-            metadata: metadata.clone(),
+            profile: profile.clone(),
             accounts: accounts_meta.clone(),
             fixed_assets: fixed_assets.map(round2),
             current_assets: current_assets.map(round2),
@@ -351,7 +255,7 @@ impl Frs105Accounts {
     /// Render the accounts as an iXBRL HTML document.
     pub fn to_ixbrl(&self) -> String {
         let company = &self.company;
-        let metadata = &self.metadata;
+        let profile = &self.profile;
         let period = self.accounts.period();
         let period_start = period.start;
         let period_end = period.end;
@@ -365,17 +269,17 @@ impl Frs105Accounts {
         // -- ix:header ------------------------------------------------------
 
         let hidden = elt("ix:hidden", &[]).children(vec![
-            non_numeric("uk-bus:ReportTitle", "ctxt-0", &metadata.report_title),
+            non_numeric("uk-bus:ReportTitle", "ctxt-0", &self.accounts.report_title),
             non_numeric_fmt(
                 "uk-bus:BusinessReportPublicationDate",
                 "ctxt-1",
-                &format_date(&metadata.report_date),
+                &format_date(&self.accounts.report_date),
                 "ixt2:datedaymonthyearen",
             ),
             non_numeric_fmt(
                 "uk-core:DateAuthorisationFinancialStatementsForIssue",
                 "ctxt-2",
-                &format_date(&metadata.authorised_date),
+                &format_date(&self.accounts.authorised_date),
                 "ixt2:datedaymonthyearen",
             ),
             non_numeric_fmt(
@@ -400,7 +304,7 @@ impl Frs105Accounts {
                 "ctxt-0",
                 &company.company_number,
             ),
-            non_numeric("uk-bus:VATRegistrationNumber", "ctxt-0", &metadata.vat_registration),
+            non_numeric("uk-bus:VATRegistrationNumber", "ctxt-0", &profile.vat_registration),
             non_numeric("uk-bus:NameProductionSoftware", "ctxt-0", "ixbrl-reporter"),
             // Must match the version of the flake-pinned reference
             // (`ixbrl-reporter` in flake.nix); the fixture is generated with
@@ -415,17 +319,17 @@ impl Frs105Accounts {
             non_numeric(
                 "uk-bus:DescriptionPrincipalActivities",
                 "ctxt-0",
-                &metadata.activities,
+                &profile.activities,
             ),
             non_numeric(
                 "uk-bus:SICCodeRecordedUKCompaniesHouse1",
                 "ctxt-0",
-                metadata.sic_codes.first().map(String::as_str).unwrap_or(""),
+                profile.sic_codes.first().map(String::as_str).unwrap_or(""),
             ),
             non_numeric(
                 "uk-bus:SICCodeRecordedUKCompaniesHouse2",
                 "ctxt-0",
-                metadata.sic_codes.get(1).map(String::as_str).unwrap_or(""),
+                profile.sic_codes.get(1).map(String::as_str).unwrap_or(""),
             ),
             non_numeric("uk-bus:MainIndustrySector", "ctxt-3", ""),
             non_numeric("uk-bus:EntityDormantTruefalse", "ctxt-0", "false"),
@@ -438,49 +342,49 @@ impl Frs105Accounts {
             non_numeric_fmt(
                 "uk-bus:DateFormationOrIncorporation",
                 "ctxt-1",
-                &format_date(&metadata.incorporation_date),
+                &format_date(&self.accounts.incorporation_date),
                 "ixt2:datedaymonthyearen",
             ),
             employees_non_fraction(
                 "ctxt-0",
-                &metadata.average_employees_for(period_end.year()).to_string(),
+                &self.accounts.average_employees_for(period_end.year()).to_string(),
             ),
             employees_non_fraction(
                 "ctxt-9",
-                &metadata.average_employees_for(prev_end.year()).to_string(),
+                &self.accounts.average_employees_for(prev_end.year()).to_string(),
             ),
             non_numeric("uk-core:DirectorSigningFinancialStatements", "ctxt-11", ""),
             non_numeric(
                 "uk-bus:NameContactDepartmentOrPerson",
                 "ctxt-13",
-                &metadata.contact_name,
+                &profile.contact_name,
             ),
             non_numeric(
                 "uk-bus:AddressLine1",
                 "ctxt-13",
-                metadata.address_lines.first().map(String::as_str).unwrap_or(""),
+                profile.address_lines.first().map(String::as_str).unwrap_or(""),
             ),
             non_numeric(
                 "uk-bus:AddressLine2",
                 "ctxt-13",
-                metadata.address_lines.get(1).map(String::as_str).unwrap_or(""),
+                profile.address_lines.get(1).map(String::as_str).unwrap_or(""),
             ),
             non_numeric(
                 "uk-bus:PrincipalLocation-CityOrTown",
                 "ctxt-13",
-                &metadata.location,
+                &profile.location,
             ),
-            non_numeric("uk-bus:CountyRegion", "ctxt-13", &metadata.county),
-            non_numeric("uk-bus:PostalCodeZip", "ctxt-13", &metadata.postcode),
-            non_numeric("uk-bus:E-mailAddress", "ctxt-13", &metadata.email),
-            non_numeric("uk-bus:CountryCode", "ctxt-14", &metadata.phone_country),
-            non_numeric("uk-bus:AreaCode", "ctxt-14", &metadata.phone_area),
-            non_numeric("uk-bus:LocalNumber", "ctxt-14", &metadata.phone_number),
-            non_numeric("uk-bus:WebsiteMainPageURL", "ctxt-13", &metadata.website_url),
+            non_numeric("uk-bus:CountyRegion", "ctxt-13", &profile.county),
+            non_numeric("uk-bus:PostalCodeZip", "ctxt-13", &profile.postcode),
+            non_numeric("uk-bus:E-mailAddress", "ctxt-13", &profile.email),
+            non_numeric("uk-bus:CountryCode", "ctxt-14", &profile.phone_country),
+            non_numeric("uk-bus:AreaCode", "ctxt-14", &profile.phone_area),
+            non_numeric("uk-bus:LocalNumber", "ctxt-14", &profile.phone_number),
+            non_numeric("uk-bus:WebsiteMainPageURL", "ctxt-13", &profile.website_url),
             non_numeric(
                 "uk-bus:DescriptionOrOtherInformationOnWebsite",
                 "ctxt-13",
-                &metadata.website_description,
+                &profile.website_description,
             ),
         ]);
 
@@ -508,7 +412,7 @@ impl Frs105Accounts {
             context_instant(
                 "ctxt-1",
                 &company.company_number,
-                &metadata.report_date,
+                &self.accounts.report_date,
                 None,
                 None,
             ),
@@ -528,7 +432,7 @@ impl Frs105Accounts {
                 None,
                 &[(
                     "uk-bus:MainIndustrySectorDimension",
-                    &metadata.industry_sector_dimension,
+                    &profile.industry_sector_dimension,
                 )],
             ),
             context_duration_full(
@@ -540,7 +444,7 @@ impl Frs105Accounts {
                 None,
                 &[(
                     "uk-bus:AccountingStandardsDimension",
-                    &metadata.accounting_standards_dimension,
+                    &self.accounts.accounting_standards_dimension,
                 )],
             ),
             context_duration_full(
@@ -552,7 +456,7 @@ impl Frs105Accounts {
                 None,
                 &[(
                     "uk-bus:AccountsTypeDimension",
-                    &metadata.accounts_type_dimension,
+                    &self.accounts.accounts_type_dimension,
                 )],
             ),
             context_duration_full(
@@ -564,7 +468,7 @@ impl Frs105Accounts {
                 None,
                 &[(
                     "uk-bus:AccountsStatusDimension",
-                    &metadata.accounts_status_dimension,
+                    &self.accounts.accounts_status_dimension,
                 )],
             ),
             context_duration_full(
@@ -576,7 +480,7 @@ impl Frs105Accounts {
                 None,
                 &[(
                     "uk-bus:LegalFormEntityDimension",
-                    &metadata.legal_form_dimension,
+                    &profile.legal_form_dimension,
                 )],
             ),
             context_duration_full(
@@ -588,7 +492,7 @@ impl Frs105Accounts {
                 None,
                 &[(
                     "uk-geo:CountriesRegionsDimension",
-                    &metadata.country_dimension,
+                    &profile.country_dimension,
                 )],
             ),
             context_duration(
@@ -635,7 +539,7 @@ impl Frs105Accounts {
                 None,
                 &[(
                     "uk-geo:CountriesRegionsDimension",
-                    &metadata.contact_country_dimension,
+                    &profile.contact_country_dimension,
                 )],
             ),
             context_duration_full(
@@ -647,7 +551,7 @@ impl Frs105Accounts {
                 None,
                 &[(
                     "uk-bus:PhoneNumberTypeDimension",
-                    &metadata.phone_type_dimension,
+                    &profile.phone_type_dimension,
                 )],
             ),
             context_instant("ctxt-15", &company.company_number, &period_end, None, None),
@@ -747,8 +651,8 @@ impl Frs105Accounts {
     /// financial-year tax parameters (also not serialised).  Fields that
     /// *are* serialised (name, company number, accounting-period dates) are
     /// recovered from the document and override the supplied values.
-    /// Similarly, metadata fields that have no iXBRL fact (`jurisdiction`,
-    /// `signed_by`) come back empty.
+    /// Similarly, profile/report fields that have no iXBRL fact
+    /// (`jurisdiction`, `signed_by`) come back empty.
     ///
     /// Balance-sheet values are rendered at whole pounds (`decimals = 0`),
     /// so the round trip preserves them to the nearest pound; the sign is
@@ -859,7 +763,7 @@ impl Frs105Accounts {
         .filter(|s| !s.is_empty())
         .collect();
 
-        let metadata = AccountsMetadata {
+        let profile = CompanyProfile {
             directors,
             contact_name: text("uk-bus:NameContactDepartmentOrPerson"),
             address_lines,
@@ -875,10 +779,6 @@ impl Frs105Accounts {
             vat_registration: text("uk-bus:VATRegistrationNumber"),
             sic_codes,
             activities: text("uk-bus:DescriptionPrincipalActivities"),
-            average_employees: HashMap::from([
-                (period_end.year().to_string(), num("uk-core:AverageNumberEmployeesDuringPeriod", "ctxt-0") as u32),
-                (prev_year.to_string(), num("uk-core:AverageNumberEmployeesDuringPeriod", "ctxt-9") as u32),
-            ]),
             jurisdiction: String::new(), // not serialised to iXBRL
             accountant_name: text("uk-accrep:NameAccountantResponsible"),
             accountant_business: text("uk-bus:NameEntityAccountants"),
@@ -886,26 +786,38 @@ impl Frs105Accounts {
             auditor_name: text("uk-aurep:NameIndividualAuditor"),
             auditor_business: text("uk-bus:NameEntityAuditors"),
             auditor_address: text("uk-aurep:NameOrLocationOfficePerformingAudit"),
+            industry_sector_dimension: dim("ctxt-3", "uk-bus:MainIndustrySectorDimension"),
+            legal_form_dimension: dim("ctxt-7", "uk-bus:LegalFormEntityDimension"),
+            country_dimension: dim("ctxt-8", "uk-geo:CountriesRegionsDimension"),
+            contact_country_dimension: dim("ctxt-13", "uk-geo:CountriesRegionsDimension"),
+            phone_type_dimension: dim("ctxt-14", "uk-bus:PhoneNumberTypeDimension"),
+            logo_b64: imgs.get("Company logo").cloned(),
+        };
+
+        // The report metadata (title, dates, signatory, employee counts and
+        // the accounts-related dimensions) is serialised to iXBRL and
+        // recovered from the document; the period and fy parameters come
+        // from the earlier `accounts` binding.
+        let accounts = AccountsMeta {
             report_title: text("uk-bus:ReportTitle"),
             report_date: parse_date(&text("uk-bus:BusinessReportPublicationDate")),
             authorised_date: parse_date(&text("uk-core:DateAuthorisationFinancialStatementsForIssue")),
             incorporation_date: parse_date(&text("uk-bus:DateFormationOrIncorporation")),
             signed_by: String::new(), // not serialised to iXBRL
-            industry_sector_dimension: dim("ctxt-3", "uk-bus:MainIndustrySectorDimension"),
+            average_employees: HashMap::from([
+                (period_end.year().to_string(), num("uk-core:AverageNumberEmployeesDuringPeriod", "ctxt-0") as u32),
+                (prev_year.to_string(), num("uk-core:AverageNumberEmployeesDuringPeriod", "ctxt-9") as u32),
+            ]),
             accounting_standards_dimension: dim("ctxt-4", "uk-bus:AccountingStandardsDimension"),
             accounts_type_dimension: dim("ctxt-5", "uk-bus:AccountsTypeDimension"),
             accounts_status_dimension: dim("ctxt-6", "uk-bus:AccountsStatusDimension"),
-            legal_form_dimension: dim("ctxt-7", "uk-bus:LegalFormEntityDimension"),
-            country_dimension: dim("ctxt-8", "uk-geo:CountriesRegionsDimension"),
-            contact_country_dimension: dim("ctxt-13", "uk-geo:CountriesRegionsDimension"),
-            phone_type_dimension: dim("ctxt-14", "uk-bus:PhoneNumberTypeDimension"),
-            logo_b64: imgs.get("Company logo").cloned().unwrap_or_default(),
             signature_b64: imgs.get("Director's signature").cloned().unwrap_or_default(),
+            ..accounts
         };
 
         Frs105Accounts {
             company,
-            metadata,
+            profile,
             accounts,
             fixed_assets: [
                 fact("uk-core:FixedAssets", "ctxt-15"),
@@ -982,7 +894,7 @@ impl Frs105Accounts {
     /// period end date.
     fn build_title_page(&self) -> XmlNode {
         let company = &self.company;
-        let metadata = &self.metadata;
+        let profile = &self.profile;
         page(vec![div("titlepage", vec![
             div("company-number", vec![span(vec![
                 span_text(" Company registration no. "),
@@ -992,14 +904,17 @@ impl Frs105Accounts {
                     &company.company_number,
                 )]),
                 span_text(" ("),
-                span(vec![span_text(&metadata.jurisdiction)]),
+                span(vec![span_text(&profile.jurisdiction)]),
                 span_text(")"),
             ])]),
             elt(
                 "img",
                 &[
                     ("alt", "Company logo"),
-                    ("src", &format!("data:image/png;base64,{}", &metadata.logo_b64)),
+                    ("src", &format!(
+                        "data:image/png;base64,{}",
+                        profile.logo_b64.as_deref().unwrap_or("")
+                    )),
                 ],
             ),
             div("company-name", vec![span(vec![span(vec![non_numeric(
@@ -1010,7 +925,7 @@ impl Frs105Accounts {
             div("title", vec![span(vec![span(vec![non_numeric(
                 "uk-bus:ReportTitle",
                 "ctxt-0",
-                &metadata.report_title,
+                &self.accounts.report_title,
             )])])]),
             div("subtitle", vec![span(vec![
                 span_text("For the year ended "),
@@ -1027,10 +942,10 @@ impl Frs105Accounts {
     /// number, registered office, accountant and auditor.
     fn build_company_info_page(&self) -> XmlNode {
         let company = &self.company;
-        let metadata = &self.metadata;
+        let profile = &self.profile;
 
         let directors_cell = td_no_class(
-            metadata
+            profile
                 .directors
                 .iter()
                 .enumerate()
@@ -1055,10 +970,10 @@ impl Frs105Accounts {
                 &company.company_number,
             )]),
             span_text(", registered in "),
-            span(vec![span_text(&metadata.jurisdiction)]),
+            span(vec![span_text(&profile.jurisdiction)]),
         ])]);
 
-        let office_children: Vec<XmlNode> = metadata
+        let office_children: Vec<XmlNode> = profile
             .address_lines
             .iter()
             .enumerate()
@@ -1078,7 +993,7 @@ impl Frs105Accounts {
                     non_numeric(
                         "uk-bus:PrincipalLocation-CityOrTown",
                         "ctxt-13",
-                        &metadata.location,
+                        &profile.location,
                     ),
                     span_text(", "),
                 ]),
@@ -1086,7 +1001,7 @@ impl Frs105Accounts {
                 span(vec![non_numeric(
                     "uk-bus:PostalCodeZip",
                     "ctxt-13",
-                    &metadata.postcode,
+                    &profile.postcode,
                 )]),
             ])))
             .collect();
@@ -1096,19 +1011,19 @@ impl Frs105Accounts {
             span(vec![span(vec![non_numeric(
                 "uk-accrep:NameAccountantResponsible",
                 "ctxt-0",
-                &metadata.accountant_name,
+                &profile.accountant_name,
             )])]),
             el("br"),
             span(vec![span(vec![non_numeric(
                 "uk-bus:NameEntityAccountants",
                 "ctxt-0",
-                &metadata.accountant_business,
+                &profile.accountant_business,
             )])]),
             el("br"),
             span(vec![span(vec![non_numeric(
                 "uk-accrep:NameOrLocationAccountantsOffice",
                 "ctxt-0",
-                &metadata.accountant_address,
+                &profile.accountant_address,
             )])]),
         ]);
 
@@ -1116,19 +1031,19 @@ impl Frs105Accounts {
             span(vec![span(vec![non_numeric(
                 "uk-aurep:NameIndividualAuditor",
                 "ctxt-0",
-                &metadata.auditor_name,
+                &profile.auditor_name,
             )])]),
             el("br"),
             span(vec![span(vec![non_numeric(
                 "uk-bus:NameEntityAuditors",
                 "ctxt-0",
-                &metadata.auditor_business,
+                &profile.auditor_business,
             )])]),
             el("br"),
             span(vec![span(vec![non_numeric(
                 "uk-aurep:NameOrLocationOfficePerformingAudit",
                 "ctxt-0",
-                &metadata.auditor_address,
+                &profile.auditor_address,
             )])]),
         ]);
 
@@ -1310,13 +1225,13 @@ impl Frs105Accounts {
                 span(vec![date_fact(
                     "uk-core:DateAuthorisationFinancialStatementsForIssue",
                     "ctxt-2",
-                    &self.metadata.authorised_date,
+                    &self.accounts.authorised_date,
                 )]),
                 span_text("."),
             ])),
             elt("p", &[]).child(span(vec![
                 span_text("Signed on behalf of the board, by "),
-                span(vec![span_text(&self.metadata.signed_by)]),
+                span(vec![span_text(&self.accounts.signed_by)]),
                 span_text("."),
             ])),
             elt(
@@ -1325,7 +1240,7 @@ impl Frs105Accounts {
                     ("alt", "Director's signature"),
                     ("src", &format!(
                         "data:image/png;base64,{}",
-                        &self.metadata.signature_b64
+                        &self.accounts.signature_b64
                     )),
                 ],
             ),
@@ -1342,7 +1257,7 @@ impl Frs105Accounts {
     /// Notes to the accounts: company-information note and employees note.
     fn build_notes_page(&self, current_year: &str, prev_year: &str) -> XmlNode {
         let company = &self.company;
-        let metadata = &self.metadata;
+        let profile = &self.profile;
         // Employee figures are indexed by calendar year in the metadata.
         let employees_cur_year = self.accounts.period().end.year();
         let employees_prev_year =
@@ -1368,7 +1283,7 @@ impl Frs105Accounts {
                     non_numeric(
                         "uk-bus:AddressLine1",
                         "ctxt-13",
-                        metadata.address_lines.first().map(String::as_str).unwrap_or(""),
+                        profile.address_lines.first().map(String::as_str).unwrap_or(""),
                     ),
                     span_text(", "),
                 ]),
@@ -1377,7 +1292,7 @@ impl Frs105Accounts {
                     non_numeric(
                         "uk-bus:AddressLine2",
                         "ctxt-13",
-                        metadata.address_lines.get(1).map(String::as_str).unwrap_or(""),
+                        profile.address_lines.get(1).map(String::as_str).unwrap_or(""),
                     ),
                     span_text(", "),
                 ]),
@@ -1388,7 +1303,7 @@ impl Frs105Accounts {
                     non_numeric(
                         "uk-bus:PrincipalLocation-CityOrTown",
                         "ctxt-13",
-                        &metadata.location,
+                        &profile.location,
                     ),
                     span_text(" "),
                 ]),
@@ -1396,7 +1311,7 @@ impl Frs105Accounts {
                 span(vec![non_numeric(
                     "uk-bus:PostalCodeZip",
                     "ctxt-13",
-                    &metadata.postcode,
+                    &profile.postcode,
                 )]),
                 span_text("."),
             ])),
@@ -1424,13 +1339,13 @@ impl Frs105Accounts {
                     elt("td", &[("class", "data value")]).child(span(vec![span(vec![
                         employees_non_fraction(
                             "ctxt-0",
-                            &metadata.average_employees_for(employees_cur_year).to_string(),
+                            &self.accounts.average_employees_for(employees_cur_year).to_string(),
                         ),
                     ])])),
                     elt("td", &[("class", "data value")]).child(span(vec![span(vec![
                         employees_non_fraction(
                             "ctxt-9",
-                            &metadata.average_employees_for(employees_prev_year).to_string(),
+                            &self.accounts.average_employees_for(employees_prev_year).to_string(),
                         ),
                     ])])),
                 ]),
@@ -1780,32 +1695,32 @@ mod tests {
     }
 
     /// The example company's identity fields from the JSON; the remaining
-    /// JSON keys are the `accounts` sub-object (into [`AccountsMeta`]) and
-    /// the flat [`AccountsMetadata`] fields.
+    /// `company` keys are the flattened [`CompanyProfile`] fields, and the
+    /// top-level `accounts` sub-object holds the period and report metadata.
     #[derive(serde::Deserialize)]
     struct CompanyData {
         name: String,
         tax_reference: String,
         company_number: String,
+        #[serde(flatten)]
+        profile: CompanyProfile,
     }
 
-    /// The top-level shape of `input-company.json`: a nested `company`
-    /// identity block, an `accounts` sub-object and the flat metadata fields
-    /// (incl. logo/signature).
+    /// The top-level shape of `input_config.json`: a nested `company`
+    /// identity + profile block and an `accounts` sub-object (period + report
+    /// metadata, incl. the signature asset).
     #[derive(serde::Deserialize)]
     struct ExampleCompanyData {
         company: CompanyData,
         #[serde(default)]
         accounts: AccountsMeta,
-        #[serde(flatten)]
-        metadata: AccountsMetadata,
     }
 
     /// Load the example company's data file — the single source of truth for
-    /// the company identity, the report metadata and the logo/signature
-    /// assets.
+    /// the company identity + profile, the report metadata and the
+    /// logo/signature assets.
     fn load_example_data() -> ExampleCompanyData {
-        let json = std::fs::read_to_string("example_data/example2/input-company.json")
+        let json = std::fs::read_to_string("example_data/example2/input_config.json")
             .expect("read example company data file");
         serde_json::from_str(&json).expect("parse example company data file")
     }
@@ -1817,14 +1732,15 @@ mod tests {
     }
 
     /// The example company's set of accounts (return period + financial-year
-    /// parameters) from the JSON.
+    /// parameters + report metadata) from the JSON.
     fn example_accounts_meta() -> AccountsMeta {
         load_example_data().accounts
     }
 
-    /// The example report metadata (incl. logo/signature) from the JSON.
-    fn example_metadata() -> AccountsMetadata {
-        load_example_data().metadata
+    /// The example company profile (directors, contacts, accountant/auditor,
+    /// logo, ...) from the JSON.
+    fn example_profile() -> CompanyProfile {
+        load_example_data().company.profile
     }
 
     #[test]
@@ -1854,30 +1770,32 @@ mod tests {
         assert_eq!(company.tax_reference, t.tax_reference);
         assert_eq!(accounts.period(), TestData::default_accounts_meta().period());
 
-        // Metadata round-trips from the same file.
-        let m = example_metadata();
-        assert_eq!(m.directors, vec!["A Bloggs", "B Smith", "C Jones"]);
-        assert_eq!(m.sic_codes, vec!["62020", "62021"]);
+        // The company profile round-trips from the same file.
+        let p = example_profile();
+        assert_eq!(p.directors, vec!["A Bloggs", "B Smith", "C Jones"]);
+        assert_eq!(p.sic_codes, vec!["62020", "62021"]);
+        assert!(!p.logo_b64.as_deref().unwrap_or("").is_empty());
+
+        // The report metadata round-trips from the same file.
         assert_eq!(
-            m.average_employees,
+            accounts.average_employees,
             HashMap::from([("2020".to_string(), 2), ("2019".to_string(), 1)])
         );
         assert_eq!(
-            m.report_date,
+            accounts.report_date,
             chrono::NaiveDate::from_ymd_opt(2021, 3, 1).unwrap()
         );
         assert_eq!(
-            m.incorporation_date,
+            accounts.incorporation_date,
             chrono::NaiveDate::from_ymd_opt(2017, 4, 5).unwrap()
         );
-        assert!(!m.logo_b64.is_empty());
-        assert!(!m.signature_b64.is_empty());
+        assert!(!accounts.signature_b64.is_empty());
     }
 
     #[tokio::test]
     async fn test_accounts_from_example2() {
         let (company, gnucash) = load_example().await;
-        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata(), &example_accounts_meta());
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta());
 
         // Balance-sheet values (whole-pence, computed from the ledger).
         assert_eq!(accounts.fixed_assets, [932.74, 633.10]);
@@ -1908,7 +1826,7 @@ mod tests {
         // copy to example_data/example2/output-accounts.html.  The Rust
         // output below must match it byte for byte.
         let (company, gnucash) = load_example().await;
-        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata(), &example_accounts_meta());
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta());
         let out = accounts.to_ixbrl();
 
         // Write the Rust output for external validation (arelle).
@@ -1927,7 +1845,7 @@ mod tests {
     #[tokio::test]
     async fn test_accounts_ixbrl_structure() {
         let (company, gnucash) = load_example().await;
-        let out = Frs105Accounts::new(&gnucash, &company, &example_metadata(), &example_accounts_meta()).to_ixbrl();
+        let out = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta()).to_ixbrl();
 
         // Header structure
         assert!(out.contains("<div class=\"hidden\"><ix:header><ix:hidden>"));
@@ -1959,7 +1877,7 @@ mod tests {
         // in two steps (XML -> XmlNode -> Frs105Accounts) and compare against
         // the original.
         let (company, gnucash) = load_example().await;
-        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata(), &example_accounts_meta());
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta());
         let html = accounts.to_ixbrl();
 
         std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
@@ -2022,104 +1940,104 @@ mod tests {
         );
 
         // Metadata fields that are serialised to iXBRL round-trip.
-        assert_eq!(back.metadata.directors, accounts.metadata.directors);
+        assert_eq!(back.profile.directors, accounts.profile.directors);
         assert_eq!(
-            back.metadata.contact_name,
-            accounts.metadata.contact_name
+            back.profile.contact_name,
+            accounts.profile.contact_name
         );
         assert_eq!(
-            back.metadata.address_lines,
-            accounts.metadata.address_lines
+            back.profile.address_lines,
+            accounts.profile.address_lines
         );
-        assert_eq!(back.metadata.county, accounts.metadata.county);
-        assert_eq!(back.metadata.location, accounts.metadata.location);
-        assert_eq!(back.metadata.postcode, accounts.metadata.postcode);
-        assert_eq!(back.metadata.email, accounts.metadata.email);
-        assert_eq!(back.metadata.phone_country, accounts.metadata.phone_country);
-        assert_eq!(back.metadata.phone_area, accounts.metadata.phone_area);
-        assert_eq!(back.metadata.phone_number, accounts.metadata.phone_number);
-        assert_eq!(back.metadata.website_url, accounts.metadata.website_url);
+        assert_eq!(back.profile.county, accounts.profile.county);
+        assert_eq!(back.profile.location, accounts.profile.location);
+        assert_eq!(back.profile.postcode, accounts.profile.postcode);
+        assert_eq!(back.profile.email, accounts.profile.email);
+        assert_eq!(back.profile.phone_country, accounts.profile.phone_country);
+        assert_eq!(back.profile.phone_area, accounts.profile.phone_area);
+        assert_eq!(back.profile.phone_number, accounts.profile.phone_number);
+        assert_eq!(back.profile.website_url, accounts.profile.website_url);
         assert_eq!(
-            back.metadata.website_description,
-            accounts.metadata.website_description
-        );
-        assert_eq!(
-            back.metadata.vat_registration,
-            accounts.metadata.vat_registration
-        );
-        assert_eq!(back.metadata.sic_codes, accounts.metadata.sic_codes);
-        assert_eq!(back.metadata.activities, accounts.metadata.activities);
-        assert_eq!(
-            back.metadata.average_employees,
-            accounts.metadata.average_employees
+            back.profile.website_description,
+            accounts.profile.website_description
         );
         assert_eq!(
-            back.metadata.accountant_name,
-            accounts.metadata.accountant_name
+            back.profile.vat_registration,
+            accounts.profile.vat_registration
+        );
+        assert_eq!(back.profile.sic_codes, accounts.profile.sic_codes);
+        assert_eq!(back.profile.activities, accounts.profile.activities);
+        assert_eq!(
+            back.accounts.average_employees,
+            accounts.accounts.average_employees
         );
         assert_eq!(
-            back.metadata.accountant_business,
-            accounts.metadata.accountant_business
+            back.profile.accountant_name,
+            accounts.profile.accountant_name
         );
         assert_eq!(
-            back.metadata.accountant_address,
-            accounts.metadata.accountant_address
-        );
-        assert_eq!(back.metadata.auditor_name, accounts.metadata.auditor_name);
-        assert_eq!(
-            back.metadata.auditor_business,
-            accounts.metadata.auditor_business
+            back.profile.accountant_business,
+            accounts.profile.accountant_business
         );
         assert_eq!(
-            back.metadata.auditor_address,
-            accounts.metadata.auditor_address
+            back.profile.accountant_address,
+            accounts.profile.accountant_address
         );
-        assert_eq!(back.metadata.report_title, accounts.metadata.report_title);
-        assert_eq!(back.metadata.report_date, accounts.metadata.report_date);
+        assert_eq!(back.profile.auditor_name, accounts.profile.auditor_name);
         assert_eq!(
-            back.metadata.authorised_date,
-            accounts.metadata.authorised_date
-        );
-        assert_eq!(
-            back.metadata.incorporation_date,
-            accounts.metadata.incorporation_date
+            back.profile.auditor_business,
+            accounts.profile.auditor_business
         );
         assert_eq!(
-            back.metadata.industry_sector_dimension,
-            accounts.metadata.industry_sector_dimension
+            back.profile.auditor_address,
+            accounts.profile.auditor_address
+        );
+        assert_eq!(back.accounts.report_title, accounts.accounts.report_title);
+        assert_eq!(back.accounts.report_date, accounts.accounts.report_date);
+        assert_eq!(
+            back.accounts.authorised_date,
+            accounts.accounts.authorised_date
         );
         assert_eq!(
-            back.metadata.accounting_standards_dimension,
-            accounts.metadata.accounting_standards_dimension
+            back.accounts.incorporation_date,
+            accounts.accounts.incorporation_date
         );
         assert_eq!(
-            back.metadata.accounts_type_dimension,
-            accounts.metadata.accounts_type_dimension
+            back.profile.industry_sector_dimension,
+            accounts.profile.industry_sector_dimension
         );
         assert_eq!(
-            back.metadata.accounts_status_dimension,
-            accounts.metadata.accounts_status_dimension
+            back.accounts.accounting_standards_dimension,
+            accounts.accounts.accounting_standards_dimension
         );
         assert_eq!(
-            back.metadata.legal_form_dimension,
-            accounts.metadata.legal_form_dimension
+            back.accounts.accounts_type_dimension,
+            accounts.accounts.accounts_type_dimension
         );
         assert_eq!(
-            back.metadata.country_dimension,
-            accounts.metadata.country_dimension
+            back.accounts.accounts_status_dimension,
+            accounts.accounts.accounts_status_dimension
         );
         assert_eq!(
-            back.metadata.contact_country_dimension,
-            accounts.metadata.contact_country_dimension
+            back.profile.legal_form_dimension,
+            accounts.profile.legal_form_dimension
         );
         assert_eq!(
-            back.metadata.phone_type_dimension,
-            accounts.metadata.phone_type_dimension
+            back.profile.country_dimension,
+            accounts.profile.country_dimension
         );
-        assert_eq!(back.metadata.logo_b64, accounts.metadata.logo_b64);
         assert_eq!(
-            back.metadata.signature_b64,
-            accounts.metadata.signature_b64
+            back.profile.contact_country_dimension,
+            accounts.profile.contact_country_dimension
+        );
+        assert_eq!(
+            back.profile.phone_type_dimension,
+            accounts.profile.phone_type_dimension
+        );
+        assert_eq!(back.profile.logo_b64, accounts.profile.logo_b64);
+        assert_eq!(
+            back.accounts.signature_b64,
+            accounts.accounts.signature_b64
         );
     }
 

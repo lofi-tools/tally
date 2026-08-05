@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{Datelike, Months, NaiveDate};
 use serde::{Deserialize, Serialize};
 
@@ -5,7 +7,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// The return period and the financial-year tax parameters live in
 /// [`AccountsMeta`], not here — a company is a company whatever set of
-/// accounts is being produced.
+/// accounts is being produced.  The company's descriptive profile
+/// (directors, contacts, accountant, auditor, ...) lives in
+/// [`CompanyProfile`].
 #[derive(Debug, Clone, Default)]
 pub struct Company {
     pub name: String,
@@ -17,6 +21,116 @@ pub struct Company {
     /// ([`Self::first_ard`], [`Self::accounting_period_n`]) is only
     /// meaningful once it is set.
     pub registration_date: NaiveDate,
+}
+
+/// The `company` sub-object of the config file (`company.*`), minus the
+/// identity fields: the company's descriptive profile — directors,
+/// registered-office contact details, accountant and auditor, SIC codes,
+/// business activities and the taxonomy dimension values the accounts
+/// report is tagged with.
+///
+/// Everything here is only available from the config file (nothing is
+/// resolved from Companies House), so every field is required there.  The
+/// company logo is the exception: it is embedded on the title page, but
+/// optional ([`Self::logo_b64`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompanyProfile {
+    /// Names of the directors, in order (used for the officer contexts).
+    pub directors: Vec<String>,
+    /// Contact department / person name.
+    pub contact_name: String,
+    /// Registered-office address lines (one fact per line).
+    pub address_lines: Vec<String>,
+    /// County / region of the registered office.
+    pub county: String,
+    /// City / town of the registered office.
+    pub location: String,
+    /// Registered-office postcode.
+    pub postcode: String,
+    /// Contact e-mail address.
+    pub email: String,
+    /// Telephone country code (e.g. "+44").
+    pub phone_country: String,
+    /// Telephone area code.
+    pub phone_area: String,
+    /// Telephone local number.
+    pub phone_number: String,
+    /// Website main page URL.
+    pub website_url: String,
+    /// Website description.
+    pub website_description: String,
+    /// VAT registration number.
+    pub vat_registration: String,
+    /// SIC codes registered with Companies House.
+    pub sic_codes: Vec<String>,
+    /// Summary of business activities.
+    pub activities: String,
+    /// Jurisdiction, e.g. "England and Wales".
+    pub jurisdiction: String,
+    /// Accountant's name.
+    pub accountant_name: String,
+    /// Accountant's firm.
+    pub accountant_business: String,
+    /// Accountant's office address.
+    pub accountant_address: String,
+    /// Auditor's name.
+    pub auditor_name: String,
+    /// Auditor's firm.
+    pub auditor_business: String,
+    /// Auditor's office address.
+    pub auditor_address: String,
+    /// Taxonomy dimension value for the industry sector.
+    pub industry_sector_dimension: String,
+    /// Taxonomy dimension value for the legal form.
+    pub legal_form_dimension: String,
+    /// Taxonomy dimension value for the country of formation.
+    pub country_dimension: String,
+    /// Taxonomy dimension value for the contact country.
+    pub contact_country_dimension: String,
+    /// Taxonomy dimension value for the phone-number type.
+    pub phone_type_dimension: String,
+    /// Base64-encoded company logo, embedded on the title page (optional).
+    #[serde(default)]
+    pub logo_b64: Option<String>,
+}
+
+impl Default for CompanyProfile {
+    /// An empty profile: no directors, contacts or accountant/auditor, no
+    /// logo.  The reports only ever receive a profile from the config file,
+    /// which requires every field — this default exists for the tests and
+    /// for the resolution stage, which does not touch the profile.
+    fn default() -> Self {
+        Self {
+            directors: Vec::new(),
+            contact_name: String::new(),
+            address_lines: Vec::new(),
+            county: String::new(),
+            location: String::new(),
+            postcode: String::new(),
+            email: String::new(),
+            phone_country: String::new(),
+            phone_area: String::new(),
+            phone_number: String::new(),
+            website_url: String::new(),
+            website_description: String::new(),
+            vat_registration: String::new(),
+            sic_codes: Vec::new(),
+            activities: String::new(),
+            jurisdiction: String::new(),
+            accountant_name: String::new(),
+            accountant_business: String::new(),
+            accountant_address: String::new(),
+            auditor_name: String::new(),
+            auditor_business: String::new(),
+            auditor_address: String::new(),
+            industry_sector_dimension: String::new(),
+            legal_form_dimension: String::new(),
+            country_dimension: String::new(),
+            contact_country_dimension: String::new(),
+            phone_type_dimension: String::new(),
+            logo_b64: None,
+        }
+    }
 }
 
 /// A period: `start` through `end` (inclusive).
@@ -46,12 +160,16 @@ impl AccountingPeriod {
 
 /// The `accounts` sub-object of the config file (`accounts.*`).
 ///
-/// A set of accounts: the return period ([`AccountingPeriod`]) plus the
+/// A set of accounts: the return period ([`AccountingPeriod`]), the
 /// financial-year tax parameters (fy1/fy2 years and rates) the computation
-/// runs on.  The period is optional here because it can be resolved — from
+/// runs on, and the report metadata (title, dates, signatory, employee
+/// counts and the accounts-related taxonomy dimension values).  The period
+/// is optional here because it can be resolved — from
 /// [`Self::accounts_made_up_to`] (the 12 months ending on that date), or
 /// from the company's next accounting period to file at Companies House —
 /// before the reports are built; the fy fields default to 2019/2020 at 19%.
+/// The report metadata is only available from the config file and is
+/// required there.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct AccountsMeta {
     /// The return period (`accounts.period.start` / `accounts.period.end`).
@@ -69,13 +187,35 @@ pub struct AccountsMeta {
     pub fy1_rate: f64,
     #[serde(default = "default_fy2_rate")]
     pub fy2_rate: f64,
+    /// Report title, shown on the title page.
+    pub report_title: String,
+    /// Date the report was published / issued.
+    pub report_date: NaiveDate,
+    /// Date the financial statements were authorised for issue.
+    pub authorised_date: NaiveDate,
+    /// Date of incorporation / formation.
+    pub incorporation_date: NaiveDate,
+    /// Name of the director who signed the report.
+    pub signed_by: String,
+    /// Average monthly number of employees, indexed by calendar year
+    /// (e.g. `"2020" -> 2`, `"2019" -> 1`; JSON object keys are strings).
+    pub average_employees: HashMap<String, u32>,
+    /// Taxonomy dimension value for the accounting standards.
+    pub accounting_standards_dimension: String,
+    /// Taxonomy dimension value for the accounts type.
+    pub accounts_type_dimension: String,
+    /// Taxonomy dimension value for the accounts status.
+    pub accounts_status_dimension: String,
+    /// Base64-encoded director's signature, embedded on the statement of
+    /// financial position.
+    pub signature_b64: String,
 }
 
 impl Default for AccountsMeta {
-    /// The default set of accounts: no period, and the default financial-year
-    /// tax parameters (fy1 2019, fy2 2020, both 19%).  Matches the serde
-    /// defaults, so a config without the `accounts` sub-object behaves like
-    /// one with it.
+    /// The default set of accounts: no period, the default financial-year
+    /// tax parameters (fy1 2019, fy2 2020, both 19%) and empty report
+    /// metadata.  Matches the serde defaults, so a config without the
+    /// `accounts` sub-object behaves like one with it.
     fn default() -> Self {
         Self {
             period: None,
@@ -84,6 +224,16 @@ impl Default for AccountsMeta {
             fy2_year: DEFAULT_FY2_YEAR,
             fy1_rate: DEFAULT_FY1_RATE,
             fy2_rate: DEFAULT_FY2_RATE,
+            report_title: String::new(),
+            report_date: NaiveDate::default(),
+            authorised_date: NaiveDate::default(),
+            incorporation_date: NaiveDate::default(),
+            signed_by: String::new(),
+            average_employees: HashMap::new(),
+            accounting_standards_dimension: String::new(),
+            accounts_type_dimension: String::new(),
+            accounts_status_dimension: String::new(),
+            signature_b64: String::new(),
         }
     }
 }
@@ -114,6 +264,12 @@ impl AccountsMeta {
     /// 19%), with no period.
     pub fn defaults() -> Self {
         Self::default()
+    }
+
+    /// The average monthly number of employees for a given calendar year
+    /// (0 when the year is absent from the data).
+    pub fn average_employees_for(&self, year: i32) -> u32 {
+        self.average_employees.get(&year.to_string()).copied().unwrap_or(0)
     }
 
     /// The return period as given, falling back on the period deduced from

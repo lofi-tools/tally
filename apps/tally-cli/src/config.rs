@@ -8,7 +8,8 @@
 //!   ([`RawEnvConfig::from_env`]): `UNIQUE_TAXPAYER_REF`, `COMPANY_NUMBER`,
 //!   the Companies House API keys, `CT600_CACHE_DIR`.
 //! * [`FileConfig`] — the JSON config file (`--config-path`): the nested
-//!   `company` identity block plus the flat accounts-metadata fields.
+//!   `company` block (identity + descriptive profile) plus the `accounts`
+//!   sub-object (period, financial-year parameters, report metadata).
 //! * [`Ct600Config`] — the `ct600` subcommand's inputs: `--config-path`,
 //!   `--book`, `--out`, `--accounts-made-up-to`.  Its
 //!   [`Ct600Config::resolve`] loads the [`FileConfig`], merges it with a
@@ -22,8 +23,9 @@
 //! source to fall back on — the environment, Companies House (the name and
 //! registration date), or defaults ([`Company::new`]); the return period
 //! falls back on the next accounting period from Companies House or is
-//! deduced from a made-up-to date; the remaining fields (the accounts
-//! metadata, the CLI paths) have no alternative source and stay required.
+//! deduced from a made-up-to date; the remaining fields (the company
+//! profile, the report metadata, the CLI paths) have no alternative source
+//! and stay required.
 //!
 //! Resolution order, field by field:
 //!
@@ -37,7 +39,8 @@
 //! | `accounts.fy1_year` / `fy2_year` / `fy1_rate` / `fy2_rate` | config file → defaults (2019 / 2020 at 19%) |
 //! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default |
 //! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
-//! | `metadata.*` | config file only |
+//! | `company.profile.*` (directors, contacts, accountant/auditor, ...) | config file only |
+//! | `accounts.*` report metadata (report_title, dates, employees, ...) | config file only |
 //! | `--book`, `--out` | command line only |
 
 use std::path::{Path, PathBuf};
@@ -45,8 +48,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, Months, NaiveDate};
 use ct600::{CompaniesHouseClient, CompaniesHouseClientType};
-use ixbrl::company::{AccountingPeriod, AccountsMeta, Company};
-use ixbrl::reports::uk_frs105_accounts::AccountsMetadata;
+use ixbrl::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use serde::Deserialize;
 
 /// The values `tally` reads from the environment.
@@ -133,28 +135,29 @@ fn non_empty_env(name: &str) -> Option<String> {
 }
 
 /// The JSON config file's contents (`--config-path`): the nested `company`
-/// identity block, the `accounts` sub-object and the flat accounts-metadata
-/// fields.
+/// block and the `accounts` sub-object.
 ///
-/// Every field of `company` is optional — the company name is resolved from
+/// The `company` block's identity fields (`name`, `tax_reference`,
+/// `company_number`) are optional — the company name is resolved from
 /// Companies House at runtime when an API key is configured, the company
 /// number falls back on the `COMPANY_NUMBER` environment variable, and the
 /// Corporation Tax reference (UTR) falls back on the `UNIQUE_TAXPAYER_REF`
 /// environment variable (which wins over `company.tax_reference`).  The
-/// `accounts` sub-object is optional too: an explicit `accounts.period`
-/// wins, otherwise the period is deduced from `accounts.accounts_made_up_to`
-/// or comes from Companies House, and the financial-year parameters default.
+/// `company` block's descriptive profile fields ([`CompanyProfile`]) and
+/// the `accounts` sub-object's report metadata are required — they have no
+/// alternative source.  The `accounts` sub-object's return period is
+/// optional: an explicit `accounts.period` wins, otherwise the period is
+/// deduced from `accounts.accounts_made_up_to` or comes from Companies
+/// House, and the financial-year parameters default.
 #[derive(Deserialize)]
 pub struct FileConfig {
-    /// The config file's company identity block; every field optional.
+    /// The config file's `company` block: optional identity fields plus the
+    /// required descriptive profile ([`CompanyProfile`], flattened).
     pub company: RawCompanyConfig,
     /// The config file's `accounts` sub-object ([`AccountsMeta`], the exact
-    /// shape of the `accounts.*` keys); every field optional.
-    #[serde(default)]
+    /// shape of the `accounts.*` keys): the optional return period and
+    /// financial-year parameters, plus the required report metadata.
     pub accounts: AccountsMeta,
-    /// The config file's flat accounts-metadata fields (all required).
-    #[serde(flatten)]
-    pub metadata: AccountsMetadata,
 }
 
 impl FileConfig {
@@ -167,15 +170,17 @@ impl FileConfig {
     }
 }
 
-/// The company identity block of the config file (`company.*`).
+/// The company block of the config file (`company.*`).
 ///
-/// Every field is optional: the company name is resolved from Companies
-/// House at runtime when an API key is configured, the company number falls
-/// back on the `COMPANY_NUMBER` environment variable, and the Corporation
-/// Tax reference (UTR) falls back on the `UNIQUE_TAXPAYER_REF` environment
-/// variable (which wins over `company.tax_reference`).  The return period
-/// and financial-year parameters are not here — they live in the config
-/// file's `accounts.*` sub-object ([`AccountsMeta`]).
+/// The identity fields are optional: the company name is resolved from
+/// Companies House at runtime when an API key is configured, the company
+/// number falls back on the `COMPANY_NUMBER` environment variable, and the
+/// Corporation Tax reference (UTR) falls back on the `UNIQUE_TAXPAYER_REF`
+/// environment variable (which wins over `company.tax_reference`).  The
+/// descriptive profile fields ([`CompanyProfile`]) are flattened in and are
+/// all required — nothing is resolved from Companies House for them.  The
+/// return period and financial-year parameters are not here — they live in
+/// the config file's `accounts.*` sub-object ([`AccountsMeta`]).
 ///
 /// [`resolve_company`] validates the resolved identity and errors clearly
 /// when it is incomplete.
@@ -184,6 +189,10 @@ pub struct RawCompanyConfig {
     pub name: Option<String>,
     pub tax_reference: Option<String>,
     pub company_number: Option<String>,
+    /// The company's descriptive profile (directors, contacts, accountant /
+    /// auditor, ...), flattened into the `company.*` keys; all required.
+    #[serde(flatten)]
+    pub profile: CompanyProfile,
 }
 
 /// Resolved (strict) configuration: every field is present, or resolution
@@ -193,11 +202,12 @@ pub struct ResolvedConfig {
     /// The fully-resolved company identity (name, UTR, number, registration
     /// date).
     pub company: Company,
-    /// The set of accounts being produced: the return period (resolved) and
-    /// the financial-year tax parameters.
+    /// The company's descriptive profile (directors, contacts, accountant /
+    /// auditor, ...) from the config's `company.*` sub-object.
+    pub profile: CompanyProfile,
+    /// The set of accounts being produced: the return period (resolved), the
+    /// financial-year tax parameters and the report metadata.
     pub accounts: AccountsMeta,
-    /// The accounts metadata for the report.
-    pub metadata: AccountsMetadata,
     /// The GnuCash ledger to read.
     pub book_path: PathBuf,
     /// The output directory; the CT600 GovTalk message is written to
@@ -270,10 +280,10 @@ impl Ct600Config {
             company: resolved
                 .company
                 .expect("no missing inputs means the company is resolved"),
+            profile: file.company.profile,
             accounts: resolved
                 .accounts
                 .expect("no missing inputs means the accounts are resolved"),
-            metadata: file.metadata,
             book_path: self.book_path.expect("book_path validated present"),
             out_dir: self.out_dir.expect("out_dir validated present"),
             companies_house_client_type: env.companies_house_client_type(),
@@ -544,6 +554,9 @@ mod tests {
             name: name.map(str::to_string),
             tax_reference: tax_reference.map(str::to_string),
             company_number: company_number.map(str::to_string),
+            // The descriptive profile is irrelevant to resolution; use the
+            // empty default.
+            profile: CompanyProfile::default(),
         }
     }
 
@@ -783,16 +796,17 @@ mod tests {
     /// are present.
     #[tokio::test]
     async fn ct600_config_resolves_and_requires_paths() {
-        let path = Path::new("../../libs/ixbrl/example_data/example2/input-company.json");
+        let path = Path::new("../../libs/ixbrl/example_data/example2/input_config.json");
         let empty_env = RawEnvConfig::default();
 
-        // The file parses into a FileConfig carrying the company block, the
-        // accounts sub-object and the flattened accounts metadata.
+        // The file parses into a FileConfig carrying the company block
+        // (identity + profile) and the accounts sub-object.
         let file = FileConfig::from_file(path).expect("parse example config");
         assert_eq!(file.company.name.as_deref(), Some("Example Biz Ltd."));
+        assert_eq!(file.company.profile.directors, vec!["A Bloggs", "B Smith", "C Jones"]);
         assert_eq!(file.accounts.period().start, date(2020, 1, 1));
         assert_eq!(file.accounts.period().end, date(2020, 12, 31));
-        assert_eq!(file.metadata.report_title, "Unaudited Micro-Entity Accounts");
+        assert_eq!(file.accounts.report_title, "Unaudited Micro-Entity Accounts");
 
         // Without the CLI paths, resolution errors naming each missing one.
         let ct600 = Ct600Config {
@@ -837,7 +851,9 @@ mod tests {
         assert_eq!(resolved.accounts.fy1_year, 2019);
         assert_eq!(resolved.book_path, PathBuf::from("input.gnucash"));
         assert_eq!(resolved.out_dir, PathBuf::from("out"));
-        assert_eq!(resolved.metadata.report_title, "Unaudited Micro-Entity Accounts");
+        assert_eq!(resolved.accounts.report_title, "Unaudited Micro-Entity Accounts");
+        // The company profile is carried through from the config file.
+        assert_eq!(resolved.profile.directors, vec!["A Bloggs", "B Smith", "C Jones"]);
         // The empty captured env configures no Companies House client.
         assert_eq!(resolved.companies_house_client_type, None);
 
@@ -1064,6 +1080,7 @@ mod live_tests {
             name: None,
             tax_reference: None,
             company_number: None,
+            profile: CompanyProfile::default(),
         };
         let raw_accounts = AccountsMeta::default();
 

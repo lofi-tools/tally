@@ -9,10 +9,10 @@
 //! ```
 //!
 //! * `--config-path` — a JSON config file describing the company and the
-//!   accounts metadata (same shape as
-//!   `libs/ixbrl/example_data/example2/input-company.json`: a nested
-//!   `company` identity block, an `accounts` sub-object and the flat
-//!   accounts-metadata fields).  The file becomes a [`config::FileConfig`]
+//!   accounts (same shape as
+//!   `libs/ixbrl/example_data/example2/input_config.json`: a nested
+//!   `company` identity + profile block and an `accounts` sub-object).  The
+//!   file becomes a [`config::FileConfig`]
 //!   and is merged with the captured environment ([`config::RawEnvConfig`])
 //!   and the subcommand's CLI values into a [`config::ResolvedConfig`] by
 //!   [`config::Ct600Config::resolve`]: every identity field is optional —
@@ -198,7 +198,7 @@ async fn run_ct600(args: Ct600Config) -> Result<()> {
 
     // FRS 105 inputs to the return.
     let accounts =
-        Frs105Accounts::new(&book, &resolved.company, &resolved.metadata, &resolved.accounts);
+        Frs105Accounts::new(&book, &resolved.company, &resolved.profile, &resolved.accounts);
     let corp_tax = Frs105CorpTax::builder(&book, &resolved.company, &resolved.accounts).build();
 
     // The CT600 GovTalk message.
