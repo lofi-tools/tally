@@ -8,47 +8,43 @@ to `<out>/ct600.xml`.  It produces the return; it does not submit it.
 tally ct600 --config-path <config> --book <book> --out <dir>
 ```
 
-## Inputs → Outputs
-
-| Input | Produces |
-|---|---|
-| `--config-path <config>` — JSON config: a nested `company` identity block plus the flat `AccountsMetadata` fields (same shape as `libs/ixbrl/example_data/example2/input-company.json`) | `ixbrl::company::Company` + `ixbrl::reports::uk_frs105_accounts::AccountsMetadata` |
-| `--book <book>` — a GnuCash ledger (`input.gnucash`, XML or SQLite) | `ixbrl::GnucashBook` via `GnucashBook::try_from_gnucash_file()` |
-| `Frs105Accounts` (computed from the book + config) | the attached accounts iXBRL document (`accounts.to_ixbrl()`) |
-| `Frs105CorpTax` (computed from the book + config) | the attached computations iXBRL document + the CT600 form figures |
-| `Frs105Accounts` + `Frs105CorpTax` | `Ct600Return::from_inputs()` → `to_xml()` = the CT600 GovTalk message, written to `<out>/ct600.xml` |
-
 ## How it works
 
-The `ct600` subcommand is dispatched through a [`Command`](src/main.rs) enum:
+`tally` turns your accounting data into the Corporation Tax return a UK
+limited company files with HMRC. You provide:
 
-1. `Command::parse_cmd_args()` reads the subcommand from `argv`;
-2. `Ct600Args::parse_args()` reads the `--config-path`, `--book` and `--out`
-   flags (all required);
-3. the config JSON is parsed into the `Company` + `AccountsMetadata` inputs;
-4. the company identity is resolved: with a Companies House API key the
-   name (and registration date) are filled in from the company's profile at
-   runtime, and anything still missing is reported with a clear error (see
+1. **A config file** (`--config-path`) — the company's identity (name,
+   registration number, tax reference) and the accounts metadata
+   (directors, SIC codes, address, …).  Anything left out is filled in
+   automatically from the company's Companies House profile when an API
+   key is set — the name, the registration date, and the accounting period
+   to file if you didn't specify one.  Anything still missing is reported
+   with a clear error (see
    [Resolving the company identity](#resolving-the-company-identity));
-5. the GnuCash book is loaded and the FRS 105 accounts and corporation-tax
-   computation are built from it;
-6. `Ct600Return::from_inputs()` assembles the return (envelope + IR header +
-   form figures + attached iXBRL documents) and `to_xml()` serialises the
-   GovTalk message, which is written to `<out>/ct600.xml`.
+2. **Your books** (`--book`) — the GnuCash ledger (`input.gnucash`);
+3. **An output directory** (`--out`) — where the CT600 message is written
+   (`<out>/ct600.xml`).
 
-There is no submission step: producing the return never contacts HMRC.
+From those, `tally` reads the book, builds the accounts and the
+corporation-tax calculation, and assembles everything into the CT600 XML
+message — nothing else is needed.
+
+That's all it does: it *produces* the return, it never submits it — filing
+it with HMRC is a separate step.
 
 ## Configuration
 
 ### Flags
 
-All flags are required; there is no environment-variable fallback.
+`--config-path`, `--book` and `--out` are required; `--accounts-made-up-to`
+is optional.  There is no environment-variable fallback.
 
 | Flag | Meaning |
 |------|---------|
 | `--config-path <config>` | JSON config: company identity + accounts metadata |
 | `--book <book>` | GnuCash ledger (`input.gnucash`) |
 | `--out <dir>` | output directory; the CT600 message is written to `<dir>/ct600.xml` |
+| `--accounts-made-up-to <date>` | date at which the accounts are made (`YYYY-MM-DD`); the return period is deduced as the 12 months ending on it (wins over the config's `company.accounts_made_up_to`) |
 
 ### Config file
 
@@ -56,14 +52,15 @@ A JSON file with the same shape as
 `libs/ixbrl/example_data/example2/input-company.json` (use it as a template): a
 nested `company` identity block plus the flat accounts-metadata fields.
 
-| Key | Type | Meaning |
+| Key | Type | Default |
 |-----|------|---------|
-| `company.name` | string | company name (optional — resolved from Companies House when an API key is configured) |
-| `company.tax_reference` | string | Corporation Tax reference (UTR) — fallback: the `UNIQUE_TAXPAYER_REF` environment variable wins when set; one of the two must be present, it cannot be resolved from Companies House |
-| `company.company_number` | string | Companies House registration number (optional — falls back on the `COMPANY_NUMBER` environment variable) |
-| `company.accounting_period_start` | date | start of the return period (`YYYY-MM-DD`) — always required, cannot be resolved from Companies House |
-| `company.accounting_period_end` | date | end of the return period (`YYYY-MM-DD`) — always required, cannot be resolved from Companies House |
-| `directors`, `sic_codes`, `address_lines`, `email`, ... | — | accounts metadata (all `AccountsMetadata` fields from `libs/ixbrl`) |
+| `company.name` | string (optional) | resolved from Companies House when an API key is configured |
+| `company.tax_reference` | string (required) | `UNIQUE_TAXPAYER_REF` environment variable wins when set; it cannot be resolved from Companies House, so one of the two must be present |
+| `company.company_number` | string (optional) | `COMPANY_NUMBER` environment variable |
+| `company.accounting_period_start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts_made_up_to` or the Companies House next period |
+| `company.accounting_period_end` | date (optional) | none — see `accounting_period_start` |
+| `company.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
+| `directors`, `sic_codes`, `address_lines`, `email`, ... | required | — |
 
 The company-identity fields are all optional in the config file (see
 [Resolving the company identity](#resolving-the-company-identity) for how the
@@ -100,8 +97,14 @@ be complete before the return can be built:
   House: it comes from the `UNIQUE_TAXPAYER_REF` environment variable
   (which wins) or the config's `company.tax_reference`, so one of the two
   must always be present;
-- the **return period** cannot be resolved from Companies House, so it must
-  always be in the config file.
+- the **return period** is optional: an explicit `accounting_period_start`
+  + `accounting_period_end` in the config wins; otherwise the date at which
+  the accounts are made — the `--accounts-made-up-to` flag (winning) or the
+  config's `company.accounts_made_up_to` — gives the 12 months ending on it;
+  otherwise the period defaults to the company's **next accounting period to
+  file**, resolved from the Companies House profile
+  (`CompaniesHouseClient::next_accounting_period`), which needs an API key
+  and company number.
 
 If the resolved identity is still incomplete, the command fails with a
 message listing every missing field and how to resolve it, e.g.:
@@ -131,12 +134,15 @@ used, otherwise the profile is fetched from the live API.
 
 ## Minimum configuration
 
-A config file containing the return period and the accounts metadata, plus a
-Corporation Tax reference — either a `UNIQUE_TAXPAYER_REF` environment
-variable or the config's `company.tax_reference` — and either a company number
-or a `COMPANY_NUMBER` environment variable.  The company name is only needed
-when no Companies House API key is configured.  The envelope credentials /
-contact details default to the reference tool's values (see above).
+A config file containing the accounts metadata, plus a Corporation Tax
+reference — either a `UNIQUE_TAXPAYER_REF` environment variable or the
+config's `company.tax_reference` — and either a company number or a
+`COMPANY_NUMBER` environment variable.  The company name and return period
+are only needed when no Companies House API key is configured: with a key,
+the name and the next accounting period to file are resolved from the
+company's profile at runtime (the period can also be given explicitly or
+deduced from `--accounts-made-up-to`).  The envelope credentials / contact
+details default to the reference tool's values (see above).
 
 ## Building and running
 
@@ -153,10 +159,10 @@ cargo run -p tally-cli -- ct600 \
 
 ## Tests
 
-This crate currently has no tests of its own.  The pipeline it drives is
-covered by the library suites, which run fully offline with zero configuration:
-
-```bash
-cargo test -p ixbrl
-cargo test -p ct600
-```
+The crate's config tests (`cargo test -p tally-cli`) cover the resolution
+pipeline: the config-file / environment / flag merge, the company-identity
+resolution and the return-period fallbacks.  They run fully offline — the
+Companies House lookups are served from scratch cache fixtures.  The pipeline
+it drives is additionally covered by the library suites (`cargo test -p
+ixbrl`, `cargo test -p ct600`), which also run offline with zero
+configuration.

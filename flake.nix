@@ -306,6 +306,17 @@
         };
         scripts = with bash; mapAttrs pkgs.writeShellScriptBin {
           run = ''cargo run -- "$@" '';
+
+          # Run our Rust tally CLI over the example2 data (config + GnuCash
+          # book), writing the CT600 GovTalk message to .cache/ct600/ct600.xml.
+          tally-x2 = ''
+            HERE="${bash.wd}"
+            mkdir -p "$HERE/.cache/ct600"
+            cargo run -p tally-cli -- ct600 \
+              --config-path "$HERE/libs/ixbrl/example_data/example2/input-company.json" \
+              --book "$HERE/libs/ixbrl/example_data/example2/input.gnucash" \
+              --out "$HERE/.cache/ct600"
+          '';
           # packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
           # utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
           # ftest = ''set -x; cargo nextest run --workspace -E "''${TEST_FILTER:-all()}" --nocapture "$@" '';
@@ -396,14 +407,11 @@
           # crate's generator) into .cache/rust-ct600/ct600-rust.xml, by
           # running the generator test that writes it.  Runs in the devShell
           # (needs cargo).
-          rct600-rust = ''
-            set -e
-            set -o pipefail
-            HERE="${bash.wd}"; cd "$HERE"
-            # Remove any stale message first so a failed regeneration cannot
-            # pass the existence check against an old file.
+          rct600-2 = ''
+            set -eo pipefail
+
             rm -f .cache/rust-ct600/ct600-rust.xml
-            cargo test -p ct600 --lib ct600_return_from_example2_matches_reference 2>&1 | tail -20
+            cargo test -p ct600 --lib ct600_return_from_example2_matches_reference
             [ -f .cache/rust-ct600/ct600-rust.xml ] || {
               echo "rct600-rust: failed to generate .cache/rust-ct600/ct600-rust.xml" >&2
               exit 1

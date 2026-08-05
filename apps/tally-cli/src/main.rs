@@ -20,8 +20,11 @@
 //!   registration date too, when the config carries no identity details at
 //!   all), the company number falls back on `COMPANY_NUMBER`, the
 //!   Corporation Tax reference (UTR) comes from `UNIQUE_TAXPAYER_REF`
-//!   (winning) or `company.tax_reference`, and anything still missing is
-//!   reported clearly (see [`config`]);
+//!   (winning) or `company.tax_reference`, the return period is the config's
+//!   `accounting_period_start` / `accounting_period_end` or is deduced from
+//!   `--accounts-made-up-to`, defaulting to the next accounting period from
+//!   Companies House, and anything still missing is reported clearly (see
+//!   [`config`]);
 //! * `--book` — the GnuCash ledger (`input.gnucash`);
 //! * `--out` — the output directory; the CT600 GovTalk message is written
 //!   to `<out>/ct600.xml`.
@@ -31,6 +34,7 @@ mod config;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use chrono::NaiveDate;
 use config::{Ct600Config, RawEnvConfig};
 use ct600::Ct600Return;
 use ixbrl::clients::CompaniesHouseClientType;
@@ -79,12 +83,14 @@ impl Command {
 fn parse_ct600_args() -> Result<Ct600Config> {
     let mut rest = std::env::args().skip(2); // skip program + subcommand
     let mut config_path = None;
+    let mut accounts_made_up_to = None;
     let mut book_path = None;
     let mut out_dir = None;
 
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--config-path" => config_path = Some(next_value(&mut rest, &arg)?),
+            "--accounts-made-up-to" => accounts_made_up_to = Some(next_date(&mut rest, &arg)?),
             "--book" => book_path = Some(next_value(&mut rest, &arg)?),
             "--out" => out_dir = Some(next_value(&mut rest, &arg)?),
             "-h" | "--help" => {
@@ -97,19 +103,25 @@ fn parse_ct600_args() -> Result<Ct600Config> {
 
     Ok(Ct600Config {
         config_path: config_path.context("missing --config-path")?,
+        accounts_made_up_to,
         book_path,
         out_dir,
     })
 }
 
 const USAGE: &str = "\
-usage: tally ct600 --config-path <config> --book <book> --out <dir>
+usage: tally ct600 --config-path <config> --book <book> --out <dir> [--accounts-made-up-to <date>]
 
 Produce (not submit) the CT600 corporation-tax return.
 
-  --config-path <config>   JSON config: company + accounts metadata
-  --book <book>            GnuCash ledger (input.gnucash)
-  --out <dir>              output directory; writes <dir>/ct600.xml";
+  --config-path <config>    JSON config: company + accounts metadata
+  --book <book>             GnuCash ledger (input.gnucash)
+  --out <dir>               output directory; writes <dir>/ct600.xml
+  --accounts-made-up-to <date>
+                            date at which the accounts are made (YYYY-MM-DD);
+                            deduce the return period as the 12 months ending
+                            on it, instead of the config's period or the
+                            Companies House default";
 
 /// Entry point: parse the subcommand, run it, and print a concise error
 /// (no backtrace) on failure.
@@ -131,6 +143,15 @@ fn next_value(rest: &mut impl Iterator<Item = String>, flag: &str) -> Result<Pat
     rest.next()
         .map(PathBuf::from)
         .with_context(|| format!("missing value for {flag}"))
+}
+
+/// The date following a flag, parsed as `YYYY-MM-DD`.
+fn next_date(rest: &mut impl Iterator<Item = String>, flag: &str) -> Result<NaiveDate> {
+    let value = rest
+        .next()
+        .with_context(|| format!("missing value for {flag}"))?;
+    NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+        .with_context(|| format!("invalid date '{value}' for {flag} (expected YYYY-MM-DD)"))
 }
 
 /// The `ct600` subcommand: config + GnuCash book -> CT600 message.

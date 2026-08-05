@@ -2,27 +2,6 @@
 
 Computes a UK limited company's accounts — the balance sheet, the profit & loss and corporation-tax figures — and produces the iXBRL accounts and CT600 corporation-tax return for filing with Companies House and HMRC.
 
-For a high-level overview of what the software currently does, what it does not
-handle, and what is planned, see [`docs/current-state-and-roadmap.md`](docs/current-state-and-roadmap.md).
-
-## Quickstart
-
-Produce the CT600 corporation-tax message from a company config file and a GnuCash
-book:
-
-```bash
-tally ct600 \
-  --config-path libs/ixbrl/example_data/example2/input-company.json \
-  --book libs/ixbrl/example_data/example2/input.gnucash \
-  --out .cache/ct600
-  # -> writes .cache/ct600/ct600.xml
-```
-
-This writes the CT600 GovTalk message to `.cache/ct600/ct600.xml`.  Use
-`libs/ixbrl/example_data/example2/input-company.json` as a template for your own
-company config, and see [tally-cli configuration](#tally-cli-configuration) for the
-flags, config-file keys and defaults.
-
 ## What this does
 
 1. **Gather data from source systems.**
@@ -42,6 +21,34 @@ flags, config-file keys and defaults.
    <br/> Wrap the iXBRL data in the format required by HMRC for online corporation tax submission: canonicalization, GovTalk envelope, IRMark.
    <br/> Include extra CT600 form values & computations.
    <br/> No submission to HRMC yet (planned)
+
+See [roadmap](docs/current-state-and-roadmap.md) for planned features & progress.
+
+## Quickstart
+
+Produce the CT600 Corporation Tax return a UK limited company files with HMRC
+
+```bash
+tally ct600 \
+  --config-path libs/ixbrl/example_data/example2/input-company.json \
+  --book libs/ixbrl/example_data/example2/input.gnucash \
+  --out .cache/ct600
+  # -> writes .cache/ct600/ct600.xml
+```
+
+`tally` turns your accounting data into the Corporation Tax return a UK
+limited company files with HMRC. You provide:
+
+1. **A config file** (`--config-path`) — the company's identity (name,
+   registration number, tax reference) and the accounts metadata
+   (directors, SIC codes, address, …).  Anything left out is filled in
+   automatically from the company's Companies House profile when an API
+   key is set.
+2. **Your books** (`--book`) — the GnuCash ledger (`input.gnucash`);
+
+See [tally-cli configuration](#tally-cli-configuration) for the
+flags, config, and defaults.
+
 
 ## Developer quickstart
 
@@ -63,9 +70,13 @@ flags, config-file keys and defaults.
    cargo test --workspace
    ```
 
-## Running the tests without any configuration
+## Testing
 
-The tests run fully offline out of the box:
+The tests run fully offline on first clone:
+
+   ```bash
+   cargo test --workspace
+   ```
 
 - The Companies House endpoints serve from hardcoded fictional mock responses in
   `libs/ixbrl/src/clients/test_utils.rs`;
@@ -75,8 +86,7 @@ The tests run fully offline out of the box:
   message is absent.
 
 So `cargo test -p ixbrl`, `cargo test -p ct600` and `cargo test --workspace` need no
-API key, no network and no cached responses on a fresh checkout. `cargo test -p tally-cli`
-currently has no tests.
+API key, no network and no cached responses on a fresh checkout. `cargo test -p tally-cli` covers the config-resolution pipeline (offline).
 
 ### Project structure
 
@@ -93,25 +103,33 @@ All the flags, config-file keys and defaults baked into the message are
 documented in the [tally-cli README](apps/tally-cli/README.md#configuration).
 In short:
 
-- every command-line flag is required and has no environment-variable fallback;
-- the company-identity fields in the config are **optional** — the name is
-  resolved from Companies House at runtime when an API key is configured (the
-  registration date too, when the config carries no identity details at all),
-  the company number falls back on `COMPANY_NUMBER`, and anything still
-  missing fails with a clear error listing the missing fields;
-- the Corporation Tax reference (UTR) comes from the `UNIQUE_TAXPAYER_REF`
-  environment variable (winning) or the config's `company.tax_reference`; the
-  return period cannot be resolved from Companies House and must always be in
-  the config file;
-- the flat accounts-metadata fields are all required (copy them from the
-  example config below).
+- `--config-path`, `--book` and `--out` are required; `--accounts-made-up-to`
+  is optional — the flags have no environment-variable fallback;
+- the company-identity fields in the config are **optional**, each with its
+  own default: the name is resolved from Companies House at runtime when an
+  API key is configured (the registration date too, when the config carries
+  no identity details at all), the company number falls back on
+  `COMPANY_NUMBER`, and anything still missing fails with a clear error
+  listing the missing fields;
+- the Corporation Tax reference (UTR) cannot be resolved from Companies
+  House: it comes from the `UNIQUE_TAXPAYER_REF` environment variable
+  (winning) or the config's `company.tax_reference`, so one of the two must
+  be present;
+- the return period is optional too: an explicit `accounting_period_start` +
+  `accounting_period_end` (given together) or an `accounts_made_up_to` date
+  in the config (or the `--accounts-made-up-to` flag) gives the period;
+  otherwise it defaults to the company's next accounting period to file,
+  resolved from the Companies House profile;
+- the flat accounts-metadata fields are all required and have no defaults
+  (copy them from the example config below).
 
 ### Example configs
 
-**With a Companies House API key** — the company block only needs the return
-period; the name and registration number are resolved from the company's
-profile at runtime (`COMPANY_NUMBER` provides the lookup number), and the UTR
-comes from `UNIQUE_TAXPAYER_REF`:
+**With a Companies House API key** — the company block can be nearly empty:
+the name, registration number and the next accounting period to file (the
+return period) are resolved from the company's profile at runtime
+(`COMPANY_NUMBER` provides the lookup number), and the UTR comes from
+`UNIQUE_TAXPAYER_REF`:
 
 ```bash
 export COMPANIES_HOUSE_API_KEY="your-api-key"   # or COMPANIES_HOUSE_API_KEY_TEST
