@@ -103,13 +103,13 @@ run).  Both are part of the **default-enabled** `api_tests` feature — plain
 ```bash
 export COMPANIES_HOUSE_API_KEY="your-api-key"             # or COMPANIES_HOUSE_SANDBOX_API_KEY
 export COMPANY_NUMBER="00000006"                          # a company that exists in the API you chose
-export UNIQUE_TAXPAYER_REF="8596148860"                   # needed by tally-cli's enrichment test
+export COMPANY_UNIQUE_TAXPAYER_REF="8596148860"                   # needed by tally-cli's enrichment test
 cargo test -p ct600
 cargo test -p tally-cli
 ```
 
 They only fetch data on first run, and cache it for the next runs.  (The
-tally-cli test additionally needs `UNIQUE_TAXPAYER_REF`: the Corporation
+tally-cli test additionally needs `COMPANY_UNIQUE_TAXPAYER_REF`: the Corporation
 Tax reference is never resolved from Companies House.)
 
 ### Project structure
@@ -136,7 +136,7 @@ In short:
   (winning) or `company.company_number`, and the first still-missing field
   fails with a clear error explaining how to resolve it;
 - the Corporation Tax reference (UTR) cannot be resolved from Companies
-  House: it comes from the `UNIQUE_TAXPAYER_REF` environment variable
+  House: it comes from the `COMPANY_UNIQUE_TAXPAYER_REF` environment variable
   (winning) or the config's `company.tax_reference`, so one of the two must
   be present;
 - the return period lives in the config's `accounts` sub-object and is
@@ -157,12 +157,12 @@ In short:
 required profile fields; the identity can be left out: the name, registration
 number and the next accounting period to file (the return period) are
 resolved from the company's profile at runtime (`COMPANY_NUMBER` provides
-the lookup number), and the UTR comes from `UNIQUE_TAXPAYER_REF`:
+the lookup number), and the UTR comes from `COMPANY_UNIQUE_TAXPAYER_REF`:
 
 ```bash
 export COMPANIES_HOUSE_API_KEY="your-api-key"   # or COMPANIES_HOUSE_SANDBOX_API_KEY
 export COMPANY_NUMBER=12345678
-export UNIQUE_TAXPAYER_REF=8596148860
+export COMPANY_UNIQUE_TAXPAYER_REF=8596148860
 ```
 
 <!--```json

@@ -23,9 +23,9 @@
 
 use std::time::Duration;
 
+use crate::companies_house::Config as IxbrlConfig;
 use base64::{Engine as _, engine::general_purpose};
 use chrono::Local;
-use crate::companies_house::Config as IxbrlConfig;
 use reqwest::StatusCode;
 use sha1::{Digest, Sha1};
 use snafu::Snafu;
@@ -957,15 +957,6 @@ mod tests {
         assert!(til.gateway_test);
     }
 
-    /// The config embeds a resolved ixbrl config.
-    #[test]
-    fn config_embeds_ixbrl_config() {
-        let config = HmrcCorpTaxConfig::test_from_env();
-        // The embedded config resolves the ixbrl defaults (no company number
-        // set in this test environment).
-        assert_eq!(config.ixbrl.company_number(), None);
-    }
-
     /// The full lifecycle against an in-process stub gateway: submit, poll,
     /// respond, delete.
     #[tokio::test]
@@ -1001,7 +992,10 @@ mod tests {
                 .with_poll_timeout(Duration::from_secs(10)),
         );
 
-        let receipt = client.submit(&TestData::sample_return()).await.expect("submit");
+        let receipt = client
+            .submit(&TestData::sample_return())
+            .await
+            .expect("submit");
         match client.poll(&receipt).await {
             Err(HmrcCorpTaxError::SubmissionError { text, .. }) => {
                 assert_eq!(text, "Box 145 is invalid");

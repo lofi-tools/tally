@@ -25,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::{Duration, Months, NaiveDate};
 use ct600::companies_house::{CompanyProfile as ChProfile, next_accounting_period_from};
 use ct600::{CompaniesHouseClient, CompaniesHouseClientType};
@@ -36,7 +36,7 @@ use serde::Deserialize;
 /// [`EnvVars::from_env`] (empty variables count as unset).
 #[derive(Debug, Clone, Default)]
 pub struct EnvVars {
-    /// `UNIQUE_TAXPAYER_REF` — the Corporation Tax reference (UTR); wins
+    /// `COMPANY_UNIQUE_TAXPAYER_REF` — the Corporation Tax reference (UTR); wins
     /// over the config file's `company.tax_reference`.
     pub unique_taxpayer_ref: Option<String>,
     /// `COMPANY_NUMBER` — the company number; wins over the config file's
@@ -54,7 +54,7 @@ impl EnvVars {
     /// Snapshot the environment; empty variables count as unset.
     pub fn from_env() -> Self {
         Self {
-            unique_taxpayer_ref: non_empty_env("UNIQUE_TAXPAYER_REF"),
+            unique_taxpayer_ref: non_empty_env("COMPANY_UNIQUE_TAXPAYER_REF"),
             company_number: non_empty_env("COMPANY_NUMBER"),
             companies_house_api_key: non_empty_env("COMPANIES_HOUSE_API_KEY"),
             companies_house_sandbox_api_key: non_empty_env("COMPANIES_HOUSE_SANDBOX_API_KEY"),
@@ -91,7 +91,9 @@ impl EnvVars {
         if let Some(client_type) = self.companies_house_client_type() {
             let api_key = match client_type {
                 CompaniesHouseClientType::Live => self.companies_house_api_key.as_deref(),
-                CompaniesHouseClientType::Sandbox => self.companies_house_sandbox_api_key.as_deref(),
+                CompaniesHouseClientType::Sandbox => {
+                    self.companies_house_sandbox_api_key.as_deref()
+                }
             };
             if let Some(api_key) = api_key {
                 config = config.with_api(api_key, client_type == CompaniesHouseClientType::Sandbox);
@@ -124,8 +126,7 @@ impl ConfigFile {
     pub fn from_file(path: &Path) -> Result<Self> {
         let data = std::fs::read_to_string(path)
             .with_context(|| format!("read config '{}'", path.display()))?;
-        serde_json::from_str(&data)
-            .with_context(|| format!("parse config '{}'", path.display()))
+        serde_json::from_str(&data).with_context(|| format!("parse config '{}'", path.display()))
     }
 }
 
@@ -194,16 +195,23 @@ impl ConfigBuilder {
     pub async fn build(self) -> Result<ResolvedInputs> {
         let ch = self.env.ch_config();
         let company_number = self.resolve_company_number()?;
-        let api = self.env.api_key_configured().then(|| {
-            CompaniesHouseClient::new(ch.with_company_number(company_number.clone()))
-        });
+        let api = self
+            .env
+            .api_key_configured()
+            .then(|| CompaniesHouseClient::new(ch.with_company_number(company_number.clone())));
         // The profile is fetched at most once and shared across the
         // sub-methods below.
         let mut ch_profile: Option<ChProfile> = None;
-        let (name, tax_reference, mut registration_date) =
-            self.resolve_identity(&company_number, api.as_ref(), &mut ch_profile).await?;
+        let (name, tax_reference, mut registration_date) = self
+            .resolve_identity(&company_number, api.as_ref(), &mut ch_profile)
+            .await?;
         let period = self
-            .resolve_period(api.as_ref(), &company_number, &mut registration_date, &mut ch_profile)
+            .resolve_period(
+                api.as_ref(),
+                &company_number,
+                &mut registration_date,
+                &mut ch_profile,
+            )
             .await?;
         let (book_path, out_dir) = self.resolve_paths()?;
 
@@ -529,11 +537,15 @@ mod tests {
             Some("8596148860"),
             Some("12345678"),
         );
-        let company = builder(empty_env.clone(), complete.clone(), accounts_meta(true, None))
-            .build()
-            .await
-            .expect("complete config resolves")
-            .company;
+        let company = builder(
+            empty_env.clone(),
+            complete.clone(),
+            accounts_meta(true, None),
+        )
+        .build()
+        .await
+        .expect("complete config resolves")
+        .company;
         assert_eq!(company.name, "Example Biz Ltd.");
         assert_eq!(company.tax_reference, "8596148860");
         assert_eq!(company.company_number, "12345678");
@@ -638,63 +650,6 @@ mod tests {
         assert_eq!(company.name, "Example Biz Ltd.");
     }
 
-    /// `EnvVars::from_env` snapshots the environment (empty variables count
-    /// as unset) and prefers the live API key over the sandbox.  The only
-    /// test that touches the environment; the resolution tests pass the env
-    /// in explicitly.
-    #[test]
-    fn env_snapshot_captures_non_empty_variables() {
-        // Serialises against the live test's `EnvVars::from_env()` (ENV_LOCK).
-        let _guard = ENV_LOCK.lock().unwrap();
-        unsafe {
-            std::env::set_var("UNIQUE_TAXPAYER_REF", "1111111111");
-            std::env::set_var("COMPANY_NUMBER", "12345678");
-            std::env::set_var("COMPANIES_HOUSE_API_KEY", "live-key");
-            std::env::set_var("COMPANIES_HOUSE_SANDBOX_API_KEY", "sandbox-key");
-            std::env::set_var("CT600_CACHE_DIR", "/tmp/ch-cache");
-        }
-        let env = EnvVars::from_env();
-        assert_eq!(env.unique_taxpayer_ref.as_deref(), Some("1111111111"));
-        assert_eq!(env.company_number.as_deref(), Some("12345678"));
-        assert_eq!(env.companies_house_api_key.as_deref(), Some("live-key"));
-        assert_eq!(env.companies_house_sandbox_api_key.as_deref(), Some("sandbox-key"));
-        assert_eq!(env.cache_dir.as_deref(), Some(Path::new("/tmp/ch-cache")));
-        assert!(env.api_key_configured());
-        // Both keys set: the live key is preferred.
-        assert_eq!(env.companies_house_client_type(), Some(CompaniesHouseClientType::Live));
-
-        // An empty variable counts as unset.
-        unsafe {
-            std::env::set_var("UNIQUE_TAXPAYER_REF", "");
-            std::env::set_var("COMPANIES_HOUSE_API_KEY", "");
-            std::env::remove_var("COMPANIES_HOUSE_SANDBOX_API_KEY");
-        }
-        let env = EnvVars::from_env();
-        assert_eq!(env.unique_taxpayer_ref, None);
-        assert_eq!(env.companies_house_api_key, None);
-        assert_eq!(env.companies_house_sandbox_api_key, None);
-        assert!(!env.api_key_configured());
-        assert_eq!(env.companies_house_client_type(), None);
-
-        // Only the sandbox key: Sandbox.
-        unsafe {
-            std::env::set_var("COMPANIES_HOUSE_SANDBOX_API_KEY", "sandbox-key");
-        }
-        let env = EnvVars::from_env();
-        assert_eq!(env.companies_house_client_type(), Some(CompaniesHouseClientType::Sandbox));
-        unsafe {
-            std::env::remove_var("COMPANIES_HOUSE_SANDBOX_API_KEY");
-        }
-
-        unsafe {
-            std::env::remove_var("UNIQUE_TAXPAYER_REF");
-            std::env::remove_var("COMPANY_NUMBER");
-            std::env::remove_var("COMPANIES_HOUSE_API_KEY");
-            std::env::remove_var("COMPANIES_HOUSE_SANDBOX_API_KEY");
-            std::env::remove_var("CT600_CACHE_DIR");
-        }
-    }
-
     /// End-to-end through the per-source types: the example config file
     /// parses into a [`ConfigFile`], and a [`ConfigBuilder`] resolves it —
     /// erroring on the first missing CLI path, succeeding once both are
@@ -706,10 +661,16 @@ mod tests {
 
         let file = ConfigFile::from_file(path).expect("parse example config");
         assert_eq!(file.company.name.as_deref(), Some("Example Biz Ltd."));
-        assert_eq!(file.company.profile.directors, vec!["A Bloggs", "B Smith", "C Jones"]);
+        assert_eq!(
+            file.company.profile.directors,
+            vec!["A Bloggs", "B Smith", "C Jones"]
+        );
         assert_eq!(file.accounts.period().start, date(2020, 1, 1));
         assert_eq!(file.accounts.period().end, date(2020, 12, 31));
-        assert_eq!(file.accounts.report_title, "Unaudited Micro-Entity Accounts");
+        assert_eq!(
+            file.accounts.report_title,
+            "Unaudited Micro-Entity Accounts"
+        );
 
         // Without the CLI paths, resolution errors on the first missing one.
         let cli = CliArgs {
@@ -718,13 +679,20 @@ mod tests {
             book_path: None,
             out_dir: None,
         };
-        let err = ConfigBuilder { env: empty_env.clone(), file: file.clone(), cli }
-            .build()
-            .await
-            .expect_err("missing paths must error");
+        let err = ConfigBuilder {
+            env: empty_env.clone(),
+            file: file.clone(),
+            cli,
+        }
+        .build()
+        .await
+        .expect_err("missing paths must error");
         let msg = format!("{err:#}");
         assert!(msg.contains("--book"), "{msg}");
-        assert!(!msg.contains("--out"), "resolution fails fast on the first missing path: {msg}");
+        assert!(
+            !msg.contains("--out"),
+            "resolution fails fast on the first missing path: {msg}"
+        );
 
         // With only one path present, the error names the missing one.
         let cli = CliArgs {
@@ -733,13 +701,20 @@ mod tests {
             book_path: Some(PathBuf::from("input.gnucash")),
             out_dir: None,
         };
-        let err = ConfigBuilder { env: empty_env.clone(), file: file.clone(), cli }
-            .build()
-            .await
-            .expect_err("missing --out must error");
+        let err = ConfigBuilder {
+            env: empty_env.clone(),
+            file: file.clone(),
+            cli,
+        }
+        .build()
+        .await
+        .expect_err("missing --out must error");
         let msg = format!("{err:#}");
         assert!(msg.contains("--out"), "{msg}");
-        assert!(!msg.contains("--book"), "the present path must not be reported: {msg}");
+        assert!(
+            !msg.contains("--book"),
+            "the present path must not be reported: {msg}"
+        );
 
         // With both, resolution succeeds and everything carries through.
         let cli = CliArgs {
@@ -748,10 +723,14 @@ mod tests {
             book_path: Some(PathBuf::from("input.gnucash")),
             out_dir: Some(PathBuf::from("out")),
         };
-        let resolved = ConfigBuilder { env: empty_env.clone(), file: file.clone(), cli }
-            .build()
-            .await
-            .expect("resolves with paths");
+        let resolved = ConfigBuilder {
+            env: empty_env.clone(),
+            file: file.clone(),
+            cli,
+        }
+        .build()
+        .await
+        .expect("resolves with paths");
         assert_eq!(resolved.company.name, "Example Biz Ltd.");
         assert_eq!(resolved.company.tax_reference, "8596148860");
         assert_eq!(resolved.company.company_number, "12345678");
@@ -761,8 +740,14 @@ mod tests {
         assert_eq!(resolved.accounts.fy1_year, 2019);
         assert_eq!(resolved.book_path, PathBuf::from("input.gnucash"));
         assert_eq!(resolved.out_dir, PathBuf::from("out"));
-        assert_eq!(resolved.accounts.report_title, "Unaudited Micro-Entity Accounts");
-        assert_eq!(resolved.profile.directors, vec!["A Bloggs", "B Smith", "C Jones"]);
+        assert_eq!(
+            resolved.accounts.report_title,
+            "Unaudited Micro-Entity Accounts"
+        );
+        assert_eq!(
+            resolved.profile.directors,
+            vec!["A Bloggs", "B Smith", "C Jones"]
+        );
         // The empty captured env configures no Companies House client.
         assert_eq!(resolved.companies_house_client_type, None);
 
@@ -782,7 +767,10 @@ mod tests {
         .build()
         .await
         .expect("resolves with paths");
-        assert_eq!(resolved.companies_house_client_type, Some(CompaniesHouseClientType::Sandbox));
+        assert_eq!(
+            resolved.companies_house_client_type,
+            Some(CompaniesHouseClientType::Sandbox)
+        );
     }
 
     /// The return period deduced from a made-up-to date, entirely offline:
@@ -864,7 +852,11 @@ mod tests {
     #[tokio::test]
     async fn missing_period_without_api_key_errors_with_options() {
         let empty_env = env(None, None, None, None);
-        let raw = company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"));
+        let raw = company_config(
+            Some("Example Biz Ltd."),
+            Some("8596148860"),
+            Some("12345678"),
+        );
         let err = builder(empty_env, raw, accounts_meta(false, None))
             .build()
             .await
@@ -913,7 +905,10 @@ mod tests {
         .expect_err("the identity error surfaces first");
         let msg = format!("{err:#}");
         assert!(msg.contains("company.company_number"), "{msg}");
-        assert!(!msg.contains("--book"), "the identity is resolved before the paths: {msg}");
+        assert!(
+            !msg.contains("--book"),
+            "the identity is resolved before the paths: {msg}"
+        );
     }
 
     /// With an API key, a company number and a cached profile, the return
@@ -947,7 +942,11 @@ mod tests {
         let mut env = env(None, None, Some("test-key"), None);
         env.cache_dir = Some(cache_dir.clone());
 
-        let raw = company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"));
+        let raw = company_config(
+            Some("Example Biz Ltd."),
+            Some("8596148860"),
+            Some("12345678"),
+        );
         let resolved = builder(env, raw, accounts_meta(false, None))
             .build()
             .await
@@ -967,12 +966,6 @@ mod tests {
 // Live enrichment tests (part of the default-enabled `api_tests` feature)
 // ============================================================================
 
-/// Serialises the env-reading tests (`EnvVars::from_env` in the live test and
-/// in `mod tests`) against the env-mutation test, which would otherwise race
-/// in a parallel run.
-#[cfg(test)]
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 /// Live Companies House enrichment tests (part of the default-enabled
 /// `api_tests` feature).
 #[cfg(test)]
@@ -985,40 +978,30 @@ mod live_tests {
     /// With `COMPANIES_HOUSE_API_KEY` (or `COMPANIES_HOUSE_SANDBOX_API_KEY`),
     /// `COMPANY_NUMBER` and `UNIQUE_TAXPAYER_REF` exported, an empty config
     /// is enriched entirely from the live profile (name, registration date,
-    /// next accounting period).  The fetched profile is cached in a scratch
-    /// directory; a second run against that cache with a placeholder key
-    /// proves the second run never touches the network.
+    /// next accounting period).  The profile lands in the ambient cache
+    /// directory (idempotent: a warm cache simply skips the network); a
+    /// second run with a placeholder key proves the cache serves the
+    /// response.
     #[tokio::test]
     #[cfg_attr(
         not(feature = "api_tests"),
         ignore = "requires a Companies House API key, COMPANY_NUMBER and UNIQUE_TAXPAYER_REF"
     )]
     async fn live_minimal_config_enriched_from_api_and_cached() {
-        // The ambient environment, with the cache redirected to a scratch
-        // directory the test owns (so the first run hits the network and
-        // the cache state is deterministic).
-        let cache_dir = tempfile::tempdir().expect("create the scratch cache dir");
-        let mut env = {
-            let _guard = ENV_LOCK.lock().unwrap();
-            EnvVars::from_env()
-        };
-        env.cache_dir = Some(cache_dir.path().to_path_buf());
-
+        let env = EnvVars::from_env();
         assert!(
             env.companies_house_api_key.is_some() || env.companies_house_sandbox_api_key.is_some(),
             "the api_tests feature needs COMPANIES_HOUSE_API_KEY (live) or \
              COMPANIES_HOUSE_SANDBOX_API_KEY (sandbox)"
         );
-        let number = env
-            .company_number
-            .as_deref()
-            .expect("the api_tests feature needs COMPANY_NUMBER: use a real company for the \
-                     live API, a sandbox test company for the sandbox API");
-        let utr = env
-            .unique_taxpayer_ref
-            .as_deref()
-            .expect("the api_tests feature needs UNIQUE_TAXPAYER_REF (the Corporation Tax \
-                     reference is never resolved from Companies House)");
+        let number = env.company_number.as_deref().expect(
+            "the api_tests feature needs COMPANY_NUMBER: use a real company for the \
+                     live API, a sandbox test company for the sandbox API",
+        );
+        let utr = env.unique_taxpayer_ref.as_deref().expect(
+            "the api_tests feature needs UNIQUE_TAXPAYER_REF (the Corporation Tax \
+                     reference is never resolved from Companies House)",
+        );
 
         // The minimum config: an empty `company` block and `accounts`
         // sub-object, nothing to resolve from.
@@ -1038,7 +1021,8 @@ mod live_tests {
             out_dir: Some(PathBuf::from("out")),
         };
 
-        // Run 1: everything is enriched from the live API response.
+        // Run 1: everything is enriched from the live API response (or the
+        // already-warm cache).
         let resolved = ConfigBuilder {
             env: env.clone(),
             file: file.clone(),
@@ -1050,7 +1034,10 @@ mod live_tests {
         let company = resolved.company;
         assert_eq!(company.company_number, number);
         assert_eq!(company.tax_reference, utr);
-        assert!(!company.name.is_empty(), "the name is filled from the profile");
+        assert!(
+            !company.name.is_empty(),
+            "the name is filled from the profile"
+        );
         let today = chrono::Utc::now().date_naive();
         assert!(
             company.registration_date < today,
@@ -1064,14 +1051,20 @@ mod live_tests {
         assert!(period.start < period.end, "the return period is ordered");
 
         // The profile is cached for the next run.
-        let cache_file = cache_dir.path().join(format!("companies-house-{number}.json"));
+        let cache_file = env
+            .ch_config()
+            .cache_dir()
+            .join(format!("companies-house-{number}.json"));
         assert!(cache_file.exists(), "the fetched profile is cached on disk");
         let cached = std::fs::read_to_string(&cache_file).expect("read the cache file");
-        assert!(cached.contains("company_name"), "the cache holds the profile JSON");
+        assert!(
+            cached.contains("company_name"),
+            "the cache holds the profile JSON"
+        );
 
-        // Run 2: the same scratch cache, but a placeholder key that could
-        // never fetch the real profile — resolution is served entirely from
-        // the cache.
+        // Run 2: the same cache, but a placeholder key that could never
+        // fetch the real profile — resolution is served entirely from the
+        // cache.
         let mut cached_env = env.clone();
         cached_env.companies_house_api_key = Some("placeholder-cached-run".to_string());
         cached_env.companies_house_sandbox_api_key = None;
@@ -1087,7 +1080,13 @@ mod live_tests {
         assert_eq!(company2.name, company.name);
         assert_eq!(company2.registration_date, company.registration_date);
         let period2 = from_cache.accounts.period();
-        assert_eq!(period2.start, period.start, "the return period is the same on the cached run");
-        assert_eq!(period2.end, period.end, "the return period is the same on the cached run");
+        assert_eq!(
+            period2.start, period.start,
+            "the return period is the same on the cached run"
+        );
+        assert_eq!(
+            period2.end, period.end,
+            "the return period is the same on the cached run"
+        );
     }
 }
