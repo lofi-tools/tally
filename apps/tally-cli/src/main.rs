@@ -11,20 +11,20 @@
 //! * `--config-path` — a JSON config file describing the company and the
 //!   accounts (same shape as
 //!   `libs/ixbrl/example_data/example2/input_config.json`: a nested
-//!   `company` identity + profile block and an `accounts` sub-object).  The
-//!   file becomes a [`config::FileConfig`]
-//!   and is merged with the captured environment ([`config::RawEnvConfig`])
-//!   and the subcommand's CLI values into a [`config::ResolvedConfig`] by
-//!   [`config::Ct600Config::resolve`]: every identity field is optional —
-//!   the company name is resolved from Companies House at runtime when an
-//!   API key is configured (the registration date too, when the config
-//!   carries no identity details at all), the company number falls back on
-//!   `COMPANY_NUMBER`, the Corporation Tax reference (UTR) comes from
-//!   `UNIQUE_TAXPAYER_REF` (winning) or `company.tax_reference`, the return
-//!   period is the config's `accounts.period` or is deduced from
-//!   `--accounts-made-up-to`, defaulting to the next accounting period from
-//!   Companies House, and anything still missing is reported clearly (see
-//!   [`config`]);
+//!   `company` identity + profile block and an `accounts` sub-object).  A
+//!   [`config::ConfigBuilder`] loads it with the captured environment
+//!   ([`config::EnvVars`]) and the subcommand's CLI values
+//!   ([`config::CliArgs`]) and resolves them into a strict
+//!   [`config::ResolvedInputs`]: every identity field is optional — the
+//!   company name is resolved from Companies House at runtime when an API
+//!   key is configured (the registration date too, when the config carries
+//!   no identity details at all), the company number comes from
+//!   `COMPANY_NUMBER` (winning) or `company.company_number`, the Corporation
+//!   Tax reference (UTR) comes from `UNIQUE_TAXPAYER_REF` (winning) or
+//!   `company.tax_reference`, the return period is the config's
+//!   `accounts.period` or is deduced from `--accounts-made-up-to`, defaulting
+//!   to the next accounting period from Companies House, and the first
+//!   still-missing input errors with how to resolve it (see [`config`]);
 //! * `--book` — the GnuCash ledger (`input.gnucash`);
 //! * `--out` — the output directory; the CT600 GovTalk message is written
 //!   to `<out>/ct600.xml`.
@@ -35,7 +35,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use chrono::NaiveDate;
-use config::{Ct600Config, RawEnvConfig};
+use config::{CliArgs, ConfigBuilder};
 use ct600::{CompaniesHouseClientType, Ct600Return};
 use ixbrl::reports::uk_frs105_accounts::Frs105Accounts;
 use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
@@ -73,13 +73,13 @@ impl Command {
     }
 }
 
-/// Parse the `ct600` flags into the subcommand's [`Ct600Config`].
+/// Parse the `ct600` flags into the subcommand's [`CliArgs`].
 ///
 /// `--config-path` is required here (the config file cannot be read without
 /// it); `--book` and `--out` are optional because the resolution stage
-/// ([`config::Ct600Config::resolve`]) is what reports them missing, alongside
+/// ([`config::ConfigBuilder::build`]) is what reports them missing, alongside
 /// any other still-unresolved config.
-fn parse_ct600_args() -> Result<Ct600Config> {
+fn parse_ct600_args() -> Result<CliArgs> {
     let mut rest = std::env::args().skip(2); // skip program + subcommand
     let mut config_path = None;
     let mut accounts_made_up_to = None;
@@ -100,7 +100,7 @@ fn parse_ct600_args() -> Result<Ct600Config> {
         }
     }
 
-    Ok(Ct600Config {
+    Ok(CliArgs {
         config_path: config_path.context("missing --config-path")?,
         accounts_made_up_to,
         book_path,
@@ -154,12 +154,13 @@ fn next_date(rest: &mut impl Iterator<Item = String>, flag: &str) -> Result<Naiv
 }
 
 /// The `ct600` subcommand: config + GnuCash book -> CT600 message.
-async fn run_ct600(args: Ct600Config) -> Result<()> {
-    // Parse and enrich the subcommand's inputs: the company identity is
-    // resolved from the config file, the captured environment, and Companies
-    // House; anything still missing errors with an explanation (see
-    // `config`).
-    let resolved = args.resolve(&RawEnvConfig::from_env()).await?;
+async fn run_ct600(args: CliArgs) -> Result<()> {
+    // Load the subcommand's inputs (the environment and the config file,
+    // with the CLI values taking precedence) and resolve them: the company
+    // identity and return period are enriched from Companies House when a
+    // client is configured; anything still missing errors with an
+    // explanation (see `config`).
+    let resolved = ConfigBuilder::from_cli(args)?.build().await?;
 
     // Print the resolved values for this run.
     println!("resolved: company '{}'", resolved.company.name);

@@ -132,9 +132,9 @@ In short:
 - the company-identity fields in the config are **optional**, each with its
   own default: the name is resolved from Companies House at runtime when an
   API key is configured (the registration date too, when the config carries
-  no identity details at all), the company number falls back on
-  `COMPANY_NUMBER`, and anything still missing fails with a clear error
-  listing the missing fields;
+  no identity details at all), the company number comes from `COMPANY_NUMBER`
+  (winning) or `company.company_number`, and the first still-missing field
+  fails with a clear error explaining how to resolve it;
 - the Corporation Tax reference (UTR) cannot be resolved from Companies
   House: it comes from the `UNIQUE_TAXPAYER_REF` environment variable
   (winning) or the config's `company.tax_reference`, so one of the two must

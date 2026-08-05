@@ -58,7 +58,7 @@ A JSON file with the same shape as
 |-----|------|---------|
 | `company.name` | string (optional) | resolved from Companies House when an API key is configured |
 | `company.tax_reference` | string (required) | `UNIQUE_TAXPAYER_REF` environment variable wins when set; it cannot be resolved from Companies House, so one of the two must be present |
-| `company.company_number` | string (optional) | `COMPANY_NUMBER` environment variable |
+| `company.company_number` | string (optional) | `COMPANY_NUMBER` environment variable wins when set |
 | `company.directors`, `company.contact_name`, `company.address_lines`, `company.email`, `company.accountant_name`, `company.auditor_name`, ... | required | — |
 | `company.logo_b64` | string (optional) | none — the logo is only embedded on the title page when present |
 | `accounts.period.start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts.accounts_made_up_to` or the Companies House next period |
@@ -101,8 +101,8 @@ can be built:
   the **registration date** is filled in too, but only when the config
   carries no identity details at all (so the accounting periods are not
   skewed by partial inputs);
-- the **company number** comes from `company.company_number`, falling back
-  on the `COMPANY_NUMBER` environment variable;
+- the **company number** comes from the `COMPANY_NUMBER` environment
+  variable (which wins) or the config's `company.company_number`;
 - the **Corporation Tax reference (UTR)** cannot be resolved from Companies
   House: it comes from the `UNIQUE_TAXPAYER_REF` environment variable
   (which wins) or the config's `company.tax_reference`, so one of the two
@@ -116,13 +116,11 @@ can be built:
   profile (`CompaniesHouseClient::next_accounting_period`), which needs an
   API key and company number.
 
-If the resolved identity is still incomplete, the command fails with a
-message listing every missing field and how to resolve it, e.g.:
+If the resolved identity is incomplete, the command fails on the first
+missing field, explaining that problem and how to resolve it, e.g.:
 
 ```text
-error: cannot resolve the company from config 'config.json': 2 fields are still missing
-  - company.name: no Companies House API key is set, so it cannot be resolved from Companies House (set COMPANIES_HOUSE_API_KEY or COMPANIES_HOUSE_SANDBOX_API_KEY)
-  - company.tax_reference: the Corporation Tax reference (UTR) cannot be resolved from Companies House; set the UNIQUE_TAXPAYER_REF environment variable or add company.tax_reference to the config file
+error: cannot resolve the config from 'config.json': company.name is missing — no Companies House API key is set, so it cannot be resolved from Companies House (set COMPANIES_HOUSE_API_KEY or COMPANIES_HOUSE_SANDBOX_API_KEY), or add company.name to the config file
 ```
 
 ### Environment variables
