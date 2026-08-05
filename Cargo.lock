@@ -1136,14 +1136,11 @@ name = "ixbrl"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "log",
  "quick-xml 0.37.5",
- "reqwest",
  "rucash",
  "serde",
  "serde_json",
  "snafu",
- "tempfile",
  "tokio",
 ]
 

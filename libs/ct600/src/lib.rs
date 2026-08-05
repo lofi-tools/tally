@@ -5,9 +5,9 @@
 //! and the HTTP client ([`clients::hmrc_corp_tax`]) that runs the full
 //! Document Submission Protocol lifecycle (submit, poll, delete) against the
 //! External Test Service, the live service, or a Test-in-live submission.
-//! The Companies House client, its layered [`Config`] and the company
-//! resolution chain live in `ixbrl::clients`; this crate adds the
-//! CT600-specific adapters ([`companies_house`]).
+//! The Companies House client, its layered [`Config`], the company
+//! resolution chain and the CT600-specific adapters all live in
+//! [`companies_house`].
 
 pub mod clients;
 pub use clients::{
@@ -15,8 +15,9 @@ pub use clients::{
     SubmissionReceipt,
 };
 pub mod companies_house;
-pub use ixbrl::clients::{
-    ApiResult, CompaniesHouseClient, CompaniesHouseError, CompanyProfile, CompanyType, Config,
+pub use companies_house::{
+    ApiResult, CompaniesHouseClient, CompaniesHouseClientType, CompaniesHouseError, CompanyProfile,
+    CompanyType, Config,
 };
 pub mod ct600_return;
 pub use ct600_return::Ct600Return;

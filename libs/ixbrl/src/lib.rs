@@ -2,7 +2,6 @@ use std::fmt;
 
 use snafu::Snafu;
 
-pub mod clients;
 pub mod company;
 pub mod ixbrl_fmt;
 pub mod reports {

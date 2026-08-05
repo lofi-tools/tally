@@ -2,10 +2,10 @@
 //! Test utilities for the ct600 crate.
 //!
 //! The company fixtures and offline test clients live in
-//! `ixbrl::clients::test_utils`; [`sample_values`] derives the CT600 form
-//! values from the shared sample tax computation and [`TestData`] hosts the
-//! hardcoded fixtures for the HMRC client tests (a sample return and a test
-//! config), so tests run with zero configuration on a fresh checkout.
+//! `crate::companies_house::test_utils`; [`sample_values`] derives the CT600
+//! form values from the shared sample tax computation and [`TestData`] hosts
+//! the hardcoded fixtures for the HMRC client tests (a sample return and a
+//! test config), so tests run with zero configuration on a fresh checkout.
 
 use crate::clients::HmrcCorpTaxConfig;
 use crate::clients::hmrc_corp_tax::CLASS_LIVE;
@@ -21,9 +21,9 @@ use crate::govtalk::{
 use chrono::NaiveDate;
 
 /// The CT600 form values derived from the shared sample tax computation
-/// (`ixbrl::clients::test_utils::TestData::sample_tax`).
+/// (`crate::companies_house::test_utils::TestData::sample_tax`).
 pub fn sample_values() -> Ct600FormValues {
-    Ct600FormValues::from_tax(&ixbrl::clients::test_utils::TestData::sample_tax())
+    Ct600FormValues::from_tax(&crate::companies_house::test_utils::TestData::sample_tax())
 }
 
 /// Hardcoded test data for the HMRC Corporation Tax client tests.

@@ -78,23 +78,46 @@ The tests run fully offline on first clone:
    cargo test --workspace
    ```
 
-- The Companies House endpoints serve from hardcoded fictional mock responses in
-  `libs/ixbrl/src/clients/test_utils.rs`;
-- The HMRC Corporation Tax client is tested against an in-process GovTalk stub gateway
-  in `libs/ct600/src/test_utils.rs`;
-- `libs/ct600`'s reference comparison skips gracefully when the cached reference
-  message is absent.
-
 So `cargo test -p ixbrl`, `cargo test -p ct600` and `cargo test --workspace` need no
 API key, no network and no cached responses on a fresh checkout. `cargo test -p tally-cli` covers the config-resolution pipeline (offline).
+
+### Testing with a Companies House API key
+
+The suite runs fully offline on a fresh clone: the tests that hit the live
+Companies House API live in `libs/ct600/src/companies_house.rs` (the
+`live_tests` module) and are **ignored by default** — `cargo test` reports
+them with the reason "requires a Companies House API key".  Run them
+explicitly with the `api_tests` feature:
+
+```bash
+export COMPANIES_HOUSE_API_KEY="your-api-key"             # live API
+# or
+export COMPANIES_HOUSE_SANDBOX_API_KEY="your-api-key"     # sandbox API
+export COMPANY_NUMBER="00000006"                          # a company that exists in the API you chose
+cargo test -p ct600 --features api_tests
+```
+
+With the feature enabled but the key (or `COMPANY_NUMBER`) missing, those
+tests fail with a clear message — so a fresh clone never needs a key, and
+a keyed run never silently skips.  (The `tally` CLI also accepts the sandbox
+key: see the example configs below.)
+
+The shared test client (`ct600::companies_house::test_utils::TestClient`)
+likewise falls back on the live API when a key is set: it serves from the
+local cache first, then the hardcoded fixtures, then the live API — caching
+each fetched profile under `.cache/api_responses/`, so the first run hits the
+network and later runs serve from the cache.  This is also what lets the
+`tally` CLI resolve a real company's name, registration date and next
+accounting period at runtime. The HMRC Corporation Tax tests always use
+the in-process GovTalk stub, so no HMRC credentials are ever needed.
 
 ### Project structure
 
 | Crate | Stage | Purpose |
 |-------|-------|---------|
 | [`apps/tally-cli`](apps/tally-cli/README.md) | 3–4 | CLI  for the libraries: `tally ct600` produces the CT600 message from a config file + GnuCash book (no submission yet) |
-| `libs/ixbrl` | 1, 3 | GnuCash parser + FRS-105 (micro-entity) iXBRL reports + Companies House client / company resolution (`ixbrl::clients`) |
-| `libs/ct600` | 4 | HMRC GovTalk XML message builder/parser for CT600 submission |
+| `libs/ixbrl` | 1, 3 | GnuCash parser + FRS-105 (micro-entity) iXBRL reports |
+| `libs/ct600` | 4 | HMRC GovTalk XML message builder/parser for CT600 submission + Companies House client / company resolution (`companies_house`) |
 
 
 ## tally-cli configuration
@@ -132,7 +155,7 @@ return period) are resolved from the company's profile at runtime
 `UNIQUE_TAXPAYER_REF`:
 
 ```bash
-export COMPANIES_HOUSE_API_KEY="your-api-key"   # or COMPANIES_HOUSE_API_KEY_TEST
+export COMPANIES_HOUSE_API_KEY="your-api-key"   # or COMPANIES_HOUSE_SANDBOX_API_KEY
 export COMPANY_NUMBER=12345678
 export UNIQUE_TAXPAYER_REF=8596148860
 ```

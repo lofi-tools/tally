@@ -35,7 +35,7 @@
 //! | `company.accounting_period_start` / `end` | config file (both together) → deduced from `accounts_made_up_to` / `--accounts-made-up-to` (the 12 months ending on that date) → Companies House next accounting period |
 //! | `company.accounts_made_up_to` / `--accounts-made-up-to` | command line (flag) → config file; deduces the return period as the 12 months ending on the date |
 //! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default (period start) |
-//! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_API_KEY_TEST` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
+//! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
 //! | `metadata.*` | config file only |
 //! | `--book`, `--out` | command line only |
 
@@ -43,7 +43,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, Months, NaiveDate};
-use ixbrl::clients::{CompaniesHouseClient, CompaniesHouseClientType};
+use ct600::{CompaniesHouseClient, CompaniesHouseClientType};
 use ixbrl::company::Company;
 use ixbrl::reports::uk_frs105_accounts::AccountsMetadata;
 use serde::Deserialize;
@@ -64,8 +64,8 @@ pub struct RawEnvConfig {
     pub company_number: Option<String>,
     /// `COMPANIES_HOUSE_API_KEY` — the live Companies House API key.
     pub companies_house_api_key: Option<String>,
-    /// `COMPANIES_HOUSE_API_KEY_TEST` — the sandbox Companies House API key.
-    pub companies_house_api_key_test: Option<String>,
+    /// `COMPANIES_HOUSE_SANDBOX_API_KEY` — the sandbox Companies House API key.
+    pub companies_house_sandbox_api_key: Option<String>,
     /// `CT600_CACHE_DIR` — the Companies House response-cache directory.
     pub cache_dir: Option<PathBuf>,
 }
@@ -78,19 +78,19 @@ impl RawEnvConfig {
             unique_taxpayer_ref: non_empty_env("UNIQUE_TAXPAYER_REF"),
             company_number: non_empty_env("COMPANY_NUMBER"),
             companies_house_api_key: non_empty_env("COMPANIES_HOUSE_API_KEY"),
-            companies_house_api_key_test: non_empty_env("COMPANIES_HOUSE_API_KEY_TEST"),
+            companies_house_sandbox_api_key: non_empty_env("COMPANIES_HOUSE_SANDBOX_API_KEY"),
             cache_dir: non_empty_env("CT600_CACHE_DIR").map(PathBuf::from),
         }
     }
 
     /// Which Companies House API the config will use: the live key
     /// (`COMPANIES_HOUSE_API_KEY`) preferred over the sandbox key
-    /// (`COMPANIES_HOUSE_API_KEY_TEST`), matching
-    /// `ixbrl::clients::Config::from_env`.  `None` when no key is set.
+    /// (`COMPANIES_HOUSE_SANDBOX_API_KEY`), matching
+    /// `ct600::Config::from_env`.  `None` when no key is set.
     pub fn companies_house_client_type(&self) -> Option<CompaniesHouseClientType> {
         if self.companies_house_api_key.is_some() {
             Some(CompaniesHouseClientType::Live)
-        } else if self.companies_house_api_key_test.is_some() {
+        } else if self.companies_house_sandbox_api_key.is_some() {
             Some(CompaniesHouseClientType::Sandbox)
         } else {
             None
@@ -104,11 +104,11 @@ impl RawEnvConfig {
 
     /// The Companies House client configuration resolved from the captured
     /// values alone (never re-reads the environment).
-    pub fn ch_config(&self) -> ixbrl::clients::Config {
+    pub fn ch_config(&self) -> ct600::Config {
         // `Config::default()` carries no API layer; the company number and
         // cache dir are overridden with the captured values so the ambient
         // environment cannot leak in.
-        let mut config = ixbrl::clients::Config::default()
+        let mut config = ct600::Config::default()
             .with_company_number(self.company_number.clone().unwrap_or_default());
         if let Some(cache_dir) = &self.cache_dir {
             config = config.with_cache_dir(cache_dir.clone());
@@ -116,7 +116,7 @@ impl RawEnvConfig {
         if let Some(client_type) = self.companies_house_client_type() {
             let api_key = match client_type {
                 CompaniesHouseClientType::Live => self.companies_house_api_key.as_deref(),
-                CompaniesHouseClientType::Sandbox => self.companies_house_api_key_test.as_deref(),
+                CompaniesHouseClientType::Sandbox => self.companies_house_sandbox_api_key.as_deref(),
             };
             if let Some(api_key) = api_key {
                 config = config.with_api(api_key, client_type == CompaniesHouseClientType::Sandbox);
@@ -292,7 +292,7 @@ struct ResolvedCompanyInputs {
 /// The company number comes from `company.company_number`, falling back on
 /// the environment's `COMPANY_NUMBER` ([`RawEnvConfig::company_number`]).
 /// When a Companies House API key is configured
-/// ([`RawEnvConfig::companies_house_api_key`] / `_test`) and the company name
+/// ([`RawEnvConfig::companies_house_api_key`] / `_sandbox_api_key`) and the company name
 /// is absent, the profile for that number is fetched (cache-first) and the
 /// name and registration date are filled in from it.  A complete identity is
 /// never looked up, and with no API key no lookup happens at all.
@@ -418,7 +418,7 @@ async fn resolve_company_inputs(
                     .to_string()
             } else {
                 "no Companies House API key is set, so it cannot be resolved from Companies House \
-                 (set COMPANIES_HOUSE_API_KEY or COMPANIES_HOUSE_API_KEY_TEST), or add \
+                 (set COMPANIES_HOUSE_API_KEY or COMPANIES_HOUSE_SANDBOX_API_KEY), or add \
                  company.name to the config file"
                     .to_string()
             },
@@ -451,7 +451,7 @@ async fn resolve_company_inputs(
                 .to_string()
         } else {
             "the return period cannot be resolved from Companies House without an API key; \
-             set COMPANIES_HOUSE_API_KEY (or COMPANIES_HOUSE_API_KEY_TEST), or add \
+             set COMPANIES_HOUSE_API_KEY (or COMPANIES_HOUSE_SANDBOX_API_KEY), or add \
              accounting_period_start + accounting_period_end (or \
              company.accounts_made_up_to) to the config file"
                 .to_string()
@@ -542,13 +542,13 @@ mod tests {
         utr: Option<&str>,
         company_number: Option<&str>,
         api_key: Option<&str>,
-        api_key_test: Option<&str>,
+        sandbox_api_key: Option<&str>,
     ) -> RawEnvConfig {
         RawEnvConfig {
             unique_taxpayer_ref: utr.map(str::to_string),
             company_number: company_number.map(str::to_string),
             companies_house_api_key: api_key.map(str::to_string),
-            companies_house_api_key_test: api_key_test.map(str::to_string),
+            companies_house_sandbox_api_key: sandbox_api_key.map(str::to_string),
             cache_dir: None,
         }
     }
@@ -678,14 +678,14 @@ mod tests {
             std::env::set_var("UNIQUE_TAXPAYER_REF", "1111111111");
             std::env::set_var("COMPANY_NUMBER", "12345678");
             std::env::set_var("COMPANIES_HOUSE_API_KEY", "live-key");
-            std::env::set_var("COMPANIES_HOUSE_API_KEY_TEST", "sandbox-key");
+            std::env::set_var("COMPANIES_HOUSE_SANDBOX_API_KEY", "sandbox-key");
             std::env::set_var("CT600_CACHE_DIR", "/tmp/ch-cache");
         }
         let env = RawEnvConfig::from_env();
         assert_eq!(env.unique_taxpayer_ref.as_deref(), Some("1111111111"));
         assert_eq!(env.company_number.as_deref(), Some("12345678"));
         assert_eq!(env.companies_house_api_key.as_deref(), Some("live-key"));
-        assert_eq!(env.companies_house_api_key_test.as_deref(), Some("sandbox-key"));
+        assert_eq!(env.companies_house_sandbox_api_key.as_deref(), Some("sandbox-key"));
         assert_eq!(env.cache_dir.as_deref(), Some(Path::new("/tmp/ch-cache")));
         assert!(env.api_key_configured());
         // Both keys set: the live key is preferred.
@@ -695,30 +695,30 @@ mod tests {
         unsafe {
             std::env::set_var("UNIQUE_TAXPAYER_REF", "");
             std::env::set_var("COMPANIES_HOUSE_API_KEY", "");
-            std::env::remove_var("COMPANIES_HOUSE_API_KEY_TEST");
+            std::env::remove_var("COMPANIES_HOUSE_SANDBOX_API_KEY");
         }
         let env = RawEnvConfig::from_env();
         assert_eq!(env.unique_taxpayer_ref, None);
         assert_eq!(env.companies_house_api_key, None);
-        assert_eq!(env.companies_house_api_key_test, None);
+        assert_eq!(env.companies_house_sandbox_api_key, None);
         assert!(!env.api_key_configured());
         assert_eq!(env.companies_house_client_type(), None);
 
         // Only the sandbox key: Sandbox.
         unsafe {
-            std::env::set_var("COMPANIES_HOUSE_API_KEY_TEST", "sandbox-key");
+            std::env::set_var("COMPANIES_HOUSE_SANDBOX_API_KEY", "sandbox-key");
         }
         let env = RawEnvConfig::from_env();
         assert_eq!(env.companies_house_client_type(), Some(CompaniesHouseClientType::Sandbox));
         unsafe {
-            std::env::remove_var("COMPANIES_HOUSE_API_KEY_TEST");
+            std::env::remove_var("COMPANIES_HOUSE_SANDBOX_API_KEY");
         }
 
         unsafe {
             std::env::remove_var("UNIQUE_TAXPAYER_REF");
             std::env::remove_var("COMPANY_NUMBER");
             std::env::remove_var("COMPANIES_HOUSE_API_KEY");
-            std::env::remove_var("COMPANIES_HOUSE_API_KEY_TEST");
+            std::env::remove_var("COMPANIES_HOUSE_SANDBOX_API_KEY");
             std::env::remove_var("CT600_CACHE_DIR");
         }
     }

@@ -3,6 +3,14 @@ name = "ct600"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Live Companies House API integration tests (in `src/companies_house.rs`,
+# the `live_tests` module).  Off by default so `cargo test` runs fully
+# offline on a fresh clone; enable with
+# `cargo test -p ct600 --features api_tests` to run the tests that hit
+# the real (or sandbox) API (needs a key + `COMPANY_NUMBER`).
+api_tests = []
+
 [dependencies]
 # async, web
 tokio = { workspace = true, features = ["full"] }

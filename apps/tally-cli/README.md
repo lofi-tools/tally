@@ -86,7 +86,7 @@ be complete before the return can be built:
 
 - the **company name** is filled in from the company's Companies House
   profile when an API key is configured (`COMPANIES_HOUSE_API_KEY`, or
-  `COMPANIES_HOUSE_API_KEY_TEST` for the sandbox) — the lookup is
+  `COMPANIES_HOUSE_SANDBOX_API_KEY` for the sandbox) — the lookup is
   cache-first and never happens for a config that already names the company;
   the **registration date** is filled in too, but only when the config
   carries no identity details at all (so the accounting periods are not
@@ -111,7 +111,7 @@ message listing every missing field and how to resolve it, e.g.:
 
 ```text
 error: cannot resolve the company from config 'config.json': 2 fields are still missing
-  - company.name: no Companies House API key is set, so it cannot be resolved from Companies House (set COMPANIES_HOUSE_API_KEY or COMPANIES_HOUSE_API_KEY_TEST)
+  - company.name: no Companies House API key is set, so it cannot be resolved from Companies House (set COMPANIES_HOUSE_API_KEY or COMPANIES_HOUSE_SANDBOX_API_KEY)
   - company.tax_reference: the Corporation Tax reference (UTR) cannot be resolved from Companies House; set the UNIQUE_TAXPAYER_REF environment variable or add company.tax_reference to the config file
 ```
 
@@ -121,10 +121,10 @@ Producing the CT600 needs the Corporation Tax reference, which comes from
 `UNIQUE_TAXPAYER_REF` (winning) or the config's `company.tax_reference`.  The
 underlying libraries also read a few variables for live Companies House
 resolution and HMRC submission (future features): `COMPANY_NUMBER`,
-`COMPANIES_HOUSE_API_KEY` / `COMPANIES_HOUSE_API_KEY_TEST`, `CT600_CACHE_DIR`,
+`COMPANIES_HOUSE_API_KEY` / `COMPANIES_HOUSE_SANDBOX_API_KEY`, `CT600_CACHE_DIR`,
 and the `HMRC_CT_*` submission credentials.
 
-The Companies House client (`ixbrl::clients::CompaniesHouseClient`) caches
+The Companies House client (`ct600::CompaniesHouseClient`) caches
 fetched company profiles under
 `.cache/api_responses/companies-house-<number>.json` (override with
 `CT600_CACHE_DIR`) and serves from the cache when available.  Company

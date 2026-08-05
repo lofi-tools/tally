@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose};
 use chrono::Local;
-use ixbrl::clients::Config as IxbrlConfig;
+use crate::companies_house::Config as IxbrlConfig;
 use reqwest::StatusCode;
 use sha1::{Digest, Sha1};
 use snafu::Snafu;

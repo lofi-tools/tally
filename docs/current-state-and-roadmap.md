@@ -46,9 +46,6 @@ handle" below).
   donations, FY1/FY2 tax, marginal relief, losses of trades, etc.).
 - **iXBRL formatting** — `ixbrl_fmt` helpers for building and parsing the
   tagged HTML documents.
-- **Companies House client** — `ixbrl::clients` resolves/enriches a company
-  (override → cached profile → live API), fetches and caches company
-  profiles under `.cache/api_responses/`.
 
 ### The `ct600` crate (`libs/ct600`)
 
@@ -62,6 +59,10 @@ handle" below).
   delete), computes and injects the IRmark (canonicalised body, SHA-1,
   base64), and supports External Test Service, live and Test-in-live
   configurations. Tested against an in-process GovTalk stub gateway.
+- **Companies House client** — `companies_house` resolves/enriches a
+  company (override → cached profile → live API), fetches and caches
+  company profiles under `.cache/api_responses/`, and derives the CT600
+  company header boxes from a profile.
 
 ### Tests
 
