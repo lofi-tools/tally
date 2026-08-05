@@ -2,12 +2,13 @@
 //! Test utilities for the ixbrl crate.
 //!
 //! Hosts the hardcoded default fixtures: the fictional example company
-//! ([`TestData::default_company`]) and a map from company number to the
-//! example GnuCash accounts file under `example_data/`
+//! ([`TestData::default_company`]), its accounts
+//! ([`TestData::default_accounts_meta`]) and a map from company number to
+//! the example GnuCash accounts file under `example_data/`
 //! ([`TestData::accounts_path`]).  Tests run with zero configuration on a
 //! fresh checkout.
 
-use crate::company::Company;
+use crate::company::{AccountingPeriod, AccountsMeta, Company};
 
 /// Hardcoded test data: the fictional example company and the example
 /// GnuCash accounts files, so tests run with zero configuration on a fresh
@@ -21,16 +22,28 @@ impl TestData {
     }
 
     /// The fictional example company: "Example Biz Ltd." with tax reference
-    /// `8596148860` and accounting period 1 Jan - 31 Dec 2020 (company
-    /// number [`Self::default_company_number`]).
+    /// `8596148860` and company number [`Self::default_company_number`].
     pub fn default_company() -> Company {
-        Company::new(
+        let mut company = Company::new(
             "Example Biz Ltd.",
             "8596148860",
             Self::default_company_number(),
-            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
-        )
+        );
+        company.registration_date = chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        company
+    }
+
+    /// The fictional example company's accounts: the 2020 calendar-year
+    /// return period and the default financial-year tax parameters (2019 /
+    /// 2020 at 19%).
+    pub fn default_accounts_meta() -> AccountsMeta {
+        AccountsMeta {
+            period: Some(AccountingPeriod {
+                start: chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+                end: chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
+            }),
+            ..AccountsMeta::default()
+        }
     }
 
     /// The path to the example GnuCash accounts file for a company number,
@@ -58,13 +71,20 @@ mod tests {
         assert_eq!(company.tax_reference, "8596148860");
         assert_eq!(company.company_number, TestData::default_company_number());
         assert_eq!(
-            company.accounting_period_start,
+            company.registration_date,
+            chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()
+        );
+        let accounts = TestData::default_accounts_meta();
+        assert_eq!(
+            accounts.period().start,
             chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()
         );
         assert_eq!(
-            company.accounting_period_end,
+            accounts.period().end,
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap()
         );
+        assert_eq!(accounts.fy1_year, 2019);
+        assert_eq!(accounts.fy2_year, 2020);
     }
 
     #[test]

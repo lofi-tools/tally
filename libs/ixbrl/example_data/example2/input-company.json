@@ -2,9 +2,13 @@
   "company": {
     "name": "Example Biz Ltd.",
     "tax_reference": "8596148860",
-    "company_number": "12345678",
-    "accounting_period_start": "2020-01-01",
-    "accounting_period_end": "2020-12-31"
+    "company_number": "12345678"
+  },
+  "accounts": {
+    "period": {
+      "start": "2020-01-01",
+      "end": "2020-12-31"
+    }
   },
   "directors": [
     "A Bloggs",

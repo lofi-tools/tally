@@ -94,17 +94,23 @@ fresh checkout needs no API key and no network.  The mock data, by source:
 ### Testing with a Companies House API key
 
 The tests that hit the live Companies House API live in
-`libs/ct600/src/companies_house.rs` (the `live_tests` module) and are part
-of the **default-enabled** `api_tests` feature — a plain `cargo test -p
-ct600` runs them:
+`libs/ct600/src/companies_house.rs` (the `live_tests` module) and in
+`apps/tally-cli/src/config.rs` (a live enrichment test: it resolves a
+minimum config from the API and checks the cache is served on the second
+run).  Both are part of the **default-enabled** `api_tests` feature — plain
+`cargo test -p ct600` / `cargo test -p tally-cli` run them:
 
 ```bash
 export COMPANIES_HOUSE_API_KEY="your-api-key"             # or COMPANIES_HOUSE_SANDBOX_API_KEY
 export COMPANY_NUMBER="00000006"                          # a company that exists in the API you chose
+export UNIQUE_TAXPAYER_REF="8596148860"                   # needed by tally-cli's enrichment test
 cargo test -p ct600
+cargo test -p tally-cli
 ```
 
-It only fetches data on first run, and caches it for the next runs.
+They only fetch data on first run, and cache it for the next runs.  (The
+tally-cli test additionally needs `UNIQUE_TAXPAYER_REF`: the Corporation
+Tax reference is never resolved from Companies House.)
 
 ### Project structure
 
@@ -133,11 +139,12 @@ In short:
   House: it comes from the `UNIQUE_TAXPAYER_REF` environment variable
   (winning) or the config's `company.tax_reference`, so one of the two must
   be present;
-- the return period is optional too: an explicit `accounting_period_start` +
-  `accounting_period_end` (given together) or an `accounts_made_up_to` date
-  in the config (or the `--accounts-made-up-to` flag) gives the period;
-  otherwise it defaults to the company's next accounting period to file,
-  resolved from the Companies House profile;
+- the return period lives in the config's `accounts` sub-object and is
+  optional too: an explicit `accounts.period` (both dates) or an
+  `accounts.accounts_made_up_to` date in the config (or the
+  `--accounts-made-up-to` flag) gives the period; otherwise it defaults to
+  the company's next accounting period to file, resolved from the Companies
+  House profile;
 - the flat accounts-metadata fields are all required and have no defaults
   (copy them from the example config below).
 
@@ -157,9 +164,12 @@ export UNIQUE_TAXPAYER_REF=8596148860
 
 <!--```json
 {
-  "company": {
-    "accounting_period_start": "2020-01-01",
-    "accounting_period_end": "2020-12-31"
+  "company": {},
+  "accounts": {
+    "period": {
+      "start": "2020-01-01",
+      "end": "2020-12-31"
+    }
   },
   "directors": ["A Bloggs"],
   "contact_name": "Corporate Enquiries",
@@ -184,9 +194,13 @@ can be resolved at runtime:
   "company": {
     "name": "Example Biz Ltd.",
     "tax_reference": "8596148860",
-    "company_number": "12345678",
-    "accounting_period_start": "2020-01-01",
-    "accounting_period_end": "2020-12-31"
+    "company_number": "12345678"
+  },
+  "accounts": {
+    "period": {
+      "start": "2020-01-01",
+      "end": "2020-12-31"
+    }
   },
   "directors": ["A Bloggs"],
   "...": "remaining required accounts-metadata fields (as in the example above)"
@@ -196,9 +210,12 @@ can be resolved at runtime:
 The UTR can also come from `UNIQUE_TAXPAYER_REF`, which wins over
 `company.tax_reference`.
 
-## Links
+## Docs & Links
 
 - [docs/current-state-and-roadmap.md](docs/current-state-and-roadmap.md) — what the software does, what it doesn't handle, and the roadmap
+
+### HMRC & gov.uk
 - https://www.gov.uk/company-tax-returns
 - https://www.gov.uk/government/collections/corporation-tax-online-support-for-software-developers
 - [HMRC CT Inline XBRL Style Guide](https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/434588/xbrl-style-guide.pdf)
+- [Local Test Service](https://www.gov.uk/government/publications/local-test-service-and-lts-update-manager)

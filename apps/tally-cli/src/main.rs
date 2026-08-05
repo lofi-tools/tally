@@ -11,17 +11,17 @@
 //! * `--config-path` — a JSON config file describing the company and the
 //!   accounts metadata (same shape as
 //!   `libs/ixbrl/example_data/example2/input-company.json`: a nested
-//!   `company` identity block plus the flat accounts-metadata fields).  The
-//!   file becomes a [`config::FileConfig`] and is merged with the captured
-//!   environment ([`config::RawEnvConfig`]) and the subcommand's CLI values
-//!   into a [`config::ResolvedConfig`] by [`config::Ct600Config::resolve`]:
-//!   every identity field is optional — the company name is resolved from
-//!   Companies House at runtime when an API key is configured (the
-//!   registration date too, when the config carries no identity details at
-//!   all), the company number falls back on `COMPANY_NUMBER`, the
-//!   Corporation Tax reference (UTR) comes from `UNIQUE_TAXPAYER_REF`
-//!   (winning) or `company.tax_reference`, the return period is the config's
-//!   `accounting_period_start` / `accounting_period_end` or is deduced from
+//!   `company` identity block, an `accounts` sub-object and the flat
+//!   accounts-metadata fields).  The file becomes a [`config::FileConfig`]
+//!   and is merged with the captured environment ([`config::RawEnvConfig`])
+//!   and the subcommand's CLI values into a [`config::ResolvedConfig`] by
+//!   [`config::Ct600Config::resolve`]: every identity field is optional —
+//!   the company name is resolved from Companies House at runtime when an
+//!   API key is configured (the registration date too, when the config
+//!   carries no identity details at all), the company number falls back on
+//!   `COMPANY_NUMBER`, the Corporation Tax reference (UTR) comes from
+//!   `UNIQUE_TAXPAYER_REF` (winning) or `company.tax_reference`, the return
+//!   period is the config's `accounts.period` or is deduced from
 //!   `--accounts-made-up-to`, defaulting to the next accounting period from
 //!   Companies House, and anything still missing is reported clearly (see
 //!   [`config`]);
@@ -165,10 +165,22 @@ async fn run_ct600(args: Ct600Config) -> Result<()> {
     println!("resolved: company '{}'", resolved.company.name);
     println!("  company number: {}", resolved.company.company_number);
     println!("  tax reference (UTR): {}", resolved.company.tax_reference);
-    println!("  registration date: {}", resolved.company.registration_date);
+    // The epoch is the unset sentinel: the registration date is only known
+    // once resolved from Companies House.
+    let registration_date = if resolved.company.registration_date == NaiveDate::default() {
+        "unknown (resolve it with a Companies House API key)".to_string()
+    } else {
+        resolved.company.registration_date.to_string()
+    };
+    println!("  registration date: {registration_date}");
+    let period = resolved.accounts.period();
+    println!("  return period: {} to {}", period.start, period.end);
     println!(
-        "  return period: {} to {}",
-        resolved.company.accounting_period_start, resolved.company.accounting_period_end
+        "  financial years: FY{} at {}%, FY{} at {}%",
+        resolved.accounts.fy1_year,
+        resolved.accounts.fy1_rate,
+        resolved.accounts.fy2_year,
+        resolved.accounts.fy2_rate
     );
     println!("  book: {}", resolved.book_path.display());
     println!("  out: {}", resolved.out_dir.display());
@@ -185,8 +197,9 @@ async fn run_ct600(args: Ct600Config) -> Result<()> {
         .with_context(|| format!("load GnuCash book '{book_path}'"))?;
 
     // FRS 105 inputs to the return.
-    let accounts = Frs105Accounts::new(&book, &resolved.company, &resolved.metadata);
-    let corp_tax = Frs105CorpTax::builder(&book, &resolved.company).build();
+    let accounts =
+        Frs105Accounts::new(&book, &resolved.company, &resolved.metadata, &resolved.accounts);
+    let corp_tax = Frs105CorpTax::builder(&book, &resolved.company, &resolved.accounts).build();
 
     // The CT600 GovTalk message.
     let filing = Ct600Return::from_inputs(&accounts, &corp_tax);

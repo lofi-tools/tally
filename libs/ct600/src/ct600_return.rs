@@ -922,13 +922,24 @@ mod tests {
     use std::collections::HashMap;
 
     fn example2_company() -> ixbrl::company::Company {
-        ixbrl::company::Company::new(
-            "Example Biz Ltd.",
-            "8596148860",
-            "12345678",
-            NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
-            NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
-        )
+        let mut company =
+            ixbrl::company::Company::new("Example Biz Ltd.", "8596148860", "12345678");
+        // Anchored on the return-period start, matching the historical
+        // constructor default used by this fixture.
+        company.registration_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        company
+    }
+
+    /// The example company's set of accounts: the 2020 calendar-year return
+    /// period and the default financial-year tax parameters.
+    fn example2_accounts_meta() -> ixbrl::company::AccountsMeta {
+        ixbrl::company::AccountsMeta {
+            period: Some(ixbrl::company::AccountingPeriod {
+                start: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+                end: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
+            }),
+            ..ixbrl::company::AccountsMeta::default()
+        }
     }
 
     async fn example2_corp_tax() -> Frs105CorpTax {
@@ -938,7 +949,7 @@ mod tests {
         )
         .await
         .expect("open example2 gnucash");
-        Frs105CorpTax::builder(&gnucash, &company)
+        Frs105CorpTax::builder(&gnucash, &company, &example2_accounts_meta())
             .add_rd_project(
                 "Project Iguana",
                 &[
@@ -967,7 +978,12 @@ mod tests {
         )
         .await
         .expect("open example2 gnucash");
-        Frs105Accounts::new(&gnucash, &company, &example2_metadata())
+        Frs105Accounts::new(
+            &gnucash,
+            &company,
+            &example2_metadata(),
+            &example2_accounts_meta(),
+        )
     }
 
     /// A metadata with the example2 company details (directors, SIC codes,

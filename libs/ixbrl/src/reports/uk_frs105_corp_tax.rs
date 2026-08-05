@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::GnucashBook;
-use crate::company::Company;
+use crate::company::{AccountingPeriod, AccountsMeta, Company};
 use crate::ixbrl_fmt::*;
 
 #[derive(Debug, Clone)]
@@ -21,6 +21,7 @@ pub struct RdProject {
 #[derive(Debug, Clone)]
 pub struct Frs105CorpTax {
     pub company: Company,
+    pub accounts: AccountsMeta,
 
     pub turnover: f64,
     pub total_costs: f64,
@@ -98,6 +99,7 @@ pub struct Frs105CorpTax {
 #[derive(Debug, Clone)]
 pub struct Frs105CorpTaxBuilder<'a> {
     company: &'a Company,
+    accounts: &'a AccountsMeta,
     period_splits: Vec<(f64, String)>,
     prev_splits: Vec<(f64, String)>,
     rd_project_defs: Vec<(&'a str, Vec<(&'a str, &'a str)>, &'a str)>,
@@ -119,6 +121,7 @@ impl<'a> Frs105CorpTaxBuilder<'a> {
     pub fn build(self) -> Frs105CorpTax {
         Frs105CorpTax::from_splits(
             self.company,
+            self.accounts,
             &self.period_splits,
             &self.prev_splits,
             &self.rd_project_defs,
@@ -197,16 +200,21 @@ pub fn calculate_corporation_tax_2025(taxable_profit: f64) -> CorporationTaxCalc
 
 #[allow(clippy::type_complexity)]
 impl Frs105CorpTax {
-    pub fn builder<'a>(gnucash: &GnucashBook, company: &'a Company) -> Frs105CorpTaxBuilder<'a> {
-        let accounts = gnucash.raw_accounts();
+    pub fn builder<'a>(
+        gnucash: &GnucashBook,
+        company: &'a Company,
+        accounts: &'a AccountsMeta,
+    ) -> Frs105CorpTaxBuilder<'a> {
+        let period = accounts.period();
+        let accounts_raw = gnucash.raw_accounts();
         let txns = gnucash.raw_transactions();
         let splits = gnucash.raw_splits();
 
         let mut period_splits: Vec<(f64, String)> = Vec::new();
         let mut prev_splits: Vec<(f64, String)> = Vec::new();
 
-        let prev_start = company.prev_period_start();
-        let prev_end = company.prev_period_end();
+        let prev_start = period.previous().start;
+        let prev_end = period.previous().end;
 
         for split in splits {
             let tx = match txns.iter().find(|t| t.guid == split.tx_guid) {
@@ -214,18 +222,18 @@ impl Frs105CorpTax {
                 None => continue,
             };
             let tx_date = tx.post_datetime.date();
-            let acc = match accounts.iter().find(|a| a.guid == split.account_guid) {
+            let acc = match accounts_raw.iter().find(|a| a.guid == split.account_guid) {
                 Some(a) => a,
                 None => continue,
             };
             if acc.r#type == "ROOT" || acc.r#type == "TEMPLATE" {
                 continue;
             }
-            let path = Self::account_path(accounts, acc);
+            let path = Self::account_path(accounts_raw, acc);
             let val = split.value.to_string().parse::<f64>().unwrap_or(0.0);
 
-            if tx_date >= company.accounting_period_start
-                && tx_date <= company.accounting_period_end
+            if tx_date >= period.start
+                && tx_date <= period.end
             {
                 period_splits.push((val, path.clone()));
             }
@@ -236,6 +244,7 @@ impl Frs105CorpTax {
 
         Frs105CorpTaxBuilder {
             company,
+            accounts,
             period_splits,
             prev_splits,
             rd_project_defs: Vec::new(),
@@ -244,10 +253,12 @@ impl Frs105CorpTax {
 
     fn from_splits(
         company: &Company,
+        accounts: &AccountsMeta,
         period_splits: &[(f64, String)],
         prev_splits: &[(f64, String)],
         rd_project_defs: &[(&str, Vec<(&str, &str)>, &str)],
     ) -> Self {
+        let period = accounts.period();
         let sum = |splits: &[(f64, String)], account: &str| -> f64 {
             splits
                 .iter()
@@ -318,18 +329,18 @@ impl Frs105CorpTax {
                         label: label.to_string(),
                         account_path: path.to_string(),
                         values_by_fy: HashMap::from([
-                            (company.fy1_year, round_down(sum_abs(prev_splits, path))),
-                            (company.fy2_year, round_down(sum_abs(period_splits, path))),
+                            (accounts.fy1_year, round_down(sum_abs(prev_splits, path))),
+                            (accounts.fy2_year, round_down(sum_abs(period_splits, path))),
                         ]),
                     })
                     .collect();
                 let enhanced: HashMap<i32, f64> = HashMap::from([
                     (
-                        company.fy1_year,
+                        accounts.fy1_year,
                         round_down(sum_abs(prev_splits, enhanced_path)),
                     ),
                     (
-                        company.fy2_year,
+                        accounts.fy2_year,
                         round_down(sum_abs(period_splits, enhanced_path)),
                     ),
                 ]);
@@ -354,20 +365,20 @@ impl Frs105CorpTax {
         let profits_before_charges = profits_before_deductions;
         let profits_chargeable = profits_before_charges;
 
-        let fy1_end = chrono::NaiveDate::from_ymd_opt(company.fy2_year, 3, 31).unwrap();
+        let fy1_end = chrono::NaiveDate::from_ymd_opt(accounts.fy2_year, 3, 31).unwrap();
         let total_days =
-            (company.accounting_period_end - company.accounting_period_start).num_days() + 1;
+            (period.end - period.start).num_days() + 1;
         let fy1_days = {
-            let s = company.accounting_period_start;
-            let e = fy1_end.min(company.accounting_period_end);
+            let s = period.start;
+            let e = fy1_end.min(period.end);
             if e >= s { (e - s).num_days() + 1 } else { 0 }
         };
         let fy2_days = total_days - fy1_days;
 
         let fy1_profit = (profits_chargeable * fy1_days as f64 / total_days as f64).round();
         let fy2_profit = (profits_chargeable * fy2_days as f64 / total_days as f64).round();
-        let fy1_tax = round2(fy1_profit * company.fy1_rate / 100.0);
-        let fy2_tax = round2(fy2_profit * company.fy2_rate / 100.0);
+        let fy1_tax = round2(fy1_profit * accounts.fy1_rate / 100.0);
+        let fy2_tax = round2(fy2_profit * accounts.fy2_rate / 100.0);
         let corporation_tax_chargeable = round2(fy1_tax + fy2_tax);
 
         let marginal_relief = 0.0;
@@ -429,10 +440,10 @@ impl Frs105CorpTax {
             0.0
         };
         let prev_profit_chargeable = prev_ct_trading_profits;
-        let prev_period_start = company.prev_period_start();
-        let prev_period_end = company.prev_period_end();
+        let prev_period_start = period.previous().start;
+        let prev_period_end = period.previous().end;
         let prev_total_days = (prev_period_end - prev_period_start).num_days() + 1;
-        let prev_fy1_end = chrono::NaiveDate::from_ymd_opt(company.fy2_year - 1, 3, 31).unwrap();
+        let prev_fy1_end = chrono::NaiveDate::from_ymd_opt(accounts.fy2_year - 1, 3, 31).unwrap();
         let prev_fy1_days = {
             let s = prev_period_start;
             let e = prev_fy1_end.min(prev_period_end);
@@ -443,8 +454,8 @@ impl Frs105CorpTax {
             (prev_profit_chargeable * prev_fy1_days as f64 / prev_total_days as f64).round();
         let prev_fy2_profit =
             (prev_profit_chargeable * prev_fy2_days as f64 / prev_total_days as f64).round();
-        let prev_fy1_tax = round2(prev_fy1_profit * company.fy1_rate / 100.0);
-        let prev_fy2_tax = round2(prev_fy2_profit * company.fy2_rate / 100.0);
+        let prev_fy1_tax = round2(prev_fy1_profit * accounts.fy1_rate / 100.0);
+        let prev_fy2_tax = round2(prev_fy2_profit * accounts.fy2_rate / 100.0);
         let prev_corporation_tax_chargeable = round2(prev_fy1_tax + prev_fy2_tax);
 
         let mut expenses_by_fy: HashMap<String, HashMap<i32, f64>> = HashMap::new();
@@ -465,12 +476,13 @@ impl Frs105CorpTax {
         for (id, cur, prev) in exp {
             expenses_by_fy.insert(
                 id.to_string(),
-                HashMap::from([(company.fy2_year, cur), (company.fy1_year, prev)]),
+                HashMap::from([(accounts.fy2_year, cur), (accounts.fy1_year, prev)]),
             );
         }
 
         Frs105CorpTax {
             company: company.clone(),
+            accounts: accounts.clone(),
 
             turnover: ct_turnover_current,
             total_costs: total_costs_current,
@@ -532,47 +544,47 @@ impl Frs105CorpTax {
             rd_projects,
 
             profit_per_accounts_by_fy: HashMap::from([
-                (company.fy1_year, profit_before_tax_prev),
-                (company.fy2_year, profit_before_tax_current),
+                (accounts.fy1_year, profit_before_tax_prev),
+                (accounts.fy2_year, profit_before_tax_current),
             ]),
             aia_by_fy: HashMap::from([
-                (company.fy1_year, aia_prev),
-                (company.fy2_year, aia_current),
+                (accounts.fy1_year, aia_prev),
+                (accounts.fy2_year, aia_current),
             ]),
             rnd_by_fy: HashMap::from([
-                (company.fy1_year, rnd_enhanced_prev),
-                (company.fy2_year, rnd_enhanced_current),
+                (accounts.fy1_year, rnd_enhanced_prev),
+                (accounts.fy2_year, rnd_enhanced_current),
             ]),
             turnover_by_fy: HashMap::from([
-                (company.fy1_year, ct_turnover_prev),
-                (company.fy2_year, ct_turnover_current),
+                (accounts.fy1_year, ct_turnover_prev),
+                (accounts.fy2_year, ct_turnover_current),
             ]),
             costs_by_fy: HashMap::from([
-                (company.fy1_year, total_costs_prev),
-                (company.fy2_year, total_costs_current),
+                (accounts.fy1_year, total_costs_prev),
+                (accounts.fy2_year, total_costs_current),
             ]),
             profit_before_tax_by_fy: HashMap::from([
-                (company.fy1_year, profit_before_tax_prev),
-                (company.fy2_year, profit_before_tax_current),
+                (accounts.fy1_year, profit_before_tax_prev),
+                (accounts.fy2_year, profit_before_tax_current),
             ]),
             tax_expense_by_fy: HashMap::from([
-                (company.fy1_year, tax_expense_prev),
-                (company.fy2_year, tax_expense_current),
+                (accounts.fy1_year, tax_expense_prev),
+                (accounts.fy2_year, tax_expense_current),
             ]),
             profit_after_tax_by_fy: HashMap::from([
                 (
-                    company.fy1_year,
+                    accounts.fy1_year,
                     round2(profit_before_tax_prev - tax_expense_prev),
                 ),
-                (company.fy2_year, profit_after_tax),
+                (accounts.fy2_year, profit_after_tax),
             ]),
             wages_by_fy: HashMap::from([
-                (company.fy1_year, salaries_prev),
-                (company.fy2_year, salaries_current),
+                (accounts.fy1_year, salaries_prev),
+                (accounts.fy2_year, salaries_current),
             ]),
             pensions_by_fy: HashMap::from([
-                (company.fy1_year, pensions_prev),
-                (company.fy2_year, pensions_current),
+                (accounts.fy1_year, pensions_prev),
+                (accounts.fy2_year, pensions_current),
             ]),
             expenses_by_fy,
         }
@@ -639,39 +651,39 @@ impl Frs105CorpTax {
             context_instant(
                 "ctxt-0",
                 &self.company.company_number,
-                &self.company.accounting_period_end,
+                &self.accounts.period().end,
                 Some("ct-comp:BusinessTypeDimension"),
                 Some("ct-comp:Company"),
             ),
             context_duration(
                 "ctxt-1",
                 &self.company.company_number,
-                &self.company.accounting_period_start,
-                &self.company.accounting_period_end,
+                &self.accounts.period().start,
+                &self.accounts.period().end,
                 Some("ct-comp:BusinessTypeDimension"),
                 Some("ct-comp:Company"),
             ),
             context_duration(
                 "ctxt-2",
                 &self.company.company_number,
-                &self.company.accounting_period_start,
-                &self.company.accounting_period_end,
+                &self.accounts.period().start,
+                &self.accounts.period().end,
                 Some("ct-comp:BusinessTypeDimension"),
                 Some("ct-comp:ManagementExpenses"),
             ),
             context_duration(
                 "ctxt-3",
                 &self.company.company_number,
-                &self.company.accounting_period_start,
-                &self.company.accounting_period_end,
+                &self.accounts.period().start,
+                &self.accounts.period().end,
                 Some("ct-comp:BusinessTypeDimension"),
                 Some("ct-comp:Company"),
             ),
             context_duration_full(
                 "ctxt-4",
                 &self.company.company_number,
-                &self.company.accounting_period_start,
-                &self.company.accounting_period_end,
+                &self.accounts.period().start,
+                &self.accounts.period().end,
                 Some("ct-comp:BusinessNameDimension"),
                 Some(&self.company.name),
                 &[
@@ -683,8 +695,8 @@ impl Frs105CorpTax {
             context_duration_full(
                 "ctxt-5",
                 &self.company.company_number,
-                &self.company.accounting_period_start,
-                &self.company.accounting_period_end,
+                &self.accounts.period().start,
+                &self.accounts.period().end,
                 Some("ct-comp:BusinessNameDimension"),
                 Some(&self.company.name),
                 &[
@@ -709,8 +721,8 @@ impl Frs105CorpTax {
             context_duration_full(
                 "ctxt-9",
                 &self.company.company_number,
-                &self.company.accounting_period_start,
-                &self.company.accounting_period_end,
+                &self.accounts.period().start,
+                &self.accounts.period().end,
                 None,
                 None,
                 &[
@@ -733,8 +745,8 @@ impl Frs105CorpTax {
             context_duration_full(
                 "ctxt-11",
                 &self.company.company_number,
-                &self.company.accounting_period_start,
-                &self.company.accounting_period_end,
+                &self.accounts.period().start,
+                &self.accounts.period().end,
                 None,
                 None,
                 &[],
@@ -751,8 +763,8 @@ impl Frs105CorpTax {
             context_duration(
                 "ctxt-13",
                 &self.company.company_number,
-                &self.company.accounting_period_start,
-                &self.company.accounting_period_end,
+                &self.accounts.period().start,
+                &self.accounts.period().end,
                 Some("dpl:ExpenseTypeDimension"),
                 Some("dpl:AdministrativeExpenses"),
             ),
@@ -825,16 +837,23 @@ impl Frs105CorpTax {
     /// Parse a [`ParsedIxBrlFacts`] into a [`Frs105CorpTax`].
     ///
     /// The `company` parameter supplies fields that are not represented in the
-    /// iXBRL output (such as `company_number` and `registration_date`).  Any
-    /// company-level data that *is* present in the facts (name, tax reference,
+    /// iXBRL output (such as `company_number` and `registration_date`), and the
+    /// `accounts` parameter supplies the default financial-year tax parameters.
+    /// Any data that *is* present in the facts (name, tax reference, the
     /// accounting-period dates, financial-year numbers, tax rates) overrides the
-    /// corresponding fields on the supplied `company`.
+    /// corresponding values on the supplied inputs.
     ///
     /// Numeric fields that have no corresponding iXBRL fact (e.g. `turnover`,
     /// `total_costs`, `gross_profit`, `tax_expense`, `profit_after_tax`) are set
     /// to `0.0`.  Similarly, the `rd_projects` vector and several per-year
     /// `HashMap`s that are not serialised to iXBRL are left empty.
-    pub fn from_parsed_facts(facts: &ParsedIxBrlFacts, company: &Company) -> Frs105CorpTax {
+    pub fn from_parsed_facts(
+        facts: &ParsedIxBrlFacts,
+        company: &Company,
+        accounts: &AccountsMeta,
+    ) -> Frs105CorpTax {
+        let period = accounts.period();
+
         // -- helpers -----------------------------------------------------------
 
         // Look up a numeric fact by (name, context).
@@ -856,33 +875,38 @@ impl Frs105CorpTax {
             let raw = text(name);
             let cleaned = raw.replace('\u{00A0}', " ");
             chrono::NaiveDate::parse_from_str(&cleaned, "%d %B %Y")
-                .unwrap_or(company.accounting_period_start)
+                .unwrap_or(period.start)
         };
 
         // -- company ----------------------------------------------------------
 
         let fy1_year = text("ct-comp:FinancialYear1CoveredByTheReturn")
             .parse::<i32>()
-            .unwrap_or(company.fy1_year);
+            .unwrap_or(accounts.fy1_year);
         let fy2_year = text("ct-comp:FinancialYear2CoveredByTheReturn")
             .parse::<i32>()
-            .unwrap_or(company.fy2_year);
+            .unwrap_or(accounts.fy2_year);
 
         let company = Company {
             name: text("ct-comp:CompanyName"),
             tax_reference: text("ct-comp:TaxReference"),
             company_number: company.company_number.clone(),
             registration_date: company.registration_date,
-            accounting_period_start: parse_date("ct-comp:PeriodOfAccountStartDate"),
-            accounting_period_end: parse_date("ct-comp:PeriodOfAccountEndDate"),
+        };
+        let accounts = AccountsMeta {
+            period: Some(AccountingPeriod {
+                start: parse_date("ct-comp:PeriodOfAccountStartDate"),
+                end: parse_date("ct-comp:PeriodOfAccountEndDate"),
+            }),
+            accounts_made_up_to: None,
             fy1_year,
             fy2_year,
             fy1_rate: num("ct-comp:FY1FirstRateOfTax", "ctxt-1"),
             fy2_rate: num("ct-comp:FY2FirstRateOfTax", "ctxt-1"),
         };
 
-        let fy1 = company.fy1_year;
-        let fy2 = company.fy2_year;
+        let fy1 = accounts.fy1_year;
+        let fy2 = accounts.fy2_year;
 
         // -- per-year hash maps ----------------------------------------------
 
@@ -1006,6 +1030,7 @@ impl Frs105CorpTax {
 
         Frs105CorpTax {
             company,
+            accounts,
 
             // Not represented in the iXBRL output.
             turnover: 0.0,
@@ -1086,17 +1111,25 @@ impl Frs105CorpTax {
     /// `Frs105CorpTax`).
     ///
     /// See [`Self::from_parsed_facts`] for which fields are recoverable.
-    pub fn from_ixbrl_node(node: &XmlNode, company: &Company) -> Frs105CorpTax {
+    pub fn from_ixbrl_node(node: &XmlNode, company: &Company, accounts: &AccountsMeta) -> Frs105CorpTax {
         let facts = ParsedIxBrlFacts::from_node(node);
-        Self::from_parsed_facts(&facts, company)
+        Self::from_parsed_facts(&facts, company, accounts)
     }
 
     /// Deserialise a [`Frs105CorpTax`] from its serialised iXBRL HTML, in
     /// two steps: first into the [`XmlNode`] intermediate representation,
     /// then into the struct.
-    pub fn from_ixbrl(html: &str, company: &Company) -> Result<Frs105CorpTax, String> {
+    ///
+    /// The supplied `accounts` must carry a return period; only its
+    /// financial-year parameters are preserved (the period is recovered from
+    /// the document).
+    pub fn from_ixbrl(
+        html: &str,
+        company: &Company,
+        accounts: &AccountsMeta,
+    ) -> Result<Frs105CorpTax, String> {
         let node = XmlNode::from_xml_string(html)?;
-        Ok(Self::from_ixbrl_node(&node, company))
+        Ok(Self::from_ixbrl_node(&node, company, accounts))
     }
 
     fn build_fact_text(&self, ref_num: &str, label: &str, value: &str) -> XmlNode {
@@ -1162,7 +1195,7 @@ impl Frs105CorpTax {
                     "Return period start",
                     "ct-comp:StartOfPeriodCoveredByReturn",
                     "ctxt-0",
-                    &format_date(&self.company.return_period_start()),
+                    &format_date(&self.accounts.period().start),
                     Some("ixt2:datedaymonthyearen"),
                 ),
                 self.build_fact_non_numeric(
@@ -1170,7 +1203,7 @@ impl Frs105CorpTax {
                     "Return period end",
                     "ct-comp:EndOfPeriodCoveredByReturn",
                     "ctxt-0",
-                    &format_date(&self.company.return_period_end()),
+                    &format_date(&self.accounts.period().end),
                     Some("ixt2:datedaymonthyearen"),
                 ),
                 self.build_fact_non_numeric(
@@ -1178,7 +1211,7 @@ impl Frs105CorpTax {
                     "Period of account start",
                     "ct-comp:PeriodOfAccountStartDate",
                     "ctxt-0",
-                    &format_date(&self.company.accounting_period_start),
+                    &format_date(&self.accounts.period().start),
                     Some("ixt2:datedaymonthyearen"),
                 ),
                 self.build_fact_non_numeric(
@@ -1186,7 +1219,7 @@ impl Frs105CorpTax {
                     "Period of account end",
                     "ct-comp:PeriodOfAccountEndDate",
                     "ctxt-0",
-                    &format_date(&self.company.accounting_period_end),
+                    &format_date(&self.accounts.period().end),
                     Some("ixt2:datedaymonthyearen"),
                 ),
                 self.build_fact_non_numeric(
@@ -1327,7 +1360,7 @@ impl Frs105CorpTax {
                     "Financial year 1 covered by the return",
                     "ct-comp:FinancialYear1CoveredByTheReturn",
                     "ctxt-1",
-                    &self.company.fy1_year.to_string(),
+                    &self.accounts.fy1_year.to_string(),
                     None,
                 ),
                 self.build_fact_non_numeric(
@@ -1335,7 +1368,7 @@ impl Frs105CorpTax {
                     "Financial year 2 covered by the return",
                     "ct-comp:FinancialYear2CoveredByTheReturn",
                     "ctxt-1",
-                    &self.company.fy2_year.to_string(),
+                    &self.accounts.fy2_year.to_string(),
                     None,
                 ),
                 self.build_fact_numeric(
@@ -1357,14 +1390,14 @@ impl Frs105CorpTax {
                     "FY1 first rate of tax",
                     "ct-comp:FY1FirstRateOfTax",
                     "ctxt-1",
-                    self.company.fy1_rate,
+                    self.accounts.fy1_rate,
                 ),
                 self.build_fact_numeric(
                     "425",
                     "FY2 first rate of tax",
                     "ct-comp:FY2FirstRateOfTax",
                     "ctxt-1",
-                    self.company.fy2_rate,
+                    self.accounts.fy2_rate,
                 ),
                 self.build_fact_numeric(
                     "430",
@@ -1493,8 +1526,8 @@ impl Frs105CorpTax {
     }
 
     fn build_rnd_worksheet_page(&self) -> XmlNode {
-        let fy1 = self.company.fy1_year;
-        let fy2 = self.company.fy2_year;
+        let fy1 = self.accounts.fy1_year;
+        let fy2 = self.accounts.fy2_year;
 
         let mut rows = vec![worksheet_header_row(fy2, fy1), worksheet_currency_row()];
 
@@ -1585,8 +1618,8 @@ impl Frs105CorpTax {
     }
 
     fn build_profit_and_loss_worksheet(&self) -> XmlNode {
-        let fy1 = self.company.fy1_year;
-        let fy2 = self.company.fy2_year;
+        let fy1 = self.accounts.fy1_year;
+        let fy2 = self.accounts.fy2_year;
 
         let turnover2 = *self.turnover_by_fy.get(&fy2).unwrap_or(&0.0);
         let turnover1 = *self.turnover_by_fy.get(&fy1).unwrap_or(&0.0);
@@ -1808,8 +1841,8 @@ impl Frs105CorpTax {
     }
 
     fn build_tax_calculation_worksheet(&self) -> XmlNode {
-        let fy1 = self.company.fy1_year;
-        let fy2 = self.company.fy2_year;
+        let fy1 = self.accounts.fy1_year;
+        let fy2 = self.accounts.fy2_year;
 
         let ppa2 = *self.profit_per_accounts_by_fy.get(&fy2).unwrap_or(&0.0);
         let ppa1 = *self.profit_per_accounts_by_fy.get(&fy1).unwrap_or(&0.0);
@@ -2001,12 +2034,12 @@ impl Frs105CorpTax {
 
     /// Box 30 — Start of the period covered by the return.
     pub fn start(&self) -> chrono::NaiveDate {
-        self.company.return_period_start()
+        self.accounts.period().start
     }
 
     /// Box 35 — End of the period covered by the return.
     pub fn end(&self) -> chrono::NaiveDate {
-        self.company.return_period_end()
+        self.accounts.period().end
     }
 
     /// Gross profit / loss per the accounts.
@@ -2051,12 +2084,12 @@ impl Frs105CorpTax {
 
     /// Box 330 — Financial year 1 covered by the return.
     pub fn fy1(&self) -> i32 {
-        self.company.fy1_year
+        self.accounts.fy1_year
     }
 
     /// Box 380 — Financial year 2 covered by the return.
     pub fn fy2(&self) -> i32 {
-        self.company.fy2_year
+        self.accounts.fy2_year
     }
 
     /// Box 335 — FY1 profit chargeable at the first rate.
@@ -2071,12 +2104,12 @@ impl Frs105CorpTax {
 
     /// Box 340 — FY1 first rate of tax.
     pub fn fy1_tax_rate(&self) -> f64 {
-        self.company.fy1_rate
+        self.accounts.fy1_rate
     }
 
     /// Box 390 — FY2 first rate of tax.
     pub fn fy2_tax_rate(&self) -> f64 {
-        self.company.fy2_rate
+        self.accounts.fy2_rate
     }
 
     /// Box 345 — FY1 tax at first rate.
@@ -2155,13 +2188,14 @@ mod tests {
     #[tokio::test]
     async fn test_ct_return_from_example2() {
         let company = crate::test_utils::TestData::default_company();
+        let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
             crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
         .expect("open gnucash");
-        let ct = Frs105CorpTax::builder(&gnucash, &company)
+        let ct = Frs105CorpTax::builder(&gnucash, &company, &accounts)
             .add_rd_project(
                 "Project Iguana",
                 &[
@@ -2185,8 +2219,8 @@ mod tests {
         assert_eq!(ct.company.name, company.name);
         assert_eq!(ct.company.tax_reference, company.tax_reference);
         assert_eq!(ct.company.company_number, company.company_number);
-        assert_eq!(ct.company.fy1_year, company.fy1_year);
-        assert_eq!(ct.company.fy2_year, company.fy2_year);
+        assert_eq!(ct.accounts.fy1_year, accounts.fy1_year);
+        assert_eq!(ct.accounts.fy2_year, accounts.fy2_year);
 
         assert_eq!(ct.net_trading_profits, 748.0);
         assert_eq!(ct.fy1_profit, 186.0);
@@ -2247,13 +2281,14 @@ mod tests {
     #[tokio::test]
     async fn test_rnd_worksheet_output() {
         let company = crate::test_utils::TestData::default_company();
+        let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
             crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
         .expect("open gnucash");
-        let ct = Frs105CorpTax::builder(&gnucash, &company)
+        let ct = Frs105CorpTax::builder(&gnucash, &company, &accounts)
             .add_rd_project(
                 "Project Iguana",
                 &[
@@ -2279,11 +2314,11 @@ mod tests {
         assert_eq!(p.name, "Project Iguana");
         assert_eq!(p.items.len(), 3);
         assert_eq!(p.items[0].label, "Staffing Costs");
-        assert_eq!(p.items[0].values_by_fy[&company.fy2_year], 465.0);
+        assert_eq!(p.items[0].values_by_fy[&accounts.fy2_year], 465.0);
         assert_eq!(p.items[1].label, "Software/Consumables");
-        assert_eq!(p.items[1].values_by_fy[&company.fy2_year], 0.0);
+        assert_eq!(p.items[1].values_by_fy[&accounts.fy2_year], 0.0);
         assert_eq!(p.items[2].label, "External Workers");
-        assert_eq!(p.items[2].values_by_fy[&company.fy2_year], 0.0);
+        assert_eq!(p.items[2].values_by_fy[&accounts.fy2_year], 0.0);
 
         let ixbrl = ct.to_ixbrl();
         assert!(ixbrl.contains("SME R&amp;D</h2>"));
@@ -2301,13 +2336,14 @@ mod tests {
     #[tokio::test]
     async fn test_ixbrl_tag_structure_matches_reference() {
         let company = crate::test_utils::TestData::default_company();
+        let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
             crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
         .expect("open gnucash");
-        let ct = Frs105CorpTax::builder(&gnucash, &company)
+        let ct = Frs105CorpTax::builder(&gnucash, &company, &accounts)
             .add_rd_project(
                 "Project Iguana",
                 &[
@@ -2496,13 +2532,14 @@ mod tests {
 
     async fn build_example2_ct() -> Frs105CorpTax {
         let company = crate::test_utils::TestData::default_company();
+        let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
             crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
         .expect("open gnucash");
-        Frs105CorpTax::builder(&gnucash, &company)
+        Frs105CorpTax::builder(&gnucash, &company, &accounts)
             .add_rd_project(
                 "Project Iguana",
                 &[
@@ -2611,7 +2648,7 @@ mod tests {
     #[tokio::test]
     async fn test_invariant_by_fy_consistency() {
         let ct = build_example2_ct().await;
-        let fy2 = ct.company.fy2_year;
+        let fy2 = ct.accounts.fy2_year;
         assert_eq!(*ct.turnover_by_fy.get(&fy2).unwrap_or(&0.0), ct.turnover);
         assert_eq!(*ct.costs_by_fy.get(&fy2).unwrap_or(&0.0), ct.total_costs);
         assert_eq!(
@@ -2631,24 +2668,24 @@ mod tests {
         std::fs::write("../../.cache/rust-ixbrl/ct_roundtrip.html", &html).unwrap();
 
         let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
-        let back = Frs105CorpTax::from_ixbrl_node(&node, &ct.company);
+        let back = Frs105CorpTax::from_ixbrl_node(&node, &ct.company, &ct.accounts);
 
         // -- company ---------------------------------------------------------
 
         assert_eq!(back.company.name, ct.company.name);
         assert_eq!(back.company.tax_reference, ct.company.tax_reference);
         assert_eq!(back.company.company_number, ct.company.company_number);
-        assert_eq!(back.company.fy1_year, ct.company.fy1_year);
-        assert_eq!(back.company.fy2_year, ct.company.fy2_year);
-        assert_eq!(back.company.fy1_rate, ct.company.fy1_rate);
-        assert_eq!(back.company.fy2_rate, ct.company.fy2_rate);
+        assert_eq!(back.accounts.fy1_year, ct.accounts.fy1_year);
+        assert_eq!(back.accounts.fy2_year, ct.accounts.fy2_year);
+        assert_eq!(back.accounts.fy1_rate, ct.accounts.fy1_rate);
+        assert_eq!(back.accounts.fy2_rate, ct.accounts.fy2_rate);
         assert_eq!(
-            back.company.accounting_period_start,
-            ct.company.accounting_period_start
+            back.accounts.period().start,
+            ct.accounts.period().start
         );
         assert_eq!(
-            back.company.accounting_period_end,
-            ct.company.accounting_period_end
+            back.accounts.period().end,
+            ct.accounts.period().end
         );
 
         // -- profits & gains page -------------------------------------------
@@ -2831,25 +2868,26 @@ mod tests {
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let company = crate::test_utils::TestData::default_company();
+        let accounts = crate::test_utils::TestData::default_accounts_meta();
 
-        let ct = Frs105CorpTax::from_parsed_facts(&facts, &company);
+        let ct = Frs105CorpTax::from_parsed_facts(&facts, &company, &accounts);
 
         // -- company fields ------------------------------------------------
 
         assert_eq!(ct.company.name, company.name);
         assert_eq!(ct.company.tax_reference, company.tax_reference);
         assert_eq!(ct.company.company_number, company.company_number);
-        assert_eq!(ct.company.fy1_year, company.fy1_year);
-        assert_eq!(ct.company.fy2_year, company.fy2_year);
-        assert_eq!(ct.company.fy1_rate, company.fy1_rate);
-        assert_eq!(ct.company.fy2_rate, company.fy2_rate);
+        assert_eq!(ct.accounts.fy1_year, accounts.fy1_year);
+        assert_eq!(ct.accounts.fy2_year, accounts.fy2_year);
+        assert_eq!(ct.accounts.fy1_rate, accounts.fy1_rate);
+        assert_eq!(ct.accounts.fy2_rate, accounts.fy2_rate);
         assert_eq!(
-            ct.company.accounting_period_start,
-            company.accounting_period_start
+            ct.accounts.period().start,
+            accounts.period().start
         );
         assert_eq!(
-            ct.company.accounting_period_end,
-            company.accounting_period_end
+            ct.accounts.period().end,
+            accounts.period().end
         );
 
         // -- profits & gains page -----------------------------------------
@@ -2904,22 +2942,22 @@ mod tests {
 
         assert_eq!(
             *ct.profit_per_accounts_by_fy
-                .get(&company.fy2_year)
+                .get(&accounts.fy2_year)
                 .unwrap_or(&0.0),
             1804.94
         );
         assert_eq!(
             *ct.profit_per_accounts_by_fy
-                .get(&company.fy1_year)
+                .get(&accounts.fy1_year)
                 .unwrap_or(&0.0),
             4837.88
         );
         assert_eq!(
-            *ct.aia_by_fy.get(&company.fy2_year).unwrap_or(&0.0),
+            *ct.aia_by_fy.get(&accounts.fy2_year).unwrap_or(&0.0),
             591.0
         );
         assert_eq!(
-            *ct.rnd_by_fy.get(&company.fy2_year).unwrap_or(&0.0),
+            *ct.rnd_by_fy.get(&accounts.fy2_year).unwrap_or(&0.0),
             465.0
         );
 
@@ -2928,7 +2966,7 @@ mod tests {
         // profit_before_tax must equal profit_per_accounts_by_fy[fy2]
         assert_eq!(
             *ct.profit_per_accounts_by_fy
-                .get(&ct.company.fy2_year)
+                .get(&ct.accounts.fy2_year)
                 .unwrap_or(&0.0),
             ct.profit_before_tax
         );

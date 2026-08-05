@@ -7,6 +7,16 @@ edition = "2024"
 name = "tally"
 path = "src/main.rs"
 
+[features]
+# Live Companies House enrichment integration test (in `src/config.rs`, the
+# `live_tests` module).  Enabled by default so `cargo test` exercises the
+# real (or sandbox) API (needs a key + `COMPANY_NUMBER` +
+# `UNIQUE_TAXPAYER_REF`); disable with `cargo test -p tally-cli
+# --no-default-features` to run fully offline — the live test is then
+# reported as ignored.
+default = ["api_tests"]
+api_tests = []
+
 [dependencies]
 # async
 tokio = { workspace = true, features = ["full"] }
@@ -24,3 +34,6 @@ anyhow.workspace = true
 # during workspace feature unification.
 ct600 = { path = "../../libs/ct600", default-features = false }
 ixbrl = { path = "../../libs/ixbrl" }
+
+[dev-dependencies]
+tempfile = "3.27.0"

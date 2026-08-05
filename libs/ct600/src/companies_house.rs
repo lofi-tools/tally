@@ -329,9 +329,8 @@ impl CompaniesHouseClient {
     /// reflects any shortened/lengthened periods and accounting-reference-date
     /// changes) — falling back on the *default* accounting periods computed
     /// from the company's registration date ([`Company::accounting_period_n`]
-    /// for the period containing today).  The caller's own
-    /// `accounting_period_start` / `accounting_period_end` fields are not
-    /// consulted: they describe the return period being produced, whereas the
+    /// for the period containing today).  The caller's own return-period
+    /// fields (the `accounts.period` being produced) are not consulted: the
     /// next period to file follows the registration-date schedule (or
     /// Companies House's).
     ///
@@ -812,10 +811,8 @@ impl FilingHistory {
 /// resolved.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NextAccountingPeriod {
-    /// Start of the next accounting period to file.
-    pub start: NaiveDate,
-    /// End of the next accounting period to file.
-    pub end: NaiveDate,
+    /// The next accounting period to file.
+    pub period: AccountingPeriod,
     /// Deadline to file the CT600 corporation-tax return with HMRC (12 months
     /// after the period end).
     pub deadline_to_file_hmrc_ct600: NaiveDate,
@@ -858,8 +855,7 @@ fn next_accounting_period_from(
         .unwrap_or_else(|| end + Months::new(9));
 
     NextAccountingPeriod {
-        start,
-        end,
+        period: AccountingPeriod { start, end },
         deadline_to_file_hmrc_ct600: end + Months::new(12),
         deadline_to_file_companies_house_accounts: companies_house_deadline,
     }
@@ -987,8 +983,10 @@ pub mod test_utils {
     use std::process::Command;
     use std::sync::LazyLock;
 
+    use chrono::NaiveDate;
     use snafu::Snafu;
 
+    use ixbrl::company::{AccountingPeriod, AccountsMeta};
     use ixbrl::ixbrl_fmt::ParsedIxBrlFacts;
     use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
 
@@ -1230,6 +1228,19 @@ pub mod test_utils {
             Self::fixture_profile(Self::sample_company_number(), "Acme Ltd", "2020-01-01")
         }
 
+        /// The sample company's set of accounts: the 2025 return period and
+        /// the default financial-year parameters — the `accounts` the sample
+        /// tax computation is built on.
+        pub fn sample_accounts_meta() -> AccountsMeta {
+            AccountsMeta {
+                period: Some(AccountingPeriod {
+                    start: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+                    end: NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
+                }),
+                ..AccountsMeta::default()
+            }
+        }
+
         /// The hardcoded fixtures: the fictional company profiles for the known
         /// company numbers, or `None` for unknown companies.
         pub fn company(company_number: &str) -> Option<CompanyProfile> {
@@ -1309,14 +1320,13 @@ pub mod test_utils {
             // served for it (by `tax.company_number()`) can never disagree with
             // the tax computation.
             let sample = Self::sample_company();
-            let company = ixbrl::company::Company::new(
+            let mut company = ixbrl::company::Company::new(
                 &sample.company_name,
                 "1234567890",
                 &sample.company_number,
-                chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-                chrono::NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
             );
-            Frs105CorpTax::from_parsed_facts(&facts, &company)
+            company.registration_date = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+            Frs105CorpTax::from_parsed_facts(&facts, &company, &Self::sample_accounts_meta())
         }
     }
 
@@ -1458,6 +1468,22 @@ mod tests {
 
     use ixbrl::ixbrl_fmt::ParsedIxBrlFacts;
 
+    /// Build a company with the historical `Company::new` five-argument
+    /// semantics: the registration date is anchored on the return-period
+    /// start (the default the constructor used to apply), keeping the
+    /// registration-date accounting schedule deterministic in the tests.
+    fn company_with_period(
+        name: &str,
+        tax_reference: &str,
+        company_number: &str,
+        period_start: NaiveDate,
+        _period_end: NaiveDate,
+    ) -> Company {
+        let mut company = Company::new(name, tax_reference, company_number);
+        company.registration_date = period_start;
+        company
+    }
+
     fn fixture_profile(company_number: &str, company_name: &str) -> CompanyProfile {
         CompanyProfile {
             company_number: company_number.to_string(),
@@ -1550,7 +1576,7 @@ mod tests {
             .with_cache_dir(cache_dir.path());
         let client = CompaniesHouseClient::new(config.with_unreachable_api());
 
-        let full = Company::new(
+        let full = company_with_period(
             "Acme Ltd",
             "1234567890",
             "9876543",
@@ -1580,7 +1606,7 @@ mod tests {
             .with_cache_dir(cache_dir.path());
         let client = CompaniesHouseClient::new(config.with_unreachable_api());
 
-        let partial = Company::new(
+        let partial = company_with_period(
             "",
             "1234567890",
             "",
@@ -1609,7 +1635,7 @@ mod tests {
             .with_cache_dir(cache_dir.path());
         let client = CompaniesHouseClient::new(config.with_unreachable_api());
 
-        let partial = Company::new(
+        let partial = company_with_period(
             "",
             "",
             "",
@@ -1647,7 +1673,7 @@ mod tests {
         assert_eq!(config.enrichment_number("Acme Ltd", "12345678"), None);
 
         let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
-        let company = Company::new(
+        let company = company_with_period(
             "",
             "",
             "",
@@ -1669,7 +1695,7 @@ mod tests {
         // 2. Without COMPANY_NUMBER, a client resolved afterwards leaves the
         //    same absent inputs alone (no cache lookup, no network).
         let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
-        let company = Company::new(
+        let company = company_with_period(
             "",
             "",
             "",
@@ -1687,7 +1713,7 @@ mod tests {
         //    (the cache holds a different profile and the client is offline).
         unsafe { std::env::set_var("COMPANY_NUMBER", "12345678") };
         let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
-        let company = Company::new(
+        let company = company_with_period(
             "Acme Ltd",
             "1234567890",
             "12345678",
@@ -1795,7 +1821,7 @@ mod tests {
         next_accounts_profile(cache_dir.path());
         let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
 
-        let company = Company::new(
+        let company = company_with_period(
             "",
             "1234567890",
             "12345678",
@@ -1807,8 +1833,8 @@ mod tests {
             .await
             .expect("next period from profile");
 
-        assert_eq!(next.start, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
-        assert_eq!(next.end, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
+        assert_eq!(next.period.start, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+        assert_eq!(next.period.end, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
         assert_eq!(
             next.deadline_to_file_companies_house_accounts,
             NaiveDate::from_ymd_opt(2026, 9, 30).unwrap()
@@ -1834,7 +1860,7 @@ mod tests {
         );
         let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
 
-        let company = Company::new(
+        let company = company_with_period(
             "",
             "1234567890",
             "12345678",
@@ -1847,8 +1873,8 @@ mod tests {
             .expect("fallback period");
 
         let expected = company.accounting_period_containing(chrono::Utc::now().date_naive());
-        assert_eq!(next.start, expected.start);
-        assert_eq!(next.end, expected.end);
+        assert_eq!(next.period.start, expected.start);
+        assert_eq!(next.period.end, expected.end);
         assert_eq!(
             next.deadline_to_file_companies_house_accounts,
             expected.end + Months::new(9)
@@ -1877,7 +1903,7 @@ mod tests {
         seed_cache(cache_dir.path(), &profile);
         let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
 
-        let company = Company::new(
+        let company = company_with_period(
             "",
             "1234567890",
             "12345678",
@@ -1892,7 +1918,7 @@ mod tests {
             next.deadline_to_file_companies_house_accounts,
             NaiveDate::from_ymd_opt(2026, 10, 15).unwrap()
         );
-        assert_eq!(next.end, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
+        assert_eq!(next.period.end, NaiveDate::from_ymd_opt(2025, 12, 31).unwrap());
     }
 
     /// A `next_accounts` block with only `period_start_on` anchors the period
@@ -1915,7 +1941,7 @@ mod tests {
         seed_cache(cache_dir.path(), &profile);
         let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
 
-        let company = Company::new(
+        let company = company_with_period(
             "",
             "1234567890",
             "12345678",
@@ -1927,11 +1953,11 @@ mod tests {
             .await
             .expect("anchored period");
 
-        assert_eq!(next.start, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+        assert_eq!(next.period.start, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
         // The registration-date period containing 2025-01-01.
         let anchored =
             company.accounting_period_containing(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
-        assert_eq!(next.end, anchored.end);
+        assert_eq!(next.period.end, anchored.end);
         assert_eq!(
             next.deadline_to_file_hmrc_ct600,
             anchored.end + Months::new(12)
@@ -1964,14 +1990,18 @@ mod tests {
     /// A tax computation with no company name / number, so the enrichment
     /// path of [`CompaniesHouseFormValues::company_form_values`] runs.
     fn tax_without_company_details() -> Frs105CorpTax {
-        let company = Company::new(
+        let company = company_with_period(
             "",
             "",
             "",
             NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
         );
-        Frs105CorpTax::from_parsed_facts(&ParsedIxBrlFacts::default(), &company)
+        Frs105CorpTax::from_parsed_facts(
+            &ParsedIxBrlFacts::default(),
+            &company,
+            &test_utils::TestData::sample_accounts_meta(),
+        )
     }
 
     /// Absent company inputs + configured number: enriched from the cached
@@ -2112,25 +2142,20 @@ mod live_tests {
     async fn live_next_accounting_period() {
         let cache_dir = tempfile::tempdir().unwrap();
         let number = company_number();
-        let company = Company::new(
-            "",
-            "",
-            &number,
-            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-            NaiveDate::from_ymd_opt(2024, 12, 31).unwrap(),
-        );
+        let mut company = Company::new("", "", &number);
+        company.registration_date = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
         let next = live_client(cache_dir.path())
             .next_accounting_period(&company)
             .await
             .expect("resolve the next accounting period");
 
-        assert!(next.start < next.end, "the period is ordered start < end");
+        assert!(next.period.start < next.period.end, "the period is ordered start < end");
         assert!(
-            next.deadline_to_file_hmrc_ct600 >= next.end,
+            next.deadline_to_file_hmrc_ct600 >= next.period.end,
             "the CT600 deadline is on or after the period end"
         );
         assert!(
-            next.deadline_to_file_companies_house_accounts >= next.end,
+            next.deadline_to_file_companies_house_accounts >= next.period.end,
             "the Companies House deadline is on or after the period end"
         );
     }

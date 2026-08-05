@@ -32,9 +32,10 @@
 //! | `company.name` | config file → Companies House (needs an API key + company number) |
 //! | `company.company_number` | config file → `COMPANY_NUMBER` (env) |
 //! | `company.tax_reference` (UTR) | `UNIQUE_TAXPAYER_REF` (env) → config file |
-//! | `company.accounting_period_start` / `end` | config file (both together) → deduced from `accounts_made_up_to` / `--accounts-made-up-to` (the 12 months ending on that date) → Companies House next accounting period |
-//! | `company.accounts_made_up_to` / `--accounts-made-up-to` | command line (flag) → config file; deduces the return period as the 12 months ending on the date |
-//! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default (period start) |
+//! | `accounts.period` | config file (both dates) → deduced from `accounts.accounts_made_up_to` / `--accounts-made-up-to` (the 12 months ending on that date) → Companies House next accounting period |
+//! | `accounts.accounts_made_up_to` / `--accounts-made-up-to` | command line (flag) → config file; deduces the return period as the 12 months ending on the date |
+//! | `accounts.fy1_year` / `fy2_year` / `fy1_rate` / `fy2_rate` | config file → defaults (2019 / 2020 at 19%) |
+//! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default |
 //! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
 //! | `metadata.*` | config file only |
 //! | `--book`, `--out` | command line only |
@@ -44,7 +45,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use chrono::{Duration, Months, NaiveDate};
 use ct600::{CompaniesHouseClient, CompaniesHouseClientType};
-use ixbrl::company::Company;
+use ixbrl::company::{AccountingPeriod, AccountsMeta, Company};
 use ixbrl::reports::uk_frs105_accounts::AccountsMetadata;
 use serde::Deserialize;
 
@@ -132,20 +133,25 @@ fn non_empty_env(name: &str) -> Option<String> {
 }
 
 /// The JSON config file's contents (`--config-path`): the nested `company`
-/// identity block plus the flat accounts-metadata fields.
+/// identity block, the `accounts` sub-object and the flat accounts-metadata
+/// fields.
 ///
 /// Every field of `company` is optional — the company name is resolved from
 /// Companies House at runtime when an API key is configured, the company
 /// number falls back on the `COMPANY_NUMBER` environment variable, and the
 /// Corporation Tax reference (UTR) falls back on the `UNIQUE_TAXPAYER_REF`
 /// environment variable (which wins over `company.tax_reference`).  The
-/// return period is optional too: an explicit start + end wins, otherwise
-/// the period is deduced from `company.accounts_made_up_to` or comes from
-/// Companies House.
+/// `accounts` sub-object is optional too: an explicit `accounts.period`
+/// wins, otherwise the period is deduced from `accounts.accounts_made_up_to`
+/// or comes from Companies House, and the financial-year parameters default.
 #[derive(Deserialize)]
 pub struct FileConfig {
     /// The config file's company identity block; every field optional.
     pub company: RawCompanyConfig,
+    /// The config file's `accounts` sub-object ([`AccountsMeta`], the exact
+    /// shape of the `accounts.*` keys); every field optional.
+    #[serde(default)]
+    pub accounts: AccountsMeta,
     /// The config file's flat accounts-metadata fields (all required).
     #[serde(flatten)]
     pub metadata: AccountsMetadata,
@@ -161,16 +167,15 @@ impl FileConfig {
     }
 }
 
-/// The company identity block of the config file.
+/// The company identity block of the config file (`company.*`).
 ///
 /// Every field is optional: the company name is resolved from Companies
 /// House at runtime when an API key is configured, the company number falls
 /// back on the `COMPANY_NUMBER` environment variable, and the Corporation
 /// Tax reference (UTR) falls back on the `UNIQUE_TAXPAYER_REF` environment
-/// variable (which wins over `company.tax_reference`).  The return period is
-/// an explicit `accounting_period_start` + `accounting_period_end` when
-/// given; otherwise it is deduced from `accounts_made_up_to` (the 12 months
-/// ending on it); otherwise it comes from Companies House at runtime.
+/// variable (which wins over `company.tax_reference`).  The return period
+/// and financial-year parameters are not here — they live in the config
+/// file's `accounts.*` sub-object ([`AccountsMeta`]).
 ///
 /// [`resolve_company`] validates the resolved identity and errors clearly
 /// when it is incomplete.
@@ -179,21 +184,18 @@ pub struct RawCompanyConfig {
     pub name: Option<String>,
     pub tax_reference: Option<String>,
     pub company_number: Option<String>,
-    pub accounting_period_start: Option<NaiveDate>,
-    pub accounting_period_end: Option<NaiveDate>,
-    /// A date at which the accounts are made (the accounting-reference
-    /// date): the return period is deduced as the 12 months ending on this
-    /// date when no explicit `accounting_period_start` / `end` is given.
-    pub accounts_made_up_to: Option<NaiveDate>,
 }
 
 /// Resolved (strict) configuration: every field is present, or resolution
 /// errored with an explanation of the input that was still missing.
 #[derive(Debug)]
 pub struct ResolvedConfig {
-    /// The fully-resolved company: identity, registration date and return
-    /// period.
+    /// The fully-resolved company identity (name, UTR, number, registration
+    /// date).
     pub company: Company,
+    /// The set of accounts being produced: the return period (resolved) and
+    /// the financial-year tax parameters.
+    pub accounts: AccountsMeta,
     /// The accounts metadata for the report.
     pub metadata: AccountsMetadata,
     /// The GnuCash ledger to read.
@@ -217,7 +219,7 @@ pub struct Ct600Config {
     pub config_path: PathBuf,
     /// The `--accounts-made-up-to` value: a date at which the accounts are
     /// made; the return period is deduced as the 12 months ending on it
-    /// (wins over the config file's `company.accounts_made_up_to`).
+    /// (wins over the config file's `accounts.accounts_made_up_to`).
     pub accounts_made_up_to: Option<NaiveDate>,
     /// The `--book` value (required; no other source).
     pub book_path: Option<PathBuf>,
@@ -235,9 +237,11 @@ impl Ct600Config {
     pub async fn resolve(self, env: &RawEnvConfig) -> Result<ResolvedConfig> {
         let file = FileConfig::from_file(&self.config_path)?;
         // The made-up-to date: the flag wins over the config file's
-        // `company.accounts_made_up_to` (merged inside
+        // `accounts.accounts_made_up_to` (merged inside
         // `resolve_company_inputs`).
-        let resolved = resolve_company_inputs(&file.company, env, self.accounts_made_up_to).await?;
+        let resolved =
+            resolve_company_inputs(&file.company, &file.accounts, env, self.accounts_made_up_to)
+                .await?;
 
         // The CLI paths have no alternative source; collect them alongside the
         // missing company identity so the error names everything in one go.
@@ -266,6 +270,9 @@ impl Ct600Config {
             company: resolved
                 .company
                 .expect("no missing inputs means the company is resolved"),
+            accounts: resolved
+                .accounts
+                .expect("no missing inputs means the accounts are resolved"),
             metadata: file.metadata,
             book_path: self.book_path.expect("book_path validated present"),
             out_dir: self.out_dir.expect("out_dir validated present"),
@@ -277,17 +284,21 @@ impl Ct600Config {
 /// A still-missing config input, with a per-input reason for the error.
 type MissingInputs = Vec<(&'static str, String)>;
 
-/// The company identity, resolved as far as the sources allow.
+/// The company identity and accounts, resolved as far as the sources allow.
 struct ResolvedCompanyInputs {
     /// The resolved company; present when no identity input is missing.
     company: Option<Company>,
-    /// Every identity input still missing, with how to resolve it.
+    /// The resolved set of accounts (with the return period filled in);
+    /// present when no input is missing.
+    accounts: Option<AccountsMeta>,
+    /// Every still-missing input, with how to resolve it.
     missing: MissingInputs,
 }
 
-/// Resolve the company identity from the config file's `company` block and
-/// the captured environment, returning the result together with the inputs
-/// the sources could not provide.
+/// Resolve the company identity and the set of accounts from the config
+/// file's `company` block and `accounts` sub-object plus the captured
+/// environment, returning the result together with the inputs the sources
+/// could not provide.
 ///
 /// The company number comes from `company.company_number`, falling back on
 /// the environment's `COMPANY_NUMBER` ([`RawEnvConfig::company_number`]).
@@ -300,15 +311,17 @@ struct ResolvedCompanyInputs {
 /// The Corporation Tax reference (UTR) is always required — Companies House
 /// cannot provide it — and comes from the environment's `UNIQUE_TAXPAYER_REF`
 /// (winning) or `company.tax_reference`.  The return period instead falls
-/// back: an explicit `accounting_period_start` + `accounting_period_end`
-/// wins; otherwise a made-up-to date (the `--accounts-made-up-to` flag,
-/// winning, or the config's `company.accounts_made_up_to`) gives the 12
-/// months ending on that date; otherwise the next accounting period to file
-/// is resolved from Companies House ([`CompaniesHouseClient::
-/// next_accounting_period`], needing an API key and company number), which
-/// also supplies the registration date when still unknown.
+/// back: an explicit `accounts.period` (both dates) wins; otherwise a
+/// made-up-to date (the `--accounts-made-up-to` flag, winning, or the
+/// config's `accounts.accounts_made_up_to`) gives the 12 months ending on
+/// that date; otherwise the next accounting period to file is resolved from
+/// Companies House ([`CompaniesHouseClient::next_accounting_period`], needing
+/// an API key and company number), which also supplies the registration date
+/// when still unknown.  The financial-year parameters come from the config's
+/// `accounts.*` fields, defaulting to 2019 / 2020 at 19%.
 async fn resolve_company_inputs(
     raw: &RawCompanyConfig,
+    raw_accounts: &AccountsMeta,
     env: &RawEnvConfig,
     made_up_to_override: Option<NaiveDate>,
 ) -> Result<ResolvedCompanyInputs> {
@@ -360,23 +373,21 @@ async fn resolve_company_inputs(
         }
     }
 
-    // The return period: an explicit `accounting_period_start` +
-    // `accounting_period_end` in the config wins; otherwise a made-up-to
-    // date (the `--accounts-made-up-to` flag, winning, or the config's
-    // `company.accounts_made_up_to`) gives the 12 months ending on that
-    // date; otherwise the next accounting period to file is resolved from
-    // Companies House (needs an API key and company number).
+    // The return period: an explicit `accounts.period` (both dates) in the
+    // config wins; otherwise a made-up-to date (the `--accounts-made-up-to`
+    // flag, winning, or the config's `accounts.accounts_made_up_to`) gives
+    // the 12 months ending on that date; otherwise the next accounting
+    // period to file is resolved from Companies House (needs an API key and
+    // company number).
     let today = chrono::Utc::now().date_naive();
-    let made_up_to = made_up_to_override.or(raw.accounts_made_up_to);
-    let mut period_start = raw.accounting_period_start;
-    let mut period_end = raw.accounting_period_end;
-    if period_start.is_some() != period_end.is_some() {
-        // A one-sided override: leave the missing side to be reported below;
-        // no default is applied to a half-provided period.
-    } else if period_start.is_none() {
+    let made_up_to = made_up_to_override.or(raw_accounts.accounts_made_up_to);
+    let mut resolved_period = raw_accounts.period;
+    if resolved_period.is_none() {
         if let Some(end) = made_up_to {
-            period_start = Some(end - Months::new(12) + Duration::days(1));
-            period_end = Some(end);
+            resolved_period = Some(AccountingPeriod {
+                start: end - Months::new(12) + Duration::days(1),
+                end,
+            });
         } else if api_key_configured && let Some(number) = &company_number {
             // The default: the next accounting period to file.  The profile
             // also supplies the registration date when still unknown, so the
@@ -393,7 +404,7 @@ async fn resolve_company_inputs(
             {
                 registration_date = Some(created);
             }
-            let mut provisional = Company::new("", "", number.clone(), today, today);
+            let mut provisional = Company::new("", "", number.clone());
             provisional.registration_date = registration_date.unwrap_or(today);
             let next = client
                 .next_accounting_period(&provisional)
@@ -403,8 +414,7 @@ async fn resolve_company_inputs(
                         "resolve the next accounting period for '{number}' from Companies House"
                     )
                 })?;
-            period_start = Some(next.start);
-            period_end = Some(next.end);
+            resolved_period = Some(next.period);
         }
     }
 
@@ -439,29 +449,18 @@ async fn resolve_company_inputs(
                 .to_string(),
         ));
     }
-    if period_start.is_none() || period_end.is_none() {
-        let reason = if raw.accounting_period_start.is_some() || raw.accounting_period_end.is_some()
-        {
-            "accounting_period_start and accounting_period_end must be provided together \
-             (or omit both to deduce the return period)"
-                .to_string()
-        } else if api_key_configured {
+    if resolved_period.is_none() {
+        let reason = if api_key_configured {
             "no company number to resolve the return period from (set company.company_number \
              or COMPANY_NUMBER)"
                 .to_string()
         } else {
             "the return period cannot be resolved from Companies House without an API key; \
              set COMPANIES_HOUSE_API_KEY (or COMPANIES_HOUSE_SANDBOX_API_KEY), or add \
-             accounting_period_start + accounting_period_end (or \
-             company.accounts_made_up_to) to the config file"
+             accounts.period (or accounts.accounts_made_up_to) to the config file"
                 .to_string()
         };
-        if period_start.is_none() {
-            missing.push(("company.accounting_period_start", reason.clone()));
-        }
-        if period_end.is_none() {
-            missing.push(("company.accounting_period_end", reason));
-        }
+        missing.push(("accounts.period", reason));
     }
 
     let company = if missing.is_empty() {
@@ -469,8 +468,6 @@ async fn resolve_company_inputs(
             name.expect("name validated present"),
             tax_reference.expect("tax_reference validated present"),
             company_number.expect("company_number validated present"),
-            period_start.expect("period_start validated present"),
-            period_end.expect("period_end validated present"),
         );
         if let Some(date) = registration_date {
             company.registration_date = date;
@@ -480,7 +477,22 @@ async fn resolve_company_inputs(
         None
     };
 
-    Ok(ResolvedCompanyInputs { company, missing })
+    // The resolved accounts: the config's `accounts.*` with the return
+    // period filled in (the financial-year parameters stay as given, or
+    // default).
+    let accounts = if missing.is_empty() {
+        let mut accounts = raw_accounts.clone();
+        accounts.period = resolved_period;
+        Some(accounts)
+    } else {
+        None
+    };
+
+    Ok(ResolvedCompanyInputs {
+        company,
+        accounts,
+        missing,
+    })
 }
 
 /// Resolve the company identity, erroring with every missing input listed.
@@ -491,9 +503,10 @@ async fn resolve_company_inputs(
 async fn resolve_company(
     config_path: &Path,
     raw: &RawCompanyConfig,
+    accounts: &AccountsMeta,
     env: &RawEnvConfig,
 ) -> Result<Company> {
-    let resolved = resolve_company_inputs(raw, env, None).await?;
+    let resolved = resolve_company_inputs(raw, accounts, env, None).await?;
     if !resolved.missing.is_empty() {
         bail!("{}", format_missing(config_path, &resolved.missing));
     }
@@ -526,15 +539,24 @@ mod tests {
         name: Option<&str>,
         tax_reference: Option<&str>,
         company_number: Option<&str>,
-        with_period: bool,
     ) -> RawCompanyConfig {
         RawCompanyConfig {
             name: name.map(str::to_string),
             tax_reference: tax_reference.map(str::to_string),
             company_number: company_number.map(str::to_string),
-            accounting_period_start: with_period.then(|| date(2020, 1, 1)),
-            accounting_period_end: with_period.then(|| date(2020, 12, 31)),
-            accounts_made_up_to: None,
+        }
+    }
+
+    /// An `accounts` sub-object with the 2020 calendar-year return period
+    /// (or none) and an optional made-up-to date.
+    fn accounts_meta(with_period: bool, made_up_to: Option<NaiveDate>) -> AccountsMeta {
+        AccountsMeta {
+            period: with_period.then(|| AccountingPeriod {
+                start: date(2020, 1, 1),
+                end: date(2020, 12, 31),
+            }),
+            accounts_made_up_to: made_up_to,
+            ..AccountsMeta::default()
         }
     }
 
@@ -569,31 +591,39 @@ mod tests {
             Some("Example Biz Ltd."),
             Some("8596148860"),
             Some("12345678"),
-            true,
         );
-        let company = resolve_company(Path::new("test.json"), &complete, &empty_env)
-            .await
-            .expect("complete config resolves");
+        let company = resolve_company(
+            Path::new("test.json"),
+            &complete,
+            &accounts_meta(true, None),
+            &empty_env,
+        )
+        .await
+        .expect("complete config resolves");
         assert_eq!(company.name, "Example Biz Ltd.");
         assert_eq!(company.tax_reference, "8596148860");
         assert_eq!(company.company_number, "12345678");
         // No Companies House lookup happened, so the registration date is
-        // the accounting-period start (Company::new's default).
-        assert_eq!(company.registration_date, date(2020, 1, 1));
+        // the unset default (Company::new's).
+        assert_eq!(company.registration_date, NaiveDate::default());
 
         // Incomplete config without an API key: clear error naming every
         // missing field and the key needed to resolve them.
-        let incomplete = company_config(None, None, None, false);
-        let err = resolve_company(Path::new("test.json"), &incomplete, &empty_env)
-            .await
-            .expect_err("incomplete config must error");
+        let incomplete = company_config(None, None, None);
+        let err = resolve_company(
+            Path::new("test.json"),
+            &incomplete,
+            &accounts_meta(false, None),
+            &empty_env,
+        )
+        .await
+        .expect_err("incomplete config must error");
         let msg = format!("{err:#}");
         for field in [
             "company.name",
             "company.tax_reference",
             "company.company_number",
-            "company.accounting_period_start",
-            "company.accounting_period_end",
+            "accounts.period",
         ] {
             assert!(msg.contains(field), "error should mention {field}: {msg}");
         }
@@ -603,15 +633,25 @@ mod tests {
 
         // Empty-string fields count as absent (matching the libraries'
         // resolution conventions): an empty name or UTR still errors.
-        let empty_name = company_config(Some(""), Some("8596148860"), Some("12345678"), true);
-        let err = resolve_company(Path::new("test.json"), &empty_name, &empty_env)
-            .await
-            .expect_err("an empty company.name must error");
+        let empty_name = company_config(Some(""), Some("8596148860"), Some("12345678"));
+        let err = resolve_company(
+            Path::new("test.json"),
+            &empty_name,
+            &accounts_meta(true, None),
+            &empty_env,
+        )
+        .await
+        .expect_err("an empty company.name must error");
         assert!(format!("{err:#}").contains("company.name"));
-        let empty_utr = company_config(Some("Example Biz Ltd."), Some(""), Some("12345678"), true);
-        let err = resolve_company(Path::new("test.json"), &empty_utr, &empty_env)
-            .await
-            .expect_err("an empty company.tax_reference must error");
+        let empty_utr = company_config(Some("Example Biz Ltd."), Some(""), Some("12345678"));
+        let err = resolve_company(
+            Path::new("test.json"),
+            &empty_utr,
+            &accounts_meta(true, None),
+            &empty_env,
+        )
+        .await
+        .expect_err("an empty company.tax_reference must error");
         assert!(format!("{err:#}").contains("company.tax_reference"));
 
         // The captured `UNIQUE_TAXPAYER_REF` wins over the config's
@@ -619,6 +659,7 @@ mod tests {
         let company = resolve_company(
             Path::new("test.json"),
             &complete,
+            &accounts_meta(true, None),
             &env(Some("1111111111"), None, None, None),
         )
         .await
@@ -627,19 +668,25 @@ mod tests {
 
         // No UTR anywhere (no env value, no config field): the error names
         // `UNIQUE_TAXPAYER_REF` and the config fallback.
-        let no_utr = company_config(Some("Example Biz Ltd."), None, Some("12345678"), true);
-        let err = resolve_company(Path::new("test.json"), &no_utr, &empty_env)
-            .await
-            .expect_err("a missing UTR must error");
+        let no_utr = company_config(Some("Example Biz Ltd."), None, Some("12345678"));
+        let err = resolve_company(
+            Path::new("test.json"),
+            &no_utr,
+            &accounts_meta(true, None),
+            &empty_env,
+        )
+        .await
+        .expect_err("a missing UTR must error");
         let msg = format!("{err:#}");
         assert!(msg.contains("company.tax_reference"));
         assert!(msg.contains("UNIQUE_TAXPAYER_REF"));
 
         // The captured `COMPANY_NUMBER` fills an absent config number.
-        let no_number = company_config(Some("Example Biz Ltd."), Some("8596148860"), None, true);
+        let no_number = company_config(Some("Example Biz Ltd."), Some("8596148860"), None);
         let company = resolve_company(
             Path::new("test.json"),
             &no_number,
+            &accounts_meta(true, None),
             &env(None, Some("12345678"), None, None),
         )
         .await
@@ -650,6 +697,7 @@ mod tests {
         let company = resolve_company(
             Path::new("test.json"),
             &complete,
+            &accounts_meta(true, None),
             &env(None, Some("99999999"), None, None),
         )
         .await
@@ -661,6 +709,7 @@ mod tests {
         let company = resolve_company(
             Path::new("test.json"),
             &complete,
+            &accounts_meta(true, None),
             &env(None, None, Some("test-key"), None),
         )
         .await
@@ -674,6 +723,9 @@ mod tests {
     /// the resolution tests above pass the env in explicitly.
     #[test]
     fn env_snapshot_captures_non_empty_variables() {
+        // The env lock serialises this mutation against the live test's
+        // `RawEnvConfig::from_env()` (see `ENV_LOCK`).
+        let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
             std::env::set_var("UNIQUE_TAXPAYER_REF", "1111111111");
             std::env::set_var("COMPANY_NUMBER", "12345678");
@@ -734,10 +786,12 @@ mod tests {
         let path = Path::new("../../libs/ixbrl/example_data/example2/input-company.json");
         let empty_env = RawEnvConfig::default();
 
-        // The file parses into a FileConfig carrying the company block and
-        // the flattened accounts metadata.
+        // The file parses into a FileConfig carrying the company block, the
+        // accounts sub-object and the flattened accounts metadata.
         let file = FileConfig::from_file(path).expect("parse example config");
         assert_eq!(file.company.name.as_deref(), Some("Example Biz Ltd."));
+        assert_eq!(file.accounts.period().start, date(2020, 1, 1));
+        assert_eq!(file.accounts.period().end, date(2020, 12, 31));
         assert_eq!(file.metadata.report_title, "Unaudited Micro-Entity Accounts");
 
         // Without the CLI paths, resolution errors naming each missing one.
@@ -776,7 +830,11 @@ mod tests {
         assert_eq!(resolved.company.name, "Example Biz Ltd.");
         assert_eq!(resolved.company.tax_reference, "8596148860");
         assert_eq!(resolved.company.company_number, "12345678");
-        assert_eq!(resolved.company.registration_date, date(2020, 1, 1));
+        assert_eq!(resolved.company.registration_date, NaiveDate::default());
+        // The accounts sub-object is carried through with the period.
+        assert_eq!(resolved.accounts.period().start, date(2020, 1, 1));
+        assert_eq!(resolved.accounts.period().end, date(2020, 12, 31));
+        assert_eq!(resolved.accounts.fy1_year, 2019);
         assert_eq!(resolved.book_path, PathBuf::from("input.gnucash"));
         assert_eq!(resolved.out_dir, PathBuf::from("out"));
         assert_eq!(resolved.metadata.report_title, "Unaudited Micro-Entity Accounts");
@@ -800,45 +858,57 @@ mod tests {
 
     /// The return period deduced from a made-up-to date, entirely offline:
     /// the 12 months ending on the date, with the flag winning over the
-    /// config's `accounts_made_up_to`, and an explicit start + end still
-    /// winning over both.
+    /// config's `accounts.accounts_made_up_to`, and an explicit
+    /// `accounts.period` still winning over both.
     #[tokio::test]
     async fn made_up_to_deduces_the_return_period() {
         let empty_env = env(None, None, None, None);
-        let no_period = || {
-            RawCompanyConfig {
-                accounts_made_up_to: Some(date(2020, 12, 31)),
-                ..company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"), false)
-            }
-        };
+        let identity = company_config(
+            Some("Example Biz Ltd."),
+            Some("8596148860"),
+            Some("12345678"),
+        );
 
-        // The config's `accounts_made_up_to`: the 12 months ending on it.
-        let resolved = resolve_company_inputs(&no_period(), &empty_env, None)
-            .await
-            .expect("resolves");
-        let company = resolved.company.expect("resolved");
-        assert_eq!(company.accounting_period_start, date(2020, 1, 1));
-        assert_eq!(company.accounting_period_end, date(2020, 12, 31));
+        // The config's `accounts.accounts_made_up_to`: the 12 months ending
+        // on it.
+        let resolved = resolve_company_inputs(
+            &identity,
+            &accounts_meta(false, Some(date(2020, 12, 31))),
+            &empty_env,
+            None,
+        )
+        .await
+        .expect("resolves");
+        let accounts = resolved.accounts.expect("resolved");
+        assert_eq!(accounts.period().start, date(2020, 1, 1));
+        assert_eq!(accounts.period().end, date(2020, 12, 31));
 
         // The flag (the override) wins over the config's date.
-        let resolved = resolve_company_inputs(&no_period(), &empty_env, Some(date(2021, 3, 31)))
-            .await
-            .expect("resolves");
-        let company = resolved.company.expect("resolved");
-        assert_eq!(company.accounting_period_start, date(2020, 4, 1));
-        assert_eq!(company.accounting_period_end, date(2021, 3, 31));
+        let resolved = resolve_company_inputs(
+            &identity,
+            &accounts_meta(false, Some(date(2020, 12, 31))),
+            &empty_env,
+            Some(date(2021, 3, 31)),
+        )
+        .await
+        .expect("resolves");
+        let accounts = resolved.accounts.expect("resolved");
+        assert_eq!(accounts.period().start, date(2020, 4, 1));
+        assert_eq!(accounts.period().end, date(2021, 3, 31));
 
-        // An explicit start + end still wins over the made-up-to date.
-        let explicit = RawCompanyConfig {
-            accounts_made_up_to: Some(date(2020, 12, 31)),
-            ..company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"), true)
-        };
-        let resolved = resolve_company_inputs(&explicit, &empty_env, Some(date(2021, 3, 31)))
-            .await
-            .expect("resolves");
-        let company = resolved.company.expect("resolved");
-        assert_eq!(company.accounting_period_start, date(2020, 1, 1));
-        assert_eq!(company.accounting_period_end, date(2020, 12, 31));
+        // An explicit `accounts.period` still wins over the made-up-to date
+        // (config or flag).
+        let resolved = resolve_company_inputs(
+            &identity,
+            &accounts_meta(true, Some(date(2020, 12, 31))),
+            &empty_env,
+            Some(date(2021, 3, 31)),
+        )
+        .await
+        .expect("resolves");
+        let accounts = resolved.accounts.expect("resolved");
+        assert_eq!(accounts.period().start, date(2020, 1, 1));
+        assert_eq!(accounts.period().end, date(2020, 12, 31));
     }
 
     /// Without any period input and no API key, the error names the period
@@ -846,50 +916,16 @@ mod tests {
     #[tokio::test]
     async fn missing_period_without_api_key_errors_with_options() {
         let empty_env = env(None, None, None, None);
-        let raw =
-            company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"), false);
-        let resolved = resolve_company_inputs(&raw, &empty_env, None)
+        let raw = company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"));
+        let resolved = resolve_company_inputs(&raw, &accounts_meta(false, None), &empty_env, None)
             .await
             .expect("no hard error, the missing inputs are reported");
         assert!(resolved.company.is_none());
+        assert!(resolved.accounts.is_none());
         let msg = format!("{}", format_missing(Path::new("test.json"), &resolved.missing));
-        assert!(msg.contains("company.accounting_period_start"), "{msg}");
-        assert!(msg.contains("company.accounting_period_end"), "{msg}");
-        assert!(msg.contains("company.accounts_made_up_to"), "{msg}");
+        assert!(msg.contains("accounts.period"), "{msg}");
+        assert!(msg.contains("accounts.accounts_made_up_to"), "{msg}");
         assert!(msg.contains("COMPANIES_HOUSE_API_KEY"), "{msg}");
-    }
-
-    /// A one-sided period override (only one of start / end) is a user
-    /// error: no default is applied and the missing side is reported.
-    #[tokio::test]
-    async fn one_sided_period_errors() {
-        let empty_env = env(None, None, None, None);
-
-        // Only the start given.
-        let raw = RawCompanyConfig {
-            accounting_period_start: Some(date(2020, 1, 1)),
-            ..company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"), false)
-        };
-        let resolved = resolve_company_inputs(&raw, &empty_env, None)
-            .await
-            .expect("no hard error, the missing inputs are reported");
-        assert!(resolved.company.is_none());
-        let msg = format!("{}", format_missing(Path::new("test.json"), &resolved.missing));
-        assert!(msg.contains("company.accounting_period_end"), "{msg}");
-        assert!(msg.contains("must be provided together"), "{msg}");
-
-        // Only the end given (symmetric).
-        let raw = RawCompanyConfig {
-            accounting_period_end: Some(date(2020, 12, 31)),
-            ..company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"), false)
-        };
-        let resolved = resolve_company_inputs(&raw, &empty_env, None)
-            .await
-            .expect("no hard error, the missing inputs are reported");
-        assert!(resolved.company.is_none());
-        let msg = format!("{}", format_missing(Path::new("test.json"), &resolved.missing));
-        assert!(msg.contains("company.accounting_period_start"), "{msg}");
-        assert!(msg.contains("must be provided together"), "{msg}");
     }
 
     /// With an API key but no company number, and no period input, the
@@ -898,14 +934,13 @@ mod tests {
     #[tokio::test]
     async fn missing_period_with_api_key_but_no_number_errors() {
         let env = env(None, None, Some("test-key"), None);
-        let raw =
-            company_config(Some("Example Biz Ltd."), Some("8596148860"), None, false);
-        let resolved = resolve_company_inputs(&raw, &env, None)
+        let raw = company_config(Some("Example Biz Ltd."), Some("8596148860"), None);
+        let resolved = resolve_company_inputs(&raw, &accounts_meta(false, None), &env, None)
             .await
             .expect("no hard error, the missing inputs are reported");
         assert!(resolved.company.is_none());
         let msg = format!("{}", format_missing(Path::new("test.json"), &resolved.missing));
-        assert!(msg.contains("company.accounting_period_start"), "{msg}");
+        assert!(msg.contains("accounts.period"), "{msg}");
         assert!(msg.contains("no company number to resolve the return period"), "{msg}");
     }
 
@@ -940,19 +975,148 @@ mod tests {
         let mut env = env(None, None, Some("test-key"), None);
         env.cache_dir = Some(cache_dir.clone());
 
-        let raw =
-            company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"), false);
-        let resolved = resolve_company_inputs(&raw, &env, None)
+        let raw = company_config(Some("Example Biz Ltd."), Some("8596148860"), Some("12345678"));
+        let resolved = resolve_company_inputs(&raw, &accounts_meta(false, None), &env, None)
             .await
             .expect("resolves from the cached profile");
+        let accounts = resolved.accounts.expect("resolved");
+        assert_eq!(accounts.period().start, date(2025, 1, 1));
+        assert_eq!(accounts.period().end, date(2025, 12, 31));
         let company = resolved.company.expect("resolved");
-        assert_eq!(company.accounting_period_start, date(2025, 1, 1));
-        assert_eq!(company.accounting_period_end, date(2025, 12, 31));
         // The profile also supplies the registration date, anchoring the
         // registration-date schedule used as the fallback inside
         // `next_accounting_period`.
         assert_eq!(company.registration_date, date(2001, 1, 1));
 
         let _ = std::fs::remove_dir_all(&cache_dir);
+    }
+}
+
+// ============================================================================
+// Live enrichment tests (part of the default-enabled `api_tests` feature)
+// ============================================================================
+
+/// Serialises the tests that read or mutate the process environment: the
+/// live test's `RawEnvConfig::from_env()` and the env-mutation test in
+/// [`tests`] below.  Without the lock they race in a parallel run and the
+/// live test could capture the fixture values (`live-key` / `12345678` …)
+/// and 401 against the real API.
+#[cfg(test)]
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Live Companies House enrichment tests (part of the default-enabled
+/// `api_tests` feature).
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    /// Live end-to-end enrichment of the *minimum* config from the Companies
+    /// House API, and the cache-first second run.
+    ///
+    /// With `COMPANIES_HOUSE_API_KEY` (or `COMPANIES_HOUSE_SANDBOX_API_KEY`),
+    /// `COMPANY_NUMBER` and `UNIQUE_TAXPAYER_REF` exported, a config with an
+    /// empty `company` block is enriched entirely from the company's live
+    /// profile: the name and registration date come from the API response,
+    /// and the return period defaults to the next accounting period to file.
+    /// The fetched profile is cached on disk in a scratch directory, and a
+    /// second resolution against that cache — with a placeholder key that
+    /// could never fetch the real profile — resolves to the same company,
+    /// proving the second run never touches the network.
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "api_tests"),
+        ignore = "requires a Companies House API key, COMPANY_NUMBER and UNIQUE_TAXPAYER_REF"
+    )]
+    async fn live_minimal_config_enriched_from_api_and_cached() {
+        // The ambient environment is captured exactly as the CLI captures
+        // it, with the response cache redirected to a scratch directory the
+        // test owns (so the first run really hits the network and the cache
+        // state is deterministic).
+        let cache_dir = tempfile::tempdir().expect("create the scratch cache dir");
+        // Snapshot under the env lock: the env-mutation test in `mod tests`
+        // runs in a parallel thread and would otherwise race this read (see
+        // `ENV_LOCK`).
+        let mut env = {
+            let _guard = ENV_LOCK.lock().unwrap();
+            RawEnvConfig::from_env()
+        };
+        env.cache_dir = Some(cache_dir.path().to_path_buf());
+
+        assert!(
+            env.companies_house_api_key.is_some() || env.companies_house_sandbox_api_key.is_some(),
+            "the api_tests feature needs COMPANIES_HOUSE_API_KEY (live) or \
+             COMPANIES_HOUSE_SANDBOX_API_KEY (sandbox)"
+        );
+        let number = env
+            .company_number
+            .as_deref()
+            .expect("the api_tests feature needs COMPANY_NUMBER: use a real company for the \
+                     live API, a sandbox test company for the sandbox API");
+        let utr = env
+            .unique_taxpayer_ref
+            .as_deref()
+            .expect("the api_tests feature needs UNIQUE_TAXPAYER_REF (the Corporation Tax \
+                     reference is never resolved from Companies House)");
+
+        // The minimum config: an empty `company` block and an empty
+        // `accounts` sub-object, nothing to resolve from.
+        let raw = RawCompanyConfig {
+            name: None,
+            tax_reference: None,
+            company_number: None,
+        };
+        let raw_accounts = AccountsMeta::default();
+
+        // Run 1: everything is enriched from the live API response.
+        let resolved = resolve_company_inputs(&raw, &raw_accounts, &env, None)
+            .await
+            .expect("resolve the minimum config from the live API");
+        assert!(
+            resolved.missing.is_empty(),
+            "nothing is missing: {:?}",
+            resolved.missing
+        );
+        let company = resolved.company.expect("resolved");
+        assert_eq!(company.company_number, number);
+        assert_eq!(company.tax_reference, utr);
+        assert!(!company.name.is_empty(), "the name is filled from the profile");
+        let today = chrono::Utc::now().date_naive();
+        assert!(
+            company.registration_date < today,
+            "the registration date comes from the profile (created in the past), got {}",
+            company.registration_date
+        );
+        // The return period defaults to the next accounting period to file
+        // and lands on the resolved accounts (a company behind on filings
+        // can have a past-due period, so only the ordering is pinned).
+        let period = resolved.accounts.expect("resolved accounts").period();
+        assert!(period.start < period.end, "the return period is ordered");
+
+        // The profile is cached for the next run.
+        let cache_file = cache_dir.path().join(format!("companies-house-{number}.json"));
+        assert!(cache_file.exists(), "the fetched profile is cached on disk");
+        let cached = std::fs::read_to_string(&cache_file).expect("read the cache file");
+        assert!(cached.contains("company_name"), "the cache holds the profile JSON");
+
+        // Run 2: the same scratch cache, but a placeholder key that could
+        // never fetch the real profile — resolution is served entirely from
+        // the cache.
+        let mut cached_env = env.clone();
+        cached_env.companies_house_api_key = Some("placeholder-cached-run".to_string());
+        cached_env.companies_house_sandbox_api_key = None;
+        let from_cache = resolve_company_inputs(&raw, &raw_accounts, &cached_env, None)
+            .await
+            .expect("resolve the minimum config from the cache");
+        assert!(
+            from_cache.missing.is_empty(),
+            "nothing is missing: {:?}",
+            from_cache.missing
+        );
+        let company2 = from_cache.company.expect("resolved from cache");
+        assert_eq!(company2.name, company.name);
+        assert_eq!(company2.registration_date, company.registration_date);
+        let period2 = from_cache.accounts.expect("resolved accounts").period();
+        assert_eq!(period2.start, period.start, "the return period is the same on the cached run");
+        assert_eq!(period2.end, period.end, "the return period is the same on the cached run");
     }
 }

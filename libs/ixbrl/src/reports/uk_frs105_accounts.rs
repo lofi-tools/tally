@@ -1,9 +1,10 @@
 //! Unaudited micro-entity accounts (FRS 105).
 //!
-//! Maps a [`GnucashBook`] (the ledger) plus company details (a [`Company`]
-//! and an [`AccountsMetadata`]) to the "Unaudited Micro-Entity Accounts"
-//! iXBRL document: a title page, a company-information page, the statement
-//! of financial position and the notes to the accounts.
+//! Maps a [`GnucashBook`] (the ledger) plus company details (a [`Company`],
+//! an [`AccountsMeta`] and an [`AccountsMetadata`]) to the
+//! "Unaudited Micro-Entity Accounts" iXBRL document: a title page, a
+//! company-information page, the statement of financial position and the
+//! notes to the accounts.
 //!
 //! The computations (balance-sheet lines, e.g. fixed assets, debtors, bank,
 //! creditors) follow the reference `ixbrl-reporter` semantics:
@@ -24,7 +25,7 @@ use std::collections::HashMap;
 
 use chrono::Datelike;
 
-use crate::company::Company;
+use crate::company::{AccountingPeriod, AccountsMeta, Company};
 use crate::ixbrl_fmt::*;
 use crate::GnucashBook;
 
@@ -137,6 +138,9 @@ pub struct Frs105Accounts {
     pub company: Company,
     /// Additional company details used by the report.
     pub metadata: AccountsMetadata,
+    /// The set of accounts: the return period and the financial-year tax
+    /// parameters (resolved before the report is built).
+    pub accounts: AccountsMeta,
     /// Tangible / fixed assets.
     pub fixed_assets: [f64; 2],
     /// Current assets (debtors + VAT refund due + bank).
@@ -165,7 +169,12 @@ pub struct Frs105Accounts {
 impl Frs105Accounts {
     /// Compute the statement of financial position from the ledger and the
     /// company details.
-    pub fn new(gnucash: &GnucashBook, company: &Company, metadata: &AccountsMetadata) -> Self {
+    pub fn new(
+        gnucash: &GnucashBook,
+        company: &Company,
+        metadata: &AccountsMetadata,
+        accounts_meta: &AccountsMeta,
+    ) -> Self {
         let accounts = gnucash.raw_accounts();
 
         // Map account path -> GnuCash account type, for the debit flip.
@@ -227,9 +236,10 @@ impl Frs105Accounts {
         // `at-end` balance-sheet dates for the current and previous period.
         // The previous period is the calendar year before the current one
         // (matching the reference metadata, e.g. 2019-12-31).
+        let period = accounts_meta.period();
         let ends = [
-            company.accounting_period_end,
-            company.accounting_period_start - chrono::Duration::days(1),
+            period.end,
+            period.start - chrono::Duration::days(1),
         ];
 
         // Round to whole pence so computed values match the reference exactly.
@@ -307,6 +317,7 @@ impl Frs105Accounts {
         Frs105Accounts {
             company: company.clone(),
             metadata: metadata.clone(),
+            accounts: accounts_meta.clone(),
             fixed_assets: fixed_assets.map(round2),
             current_assets: current_assets.map(round2),
             prepayments_and_accrued_income,
@@ -341,8 +352,9 @@ impl Frs105Accounts {
     pub fn to_ixbrl(&self) -> String {
         let company = &self.company;
         let metadata = &self.metadata;
-        let period_start = company.accounting_period_start;
-        let period_end = company.accounting_period_end;
+        let period = self.accounts.period();
+        let period_start = period.start;
+        let period_end = period.end;
         // The previous period is the calendar year before the current one
         // (e.g. 2019-01-01..2019-12-31), matching the reference metadata.
         let prev_end = period_start - chrono::Duration::days(1);
@@ -731,16 +743,21 @@ impl Frs105Accounts {
     /// `Frs105Accounts`).
     ///
     /// The `company` parameter supplies fields that are not serialised to
-    /// iXBRL (`tax_reference`, `registration_date` and the corporation-tax
-    /// rate defaults); fields that *are* serialised (name, company number,
-    /// accounting-period dates) are recovered from the document and override
-    /// the supplied values.  Similarly, metadata fields that have no iXBRL
-    /// fact (`jurisdiction`, `signed_by`) come back empty.
+    /// iXBRL (`tax_reference`, `registration_date`); `accounts` supplies the
+    /// financial-year tax parameters (also not serialised).  Fields that
+    /// *are* serialised (name, company number, accounting-period dates) are
+    /// recovered from the document and override the supplied values.
+    /// Similarly, metadata fields that have no iXBRL fact (`jurisdiction`,
+    /// `signed_by`) come back empty.
     ///
     /// Balance-sheet values are rendered at whole pounds (`decimals = 0`),
     /// so the round trip preserves them to the nearest pound; the sign is
     /// recovered from the enclosing cell's `negative` class.
-    pub fn from_ixbrl_node(node: &XmlNode, company: &Company) -> Frs105Accounts {
+    pub fn from_ixbrl_node(
+        node: &XmlNode,
+        company: &Company,
+        accounts: &AccountsMeta,
+    ) -> Frs105Accounts {
         let facts = ParsedIxBrlFacts::from_node(node);
         let dims = xbrl_context_dimensions(node);
 
@@ -755,13 +772,14 @@ impl Frs105Accounts {
         let text = |name: &str| -> String {
             facts.non_numeric.get(name).cloned().unwrap_or_default()
         };
+        let fallback_start = accounts.period().start;
         let parse_date = |raw: &str| -> chrono::NaiveDate {
             let cleaned = raw.replace('\u{00A0}', " ");
             chrono::NaiveDate::parse_from_str(&cleaned, "%d %B %Y")
-                .unwrap_or(company.accounting_period_start)
+                .unwrap_or(fallback_start)
         };
 
-        // -- company ----------------------------------------------------------
+        // -- company / accounts --------------------------------------------------
 
         let period_start = parse_date(&text("uk-bus:StartDateForPeriodCoveredByReport"));
         let period_end = parse_date(&text("uk-bus:EndDateForPeriodCoveredByReport"));
@@ -772,12 +790,16 @@ impl Frs105Accounts {
             tax_reference: company.tax_reference.clone(), // not serialised
             company_number: text("uk-bus:UKCompaniesHouseRegisteredNumber"),
             registration_date: company.registration_date,
-            accounting_period_start: period_start,
-            accounting_period_end: period_end,
-            fy1_year: company.fy1_year,
-            fy2_year: company.fy2_year,
-            fy1_rate: company.fy1_rate,
-            fy2_rate: company.fy2_rate,
+        };
+
+        // The return period is serialised and recovered from the document;
+        // the financial-year parameters come from the supplied `accounts`.
+        let accounts = AccountsMeta {
+            period: Some(AccountingPeriod {
+                start: period_start,
+                end: period_end,
+            }),
+            ..accounts.clone()
         };
 
         // -- balance-sheet values (signed, whole pounds) ----------------------
@@ -884,6 +906,7 @@ impl Frs105Accounts {
         Frs105Accounts {
             company,
             metadata,
+            accounts,
             fixed_assets: [
                 fact("uk-core:FixedAssets", "ctxt-15"),
                 fact("uk-core:FixedAssets", "ctxt-16"),
@@ -940,9 +963,17 @@ impl Frs105Accounts {
     /// Deserialise a [`Frs105Accounts`] from its serialised iXBRL HTML, in
     /// two steps: first into the [`XmlNode`] intermediate representation,
     /// then into the struct.
-    pub fn from_ixbrl(html: &str, company: &Company) -> Result<Frs105Accounts, String> {
+    ///
+    /// The supplied `accounts` must carry a return period; only its
+    /// financial-year parameters are preserved (the period is recovered from
+    /// the document).
+    pub fn from_ixbrl(
+        html: &str,
+        company: &Company,
+        accounts: &AccountsMeta,
+    ) -> Result<Frs105Accounts, String> {
         let node = XmlNode::from_xml_string(html)?;
-        Ok(Self::from_ixbrl_node(&node, company))
+        Ok(Self::from_ixbrl_node(&node, company, accounts))
     }
 
     // -- Page builders --------------------------------------------------------
@@ -986,7 +1017,7 @@ impl Frs105Accounts {
                 span(vec![date_fact(
                     "uk-bus:EndDateForPeriodCoveredByReport",
                     "ctxt-1",
-                    &company.accounting_period_end,
+                    &self.accounts.period().end,
                 )]),
             ])]),
         ])])
@@ -1252,7 +1283,7 @@ impl Frs105Accounts {
                     span(vec![date_fact(
                         "uk-bus:EndDateForPeriodCoveredByReport",
                         "ctxt-1",
-                        &self.company.accounting_period_end,
+                        &self.accounts.period().end,
                     )]),
                     span_text(
                         " the company was entitled to exemption from audit under section 477 of the Companies Act 2006 relating to small companies.",
@@ -1313,9 +1344,9 @@ impl Frs105Accounts {
         let company = &self.company;
         let metadata = &self.metadata;
         // Employee figures are indexed by calendar year in the metadata.
-        let employees_cur_year = company.accounting_period_end.year();
+        let employees_cur_year = self.accounts.period().end.year();
         let employees_prev_year =
-            (company.accounting_period_start - chrono::Duration::days(1)).year();
+            (self.accounts.period().start - chrono::Duration::days(1)).year();
 
         let company_note = elt("div", &[]).children(vec![elt("div", &[]).children(vec![
             elt("div", &[]).child(elt_text(
@@ -1422,7 +1453,7 @@ impl Frs105Accounts {
                 span(vec![date_fact(
                     "uk-bus:EndDateForPeriodCoveredByReport",
                     "ctxt-1",
-                    &company.accounting_period_end,
+                    &self.accounts.period().end,
                 )]),
             ]),
             HeaderSubtitle::AsAt => span(vec![
@@ -1430,7 +1461,7 @@ impl Frs105Accounts {
                 span(vec![date_fact(
                     "uk-bus:BalanceSheetDate",
                     "ctxt-2",
-                    &company.accounting_period_end,
+                    &self.accounts.period().end,
                 )]),
             ]),
         };
@@ -1748,23 +1779,24 @@ mod tests {
         (company, gnucash)
     }
 
-    /// The example company's identity fields from the JSON, mirroring the
-    /// constructor arguments of [`Company::new`]; the remaining JSON keys
-    /// are flattened into [`AccountsMetadata`].
+    /// The example company's identity fields from the JSON; the remaining
+    /// JSON keys are the `accounts` sub-object (into [`AccountsMeta`]) and
+    /// the flat [`AccountsMetadata`] fields.
     #[derive(serde::Deserialize)]
     struct CompanyData {
         name: String,
         tax_reference: String,
         company_number: String,
-        accounting_period_start: chrono::NaiveDate,
-        accounting_period_end: chrono::NaiveDate,
     }
 
     /// The top-level shape of `input-company.json`: a nested `company`
-    /// identity block plus the flat metadata fields (incl. logo/signature).
+    /// identity block, an `accounts` sub-object and the flat metadata fields
+    /// (incl. logo/signature).
     #[derive(serde::Deserialize)]
     struct ExampleCompanyData {
         company: CompanyData,
+        #[serde(default)]
+        accounts: AccountsMeta,
         #[serde(flatten)]
         metadata: AccountsMetadata,
     }
@@ -1778,16 +1810,16 @@ mod tests {
         serde_json::from_str(&json).expect("parse example company data file")
     }
 
-    /// The example [`Company`] (identity + accounting period) from the JSON.
+    /// The example [`Company`] (identity only) from the JSON.
     fn example_company() -> Company {
         let data = load_example_data().company;
-        Company::new(
-            data.name,
-            data.tax_reference,
-            data.company_number,
-            data.accounting_period_start,
-            data.accounting_period_end,
-        )
+        Company::new(data.name, data.tax_reference, data.company_number)
+    }
+
+    /// The example company's set of accounts (return period + financial-year
+    /// parameters) from the JSON.
+    fn example_accounts_meta() -> AccountsMeta {
+        load_example_data().accounts
     }
 
     /// The example report metadata (incl. logo/signature) from the JSON.
@@ -1802,23 +1834,25 @@ mod tests {
         assert_eq!(company.name, "Example Biz Ltd.");
         assert_eq!(company.company_number, "12345678");
         assert_eq!(company.tax_reference, "8596148860");
+
+        // The accounts sub-object round-trips from the same file.
+        let accounts = example_accounts_meta();
         assert_eq!(
-            company.accounting_period_start,
+            accounts.period().start,
             chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()
         );
         assert_eq!(
-            company.accounting_period_end,
+            accounts.period().end,
             chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap()
         );
 
-        // Must stay in sync with the hardcoded TestData company used by the
-        // corp-tax tests.
+        // Must stay in sync with the hardcoded TestData company and accounts
+        // used by the corp-tax tests.
         let t = TestData::default_company();
         assert_eq!(company.name, t.name);
         assert_eq!(company.company_number, t.company_number);
         assert_eq!(company.tax_reference, t.tax_reference);
-        assert_eq!(company.accounting_period_start, t.accounting_period_start);
-        assert_eq!(company.accounting_period_end, t.accounting_period_end);
+        assert_eq!(accounts.period(), TestData::default_accounts_meta().period());
 
         // Metadata round-trips from the same file.
         let m = example_metadata();
@@ -1843,7 +1877,7 @@ mod tests {
     #[tokio::test]
     async fn test_accounts_from_example2() {
         let (company, gnucash) = load_example().await;
-        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata());
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata(), &example_accounts_meta());
 
         // Balance-sheet values (whole-pence, computed from the ledger).
         assert_eq!(accounts.fixed_assets, [932.74, 633.10]);
@@ -1874,7 +1908,7 @@ mod tests {
         // copy to example_data/example2/output-accounts.html.  The Rust
         // output below must match it byte for byte.
         let (company, gnucash) = load_example().await;
-        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata());
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata(), &example_accounts_meta());
         let out = accounts.to_ixbrl();
 
         // Write the Rust output for external validation (arelle).
@@ -1893,7 +1927,7 @@ mod tests {
     #[tokio::test]
     async fn test_accounts_ixbrl_structure() {
         let (company, gnucash) = load_example().await;
-        let out = Frs105Accounts::new(&gnucash, &company, &example_metadata()).to_ixbrl();
+        let out = Frs105Accounts::new(&gnucash, &company, &example_metadata(), &example_accounts_meta()).to_ixbrl();
 
         // Header structure
         assert!(out.contains("<div class=\"hidden\"><ix:header><ix:hidden>"));
@@ -1925,14 +1959,14 @@ mod tests {
         // in two steps (XML -> XmlNode -> Frs105Accounts) and compare against
         // the original.
         let (company, gnucash) = load_example().await;
-        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata());
+        let accounts = Frs105Accounts::new(&gnucash, &company, &example_metadata(), &example_accounts_meta());
         let html = accounts.to_ixbrl();
 
         std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
         std::fs::write("../../.cache/rust-ixbrl/accts-micro-roundtrip.html", &html).unwrap();
 
         let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
-        let back = Frs105Accounts::from_ixbrl_node(&node, &company);
+        let back = Frs105Accounts::from_ixbrl_node(&node, &company, &example_accounts_meta());
 
         // Balance-sheet values are rendered at whole pounds (decimals = 0),
         // so the round trip preserves them to the nearest pound (the sign
@@ -1979,12 +2013,12 @@ mod tests {
         assert_eq!(back.company.company_number, accounts.company.company_number);
         assert_eq!(back.company.tax_reference, accounts.company.tax_reference);
         assert_eq!(
-            back.company.accounting_period_start,
-            accounts.company.accounting_period_start
+            back.accounts.period().start,
+            accounts.accounts.period().start
         );
         assert_eq!(
-            back.company.accounting_period_end,
-            accounts.company.accounting_period_end
+            back.accounts.period().end,
+            accounts.accounts.period().end
         );
 
         // Metadata fields that are serialised to iXBRL round-trip.

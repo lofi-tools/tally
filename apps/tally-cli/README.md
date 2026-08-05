@@ -44,25 +44,29 @@ is optional.  There is no environment-variable fallback.
 | `--config-path <config>` | JSON config: company identity + accounts metadata |
 | `--book <book>` | GnuCash ledger (`input.gnucash`) |
 | `--out <dir>` | output directory; the CT600 message is written to `<dir>/ct600.xml` |
-| `--accounts-made-up-to <date>` | date at which the accounts are made (`YYYY-MM-DD`); the return period is deduced as the 12 months ending on it (wins over the config's `company.accounts_made_up_to`) |
+| `--accounts-made-up-to <date>` | date at which the accounts are made (`YYYY-MM-DD`); the return period is deduced as the 12 months ending on it (wins over the config's `accounts.accounts_made_up_to`) |
 
 ### Config file
 
 A JSON file with the same shape as
 `libs/ixbrl/example_data/example2/input-company.json` (use it as a template): a
-nested `company` identity block plus the flat accounts-metadata fields.
+nested `company` identity block, an `accounts` sub-object and the flat
+accounts-metadata fields.
 
 | Key | Type | Default |
 |-----|------|---------|
 | `company.name` | string (optional) | resolved from Companies House when an API key is configured |
 | `company.tax_reference` | string (required) | `UNIQUE_TAXPAYER_REF` environment variable wins when set; it cannot be resolved from Companies House, so one of the two must be present |
 | `company.company_number` | string (optional) | `COMPANY_NUMBER` environment variable |
-| `company.accounting_period_start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts_made_up_to` or the Companies House next period |
-| `company.accounting_period_end` | date (optional) | none — see `accounting_period_start` |
-| `company.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
+| `accounts.period.start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts.accounts_made_up_to` or the Companies House next period |
+| `accounts.period.end` | date (optional) | none — see `accounts.period.start` |
+| `accounts.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
+| `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 |
+| `accounts.fy1_rate` / `fy2_rate` | number (optional) | 19 / 19 (percent) |
 | `directors`, `sic_codes`, `address_lines`, `email`, ... | required | — |
 
-The company-identity fields are all optional in the config file (see
+The company-identity fields and the `accounts` sub-object are all optional in
+the config file (see
 [Resolving the company identity](#resolving-the-company-identity) for how the
 missing ones are filled in and what must always be present).  The flat
 accounts-metadata fields are all required — the parser applies no defaults, so
@@ -76,7 +80,7 @@ From the libraries' `Default` implementations (no config hook yet):
 |-------|---------|
 | GovTalk envelope | class `HMRC-CT-CT600`, `GatewayTest` 1, username `CTUser100` / password `password`, vendor `1234`, software `ct600` 1.0.0 |
 | Principal contact | `Ms Sarah McAcre`, sarah@example.org |
-| Financial years / rates | FY1 2019, FY2 2020, both 19% (`Company::new` defaults) |
+| Financial years / rates | FY1 2019, FY2 2020, both 19% (`AccountsMeta` defaults) |
 | Declaration (boxes 975 / 985) | contact name / `Director`; box 980 (date) = today |
 
 ### Resolving the company identity
@@ -97,14 +101,14 @@ be complete before the return can be built:
   House: it comes from the `UNIQUE_TAXPAYER_REF` environment variable
   (which wins) or the config's `company.tax_reference`, so one of the two
   must always be present;
-- the **return period** is optional: an explicit `accounting_period_start`
-  + `accounting_period_end` in the config wins; otherwise the date at which
-  the accounts are made — the `--accounts-made-up-to` flag (winning) or the
-  config's `company.accounts_made_up_to` — gives the 12 months ending on it;
-  otherwise the period defaults to the company's **next accounting period to
-  file**, resolved from the Companies House profile
-  (`CompaniesHouseClient::next_accounting_period`), which needs an API key
-  and company number.
+- the **return period** lives in the config's `accounts` sub-object and is
+  optional: an explicit `accounts.period` (both dates) wins; otherwise the
+  date at which the accounts are made — the `--accounts-made-up-to` flag
+  (winning) or the config's `accounts.accounts_made_up_to` — gives the 12
+  months ending on it; otherwise the period defaults to the company's
+  **next accounting period to file**, resolved from the Companies House
+  profile (`CompaniesHouseClient::next_accounting_period`), which needs an
+  API key and company number.
 
 If the resolved identity is still incomplete, the command fails with a
 message listing every missing field and how to resolve it, e.g.:
