@@ -119,9 +119,9 @@ Tax reference is never resolved from Companies House.)
 | `libs/ct600` | 4 | HMRC GovTalk XML message builder/parser for CT600 submission + Companies House client / company resolution (`companies_house`) |
 
 
-## tally-cli configuration
+## `tally-cli` configuration
 
-The full details live in the [tally-cli README](apps/tally-cli/README.md#configuration).
+See [tally-cli README](apps/tally-cli/README.md#configuration) for detailed config options.
 
 - **CLI flags** — `--config-path`, `--book`, `--out` required; `--accounts-made-up-to` optional.
 - **Company identity** (`company.*`) — optional. Name, registration date and
@@ -132,15 +132,9 @@ The full details live in the [tally-cli README](apps/tally-cli/README.md#configu
 - **Return period** (`accounts.period`) — optional. `accounts.period`,
   `accounts.accounts_made_up_to` / `--accounts-made-up-to`, else the
   company's next accounting period from Companies House.
-- **Company Profile** (`company.*`) — optional, blank when absent; filled from the
-  Companies House profile when an API key is set (address, SIC codes,
-  jurisdiction, directors). Logo optional. The voluntary facts (county,
-  VAT number, business activities, e-mail, phone, website) are omitted from
-  the report when absent.
+- **Company Profile** (`company.*`) — optional, can be auto-filled from Companies House API (needs an API key in env vars)
 - **Accounts metadata** (`accounts.*`) — required: `report_date`,
-  `authorised_date`, `signature_b64`. `signed_by` defaults to the first
-  director; `average_employees` to 1 per financial year; `period` and
-  `incorporation_date` optional; taxonomy dimensions defaulted.
+  `authorised_date`, `signature_b64`. Other fields optional.
 
 ### Example configs
 
