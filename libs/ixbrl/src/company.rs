@@ -32,8 +32,9 @@ pub struct Company {
 /// Everything here is only available from the config file (nothing is
 /// resolved from Companies House), so every field is required there.  The
 /// voluntary facts are the exceptions: the registered-office county
-/// ([`Self::county`]), the e-mail address, the telephone number parts and
-/// the website ([`Self::email`], [`Self::phone_country`],
+/// ([`Self::county`]), the VAT registration number
+/// ([`Self::vat_registration`]), the e-mail address, the telephone number
+/// parts and the website ([`Self::email`], [`Self::phone_country`],
 /// [`Self::phone_area`], [`Self::phone_number`], [`Self::website_url`],
 /// [`Self::website_description`]) are optional because the UK-bus taxonomy
 /// tags them as voluntary — the report omits their facts entirely when
@@ -73,8 +74,10 @@ pub struct CompanyProfile {
     /// Website description (optional).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub website_description: Option<String>,
-    /// VAT registration number.
-    pub vat_registration: String,
+    /// VAT registration number (optional — a voluntary fact; Companies
+    /// House does not hold it, so it only ever comes from the config).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vat_registration: Option<String>,
     /// SIC codes registered with Companies House.
     pub sic_codes: Vec<String>,
     /// Summary of business activities.
@@ -128,7 +131,7 @@ impl Default for CompanyProfile {
             phone_number: None,
             website_url: None,
             website_description: None,
-            vat_registration: String::new(),
+            vat_registration: None,
             sic_codes: Vec::new(),
             activities: String::new(),
             jurisdiction: String::new(),

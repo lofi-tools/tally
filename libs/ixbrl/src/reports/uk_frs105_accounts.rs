@@ -309,7 +309,19 @@ impl Frs105Accounts {
                 "ctxt-0",
                 &company.company_number,
             ),
-            non_numeric("uk-bus:VATRegistrationNumber", "ctxt-0", &profile.vat_registration),
+        ];
+        // The VAT registration number is a voluntary fact: it is omitted
+        // when the profile leaves it blank.  Its position here (between the
+        // company number and NameProductionSoftware) must match the
+        // reference fixture's fact order.
+        if let Some(vat) = profile
+            .vat_registration
+            .as_deref()
+            .filter(|v| !v.is_empty())
+        {
+            hidden_children.push(non_numeric("uk-bus:VATRegistrationNumber", "ctxt-0", vat));
+        }
+        hidden_children.extend(vec![
             non_numeric("uk-bus:NameProductionSoftware", "ctxt-0", "ixbrl-reporter"),
             // Must match the version of the flake-pinned reference
             // (`ixbrl-reporter` in flake.nix); the fixture is generated with
@@ -379,7 +391,7 @@ impl Frs105Accounts {
                 "ctxt-13",
                 &profile.location,
             ),
-        ];
+        ]);
         // The registered-office county is a voluntary fact: it is omitted
         // when the profile leaves it blank.
         if let Some(county) = profile.county.as_deref().filter(|v| !v.is_empty()) {
@@ -819,7 +831,7 @@ impl Frs105Accounts {
             phone_number: opt_text("uk-bus:LocalNumber"),
             website_url: opt_text("uk-bus:WebsiteMainPageURL"),
             website_description: opt_text("uk-bus:DescriptionOrOtherInformationOnWebsite"),
-            vat_registration: text("uk-bus:VATRegistrationNumber"),
+            vat_registration: opt_text("uk-bus:VATRegistrationNumber"),
             sic_codes,
             activities: text("uk-bus:DescriptionPrincipalActivities"),
             jurisdiction: String::new(), // not serialised to iXBRL
@@ -1921,6 +1933,7 @@ mod tests {
         let (company, gnucash) = load_example().await;
         let mut profile = example_profile();
         profile.county = None;
+        profile.vat_registration = None;
         profile.email = None;
         profile.phone_country = None;
         profile.phone_area = None;
@@ -1934,6 +1947,7 @@ mod tests {
         // No voluntary fact is tagged.
         for fact in [
             "uk-bus:CountyRegion",
+            "uk-bus:VATRegistrationNumber",
             "uk-bus:E-mailAddress",
             "uk-bus:CountryCode",
             "uk-bus:AreaCode",
@@ -1951,6 +1965,7 @@ mod tests {
         let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
         let back = Frs105Accounts::from_ixbrl_node(&node, &company, &example_accounts_meta());
         assert_eq!(back.profile.county, None);
+        assert_eq!(back.profile.vat_registration, None);
         assert_eq!(back.profile.email, None);
         assert_eq!(back.profile.phone_country, None);
         assert_eq!(back.profile.phone_area, None);

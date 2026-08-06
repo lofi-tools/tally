@@ -1010,7 +1010,7 @@ mod tests {
             phone_number: None,
             website_url: None,
             website_description: None,
-            vat_registration: String::new(),
+            vat_registration: None,
             sic_codes: vec!["62020".into(), "62021".into()],
             activities: String::new(),
             jurisdiction: "England and Wales".into(),
