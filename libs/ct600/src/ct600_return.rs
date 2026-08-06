@@ -1001,7 +1001,7 @@ mod tests {
             directors: vec!["A Bloggs".into(), "B Smith".into(), "C Jones".into()],
             contact_name: String::new(),
             address_lines: vec!["123 Leadbarton Street".into()],
-            county: String::new(),
+            county: None,
             location: "Threapchington".into(),
             postcode: "QQ9 9ZZ".into(),
             email: Some("info@example.org".into()),

@@ -134,8 +134,8 @@ The full details live in the [tally-cli README](apps/tally-cli/README.md#configu
   company's next accounting period from Companies House.
 - **Company Profile** (`company.*`) — optional, blank when absent; filled from the
   Companies House profile when an API key is set (address, SIC codes,
-  jurisdiction, directors). Logo optional. The voluntary contact facts
-  (e-mail, phone, website) are omitted from the report when absent.
+  jurisdiction, directors). Logo optional. The voluntary facts (county,
+  e-mail, phone, website) are omitted from the report when absent.
 - **Accounts metadata** (`accounts.*`) — required: `report_date`,
   `authorised_date`, `signature_b64`. `signed_by` defaults to the first
   director; `average_employees` to 1 per financial year; `period` and

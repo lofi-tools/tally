@@ -379,12 +379,19 @@ impl Frs105Accounts {
                 "ctxt-13",
                 &profile.location,
             ),
-            non_numeric("uk-bus:CountyRegion", "ctxt-13", &profile.county),
-            non_numeric("uk-bus:PostalCodeZip", "ctxt-13", &profile.postcode),
         ];
-        // Voluntary contact facts (e-mail, phone, website): the UK-bus
-        // taxonomy tags them as optional, so they are omitted entirely when
-        // the profile leaves them blank.
+        // The registered-office county is a voluntary fact: it is omitted
+        // when the profile leaves it blank.
+        if let Some(county) = profile.county.as_deref().filter(|v| !v.is_empty()) {
+            hidden_children.push(non_numeric("uk-bus:CountyRegion", "ctxt-13", county));
+        }
+        // The postal code and the remaining voluntary contact facts
+        // (e-mail, phone, website) follow in the reference order.
+        hidden_children.push(non_numeric(
+            "uk-bus:PostalCodeZip",
+            "ctxt-13",
+            &profile.postcode,
+        ));
         for (name, ctx, value) in [
             ("uk-bus:E-mailAddress", "ctxt-13", profile.email.as_deref()),
             (
@@ -803,7 +810,7 @@ impl Frs105Accounts {
             directors,
             contact_name: text("uk-bus:NameContactDepartmentOrPerson"),
             address_lines,
-            county: text("uk-bus:CountyRegion"),
+            county: opt_text("uk-bus:CountyRegion"),
             location: text("uk-bus:PrincipalLocation-CityOrTown"),
             postcode: text("uk-bus:PostalCodeZip"),
             email: opt_text("uk-bus:E-mailAddress"),
@@ -1906,13 +1913,14 @@ mod tests {
         assert!(out.contains("AverageNumberEmployeesDuringPeriod"));
     }
 
-    /// The voluntary contact facts (e-mail, phone, website) are omitted
-    /// from the document when the profile leaves them blank, and come back
-    /// `None` on the round trip.
+    /// The voluntary facts (registered-office county, e-mail, phone,
+    /// website) are omitted from the document when the profile leaves them
+    /// blank, and come back `None` on the round trip.
     #[tokio::test]
     async fn test_blank_contact_facts_are_omitted() {
         let (company, gnucash) = load_example().await;
         let mut profile = example_profile();
+        profile.county = None;
         profile.email = None;
         profile.phone_country = None;
         profile.phone_area = None;
@@ -1923,8 +1931,9 @@ mod tests {
             Frs105Accounts::new(&gnucash, &company, &profile, &example_accounts_meta());
         let html = accounts.to_ixbrl();
 
-        // No voluntary contact fact is tagged.
+        // No voluntary fact is tagged.
         for fact in [
+            "uk-bus:CountyRegion",
             "uk-bus:E-mailAddress",
             "uk-bus:CountryCode",
             "uk-bus:AreaCode",
@@ -1938,9 +1947,10 @@ mod tests {
         assert!(html.contains("uk-bus:NameContactDepartmentOrPerson"));
         assert!(html.contains("uk-bus:PostalCodeZip"));
 
-        // Round trip: the blank contact fields come back absent.
+        // Round trip: the blank fields come back absent.
         let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
         let back = Frs105Accounts::from_ixbrl_node(&node, &company, &example_accounts_meta());
+        assert_eq!(back.profile.county, None);
         assert_eq!(back.profile.email, None);
         assert_eq!(back.profile.phone_country, None);
         assert_eq!(back.profile.phone_area, None);

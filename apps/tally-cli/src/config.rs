@@ -280,15 +280,15 @@ impl CompanyConfig {
 
     /// Fill the optional profile into the required report profile: absent
     /// fields become blank defaults (empty strings / empty lists, no logo).
-    /// The voluntary contact fields (e-mail, phone, website) stay `None`
-    /// when the config omitted them (empty counts as absent), so the report
-    /// omits their facts entirely.
+    /// The voluntary facts (registered-office county, e-mail, phone,
+    /// website) stay `None` when the config omitted them (empty counts as
+    /// absent), so the report omits their facts entirely.
     pub(crate) fn into_profile(self) -> CompanyProfile {
         CompanyProfile {
             directors: self.directors.unwrap_or_default(),
             contact_name: self.contact_name.unwrap_or_default(),
             address_lines: self.address_lines.unwrap_or_default(),
-            county: self.county.unwrap_or_default(),
+            county: self.county.filter(|s| !s.is_empty()),
             location: self.location.unwrap_or_default(),
             postcode: self.postcode.unwrap_or_default(),
             email: self.email.filter(|s| !s.is_empty()),
@@ -1469,7 +1469,7 @@ mod tests {
             profile.address_lines,
             vec!["123 Leadbarton Street", "Dumpston Trading Estate"]
         );
-        assert_eq!(profile.county, "Minchingshire");
+        assert_eq!(profile.county.as_deref(), Some("Minchingshire"));
         assert_eq!(profile.location, "Threapminchington");
         assert_eq!(profile.postcode, "QQ99 9ZZ");
         assert_eq!(profile.sic_codes, vec!["62020", "62021"]);
@@ -1588,6 +1588,13 @@ mod live_tests {
             !profile.directors.is_empty(),
             "the current directors come from the officers list"
         );
+        // The county stays `None`: this company's Companies House profile
+        // carries no `region` (county is a voluntary fact, filled from
+        // `registered_office_address.region` only when present).
+        assert_eq!(
+            profile.county, None,
+            "county is only filled when the profile records a region"
+        );
         // The minimal config omits the signatory: it defaults to the first
         // director.
         assert_eq!(
@@ -1645,5 +1652,8 @@ mod live_tests {
         // The enriched profile is served from the same caches.
         assert_eq!(from_cache.profile.directors, profile.directors);
         assert_eq!(from_cache.profile.sic_codes, profile.sic_codes);
+        // County (the company-specific voluntary field) is cache-consistent
+        // too: whatever the first run resolved, the cached run repeats it.
+        assert_eq!(from_cache.profile.county, profile.county);
     }
 }

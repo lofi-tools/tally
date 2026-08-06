@@ -31,13 +31,13 @@ pub struct Company {
 ///
 /// Everything here is only available from the config file (nothing is
 /// resolved from Companies House), so every field is required there.  The
-/// voluntary contact fields are the exceptions: the e-mail address, the
-/// telephone number parts and the website ([`Self::email`],
-/// [`Self::phone_country`], [`Self::phone_area`], [`Self::phone_number`],
-/// [`Self::website_url`], [`Self::website_description`]) are optional
-/// because the UK-bus taxonomy tags them as voluntary — the report omits
-/// their facts entirely when absent.  The company logo
-/// ([`Self::logo_b64`]) is also optional.
+/// voluntary facts are the exceptions: the registered-office county
+/// ([`Self::county`]), the e-mail address, the telephone number parts and
+/// the website ([`Self::email`], [`Self::phone_country`],
+/// [`Self::phone_area`], [`Self::phone_number`], [`Self::website_url`],
+/// [`Self::website_description`]) are optional because the UK-bus taxonomy
+/// tags them as voluntary — the report omits their facts entirely when
+/// absent.  The company logo ([`Self::logo_b64`]) is also optional.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompanyProfile {
     /// Names of the directors, in order (used for the officer contexts).
@@ -46,8 +46,11 @@ pub struct CompanyProfile {
     pub contact_name: String,
     /// Registered-office address lines (one fact per line).
     pub address_lines: Vec<String>,
-    /// County / region of the registered office.
-    pub county: String,
+    /// County / region of the registered office (optional — a voluntary
+    /// address fact, often left empty because Companies House rarely
+    /// records a `region`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub county: Option<String>,
     /// City / town of the registered office.
     pub location: String,
     /// Registered-office postcode.
@@ -116,7 +119,7 @@ impl Default for CompanyProfile {
             directors: Vec::new(),
             contact_name: String::new(),
             address_lines: Vec::new(),
-            county: String::new(),
+            county: None,
             location: String::new(),
             postcode: String::new(),
             email: None,
