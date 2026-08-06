@@ -31,8 +31,13 @@ pub struct Company {
 ///
 /// Everything here is only available from the config file (nothing is
 /// resolved from Companies House), so every field is required there.  The
-/// company logo is the exception: it is embedded on the title page, but
-/// optional ([`Self::logo_b64`]).
+/// voluntary contact fields are the exceptions: the e-mail address, the
+/// telephone number parts and the website ([`Self::email`],
+/// [`Self::phone_country`], [`Self::phone_area`], [`Self::phone_number`],
+/// [`Self::website_url`], [`Self::website_description`]) are optional
+/// because the UK-bus taxonomy tags them as voluntary — the report omits
+/// their facts entirely when absent.  The company logo
+/// ([`Self::logo_b64`]) is also optional.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompanyProfile {
     /// Names of the directors, in order (used for the officer contexts).
@@ -47,18 +52,24 @@ pub struct CompanyProfile {
     pub location: String,
     /// Registered-office postcode.
     pub postcode: String,
-    /// Contact e-mail address.
-    pub email: String,
-    /// Telephone country code (e.g. "+44").
-    pub phone_country: String,
-    /// Telephone area code.
-    pub phone_area: String,
-    /// Telephone local number.
-    pub phone_number: String,
-    /// Website main page URL.
-    pub website_url: String,
-    /// Website description.
-    pub website_description: String,
+    /// Contact e-mail address (optional — a voluntary taxonomy fact).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// Telephone country code, e.g. "+44" (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_country: Option<String>,
+    /// Telephone area code (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_area: Option<String>,
+    /// Telephone local number (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_number: Option<String>,
+    /// Website main page URL (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub website_url: Option<String>,
+    /// Website description (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub website_description: Option<String>,
     /// VAT registration number.
     pub vat_registration: String,
     /// SIC codes registered with Companies House.
@@ -96,9 +107,10 @@ pub struct CompanyProfile {
 
 impl Default for CompanyProfile {
     /// An empty profile: no directors, contacts or accountant/auditor, no
-    /// logo.  The reports only ever receive a profile from the config file,
-    /// which requires every field — this default exists for the tests and
-    /// for the resolution stage, which does not touch the profile.
+    /// logo, and no voluntary contact facts (e-mail, phone, website).  The
+    /// reports only ever receive a profile from the config file, which
+    /// requires most fields — this default exists for the tests and for the
+    /// resolution stage, which does not touch the profile.
     fn default() -> Self {
         Self {
             directors: Vec::new(),
@@ -107,12 +119,12 @@ impl Default for CompanyProfile {
             county: String::new(),
             location: String::new(),
             postcode: String::new(),
-            email: String::new(),
-            phone_country: String::new(),
-            phone_area: String::new(),
-            phone_number: String::new(),
-            website_url: String::new(),
-            website_description: String::new(),
+            email: None,
+            phone_country: None,
+            phone_area: None,
+            phone_number: None,
+            website_url: None,
+            website_description: None,
             vat_registration: String::new(),
             sic_codes: Vec::new(),
             activities: String::new(),

@@ -273,7 +273,7 @@ impl Frs105Accounts {
 
         // -- ix:header ------------------------------------------------------
 
-        let hidden = elt("ix:hidden", &[]).children(vec![
+        let mut hidden_children = vec![
             non_numeric("uk-bus:ReportTitle", "ctxt-0", REPORT_TITLE),
             non_numeric_fmt(
                 "uk-bus:BusinessReportPublicationDate",
@@ -381,17 +381,39 @@ impl Frs105Accounts {
             ),
             non_numeric("uk-bus:CountyRegion", "ctxt-13", &profile.county),
             non_numeric("uk-bus:PostalCodeZip", "ctxt-13", &profile.postcode),
-            non_numeric("uk-bus:E-mailAddress", "ctxt-13", &profile.email),
-            non_numeric("uk-bus:CountryCode", "ctxt-14", &profile.phone_country),
-            non_numeric("uk-bus:AreaCode", "ctxt-14", &profile.phone_area),
-            non_numeric("uk-bus:LocalNumber", "ctxt-14", &profile.phone_number),
-            non_numeric("uk-bus:WebsiteMainPageURL", "ctxt-13", &profile.website_url),
-            non_numeric(
+        ];
+        // Voluntary contact facts (e-mail, phone, website): the UK-bus
+        // taxonomy tags them as optional, so they are omitted entirely when
+        // the profile leaves them blank.
+        for (name, ctx, value) in [
+            ("uk-bus:E-mailAddress", "ctxt-13", profile.email.as_deref()),
+            (
+                "uk-bus:CountryCode",
+                "ctxt-14",
+                profile.phone_country.as_deref(),
+            ),
+            ("uk-bus:AreaCode", "ctxt-14", profile.phone_area.as_deref()),
+            (
+                "uk-bus:LocalNumber",
+                "ctxt-14",
+                profile.phone_number.as_deref(),
+            ),
+            (
+                "uk-bus:WebsiteMainPageURL",
+                "ctxt-13",
+                profile.website_url.as_deref(),
+            ),
+            (
                 "uk-bus:DescriptionOrOtherInformationOnWebsite",
                 "ctxt-13",
-                &profile.website_description,
+                profile.website_description.as_deref(),
             ),
-        ]);
+        ] {
+            if let Some(value) = value.filter(|v| !v.is_empty()) {
+                hidden_children.push(non_numeric(name, ctx, value));
+            }
+        }
+        let hidden = elt("ix:hidden", &[]).children(hidden_children);
 
         let refs = elt("ix:references", &[]).children(vec![elt_text(
             "link:schemaRef",
@@ -681,6 +703,15 @@ impl Frs105Accounts {
         let text = |name: &str| -> String {
             facts.non_numeric.get(name).cloned().unwrap_or_default()
         };
+        // The voluntary contact facts are omitted when blank, so their
+        // fields come back `None` unless the document carries a value.
+        let opt_text = |name: &str| -> Option<String> {
+            facts
+                .non_numeric
+                .get(name)
+                .cloned()
+                .filter(|v| !v.is_empty())
+        };
         let fallback_start = accounts.period().start;
         let parse_date = |raw: &str| -> chrono::NaiveDate {
             let cleaned = raw.replace('\u{00A0}', " ");
@@ -775,12 +806,12 @@ impl Frs105Accounts {
             county: text("uk-bus:CountyRegion"),
             location: text("uk-bus:PrincipalLocation-CityOrTown"),
             postcode: text("uk-bus:PostalCodeZip"),
-            email: text("uk-bus:E-mailAddress"),
-            phone_country: text("uk-bus:CountryCode"),
-            phone_area: text("uk-bus:AreaCode"),
-            phone_number: text("uk-bus:LocalNumber"),
-            website_url: text("uk-bus:WebsiteMainPageURL"),
-            website_description: text("uk-bus:DescriptionOrOtherInformationOnWebsite"),
+            email: opt_text("uk-bus:E-mailAddress"),
+            phone_country: opt_text("uk-bus:CountryCode"),
+            phone_area: opt_text("uk-bus:AreaCode"),
+            phone_number: opt_text("uk-bus:LocalNumber"),
+            website_url: opt_text("uk-bus:WebsiteMainPageURL"),
+            website_description: opt_text("uk-bus:DescriptionOrOtherInformationOnWebsite"),
             vat_registration: text("uk-bus:VATRegistrationNumber"),
             sic_codes,
             activities: text("uk-bus:DescriptionPrincipalActivities"),
@@ -1873,6 +1904,49 @@ mod tests {
         assert!(out.contains("1. Company information"));
         assert!(out.contains("2. Employees"));
         assert!(out.contains("AverageNumberEmployeesDuringPeriod"));
+    }
+
+    /// The voluntary contact facts (e-mail, phone, website) are omitted
+    /// from the document when the profile leaves them blank, and come back
+    /// `None` on the round trip.
+    #[tokio::test]
+    async fn test_blank_contact_facts_are_omitted() {
+        let (company, gnucash) = load_example().await;
+        let mut profile = example_profile();
+        profile.email = None;
+        profile.phone_country = None;
+        profile.phone_area = None;
+        profile.phone_number = None;
+        profile.website_url = None;
+        profile.website_description = None;
+        let accounts =
+            Frs105Accounts::new(&gnucash, &company, &profile, &example_accounts_meta());
+        let html = accounts.to_ixbrl();
+
+        // No voluntary contact fact is tagged.
+        for fact in [
+            "uk-bus:E-mailAddress",
+            "uk-bus:CountryCode",
+            "uk-bus:AreaCode",
+            "uk-bus:LocalNumber",
+            "uk-bus:WebsiteMainPageURL",
+            "uk-bus:DescriptionOrOtherInformationOnWebsite",
+        ] {
+            assert!(!html.contains(fact), "{fact} must be omitted when blank");
+        }
+        // ... while the required contact facts are still tagged.
+        assert!(html.contains("uk-bus:NameContactDepartmentOrPerson"));
+        assert!(html.contains("uk-bus:PostalCodeZip"));
+
+        // Round trip: the blank contact fields come back absent.
+        let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
+        let back = Frs105Accounts::from_ixbrl_node(&node, &company, &example_accounts_meta());
+        assert_eq!(back.profile.email, None);
+        assert_eq!(back.profile.phone_country, None);
+        assert_eq!(back.profile.phone_area, None);
+        assert_eq!(back.profile.phone_number, None);
+        assert_eq!(back.profile.website_url, None);
+        assert_eq!(back.profile.website_description, None);
     }
 
     #[tokio::test]

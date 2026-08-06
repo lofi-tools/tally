@@ -280,6 +280,9 @@ impl CompanyConfig {
 
     /// Fill the optional profile into the required report profile: absent
     /// fields become blank defaults (empty strings / empty lists, no logo).
+    /// The voluntary contact fields (e-mail, phone, website) stay `None`
+    /// when the config omitted them (empty counts as absent), so the report
+    /// omits their facts entirely.
     pub(crate) fn into_profile(self) -> CompanyProfile {
         CompanyProfile {
             directors: self.directors.unwrap_or_default(),
@@ -288,12 +291,12 @@ impl CompanyConfig {
             county: self.county.unwrap_or_default(),
             location: self.location.unwrap_or_default(),
             postcode: self.postcode.unwrap_or_default(),
-            email: self.email.unwrap_or_default(),
-            phone_country: self.phone_country.unwrap_or_default(),
-            phone_area: self.phone_area.unwrap_or_default(),
-            phone_number: self.phone_number.unwrap_or_default(),
-            website_url: self.website_url.unwrap_or_default(),
-            website_description: self.website_description.unwrap_or_default(),
+            email: self.email.filter(|s| !s.is_empty()),
+            phone_country: self.phone_country.filter(|s| !s.is_empty()),
+            phone_area: self.phone_area.filter(|s| !s.is_empty()),
+            phone_number: self.phone_number.filter(|s| !s.is_empty()),
+            website_url: self.website_url.filter(|s| !s.is_empty()),
+            website_description: self.website_description.filter(|s| !s.is_empty()),
             vat_registration: self.vat_registration.unwrap_or_default(),
             sic_codes: self.sic_codes.unwrap_or_default(),
             activities: self.activities.unwrap_or_default(),
