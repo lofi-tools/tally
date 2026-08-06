@@ -72,7 +72,7 @@ against the environment and the Companies House API.
 | `accounts.report_date` | date (required) | the publication date — cannot be inferred |
 | `accounts.authorised_date` | date (required) | the authorisation date — cannot be inferred |
 | `accounts.signed_by` | string (optional) | defaults to the first director |
-| `accounts.average_employees` | object (required) | average monthly employees by calendar year — cannot be inferred (`{}` for none) |
+| `accounts.average_employees` | object (optional) | defaults to 1 for each of the two financial years |
 | `accounts.signature_b64` | string (required) | base64 image of the director's signature, embedded on the statement of financial position (`""` for none) |
 | `accounts.incorporation_date` | date (optional) | filled from the Companies House profile when absent |
 | `accounts.accounting_standards_dimension`, `accounts.accounts_type_dimension`, `accounts.accounts_status_dimension` | string (optional) | `uk-bus:Micro-entities` / `uk-bus:AbridgedAccounts` / `uk-bus:AuditExempt-NoAccountantsReport` — the values fixed for this report |
@@ -88,9 +88,10 @@ in what the report should show.  With a Companies House API key, the fields
 Companies House holds (registered-office address, SIC codes, jurisdiction,
 current directors) are enriched from the profile instead of rendering
 blank.  The company logo (`company.logo_b64`) is one such optional asset.  The accounts' report metadata that *cannot* be
-inferred — the publication and authorisation dates, the employee counts and
-the signature — is required in the `accounts` sub-object; the signatory
-defaults to the first director.
+inferred — the publication and authorisation dates and the signature — is
+required in the `accounts` sub-object; the signatory defaults to the first
+director, and the employee counts default to 1 for each of the two
+financial years.
 the rest (the period, the incorporation date) is optional, and the accounts
 taxonomy dimensions default to the values fixed for this report.
 
@@ -161,8 +162,8 @@ used, otherwise the profile is fetched from the live API.
 
 A config file with the optional `company.*` profile fields (directors,
 contacts, accountant/auditor, ...) and the required `accounts.*` report
-metadata (dates, employees, signature; the signatory defaults to the first
-director) — copy
+metadata (dates, signature; the signatory defaults to the first director and
+the employee counts to 1 per financial year) — copy
 `libs/ixbrl/example_data/example2/input_config.json`, or start from
 `libs/ixbrl/example_data/example2/minimal_config.json` (no identity, no
 period, blank profile: with a Companies House API key, `COMPANY_NUMBER` and

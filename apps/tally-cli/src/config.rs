@@ -26,8 +26,9 @@
 //! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default |
 //! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
 //! | `company.*` profile fields (directors, contacts, accountant/auditor, ...) | config file (wins) → Companies House when absent (registered-office address, SIC codes, jurisdiction, directors) → blank defaults |
-//! | `accounts.*` unguessable report metadata (report_date, authorised_date, average_employees, signature_b64) | config file only (required) |
+//! | `accounts.*` unguessable report metadata (report_date, authorised_date, signature_b64) | config file only (required) |
 //! | `accounts.signed_by` | config file (optional) → defaults to the first director |
+//! | `accounts.average_employees` | config file (optional) → defaults to 1 for each of the two financial years |
 //! | `accounts.incorporation_date` | config file → Companies House profile when absent |
 //! | `accounts.*` taxonomy dimensions | defaulted to the values fixed for this report |
 //! | `--book`, `--out` | command line only |
@@ -321,11 +322,12 @@ impl CompanyConfig {
 /// company's next accounting period at Companies House, the fy parameters
 /// and the accounts taxonomy dimensions default to the values fixed for
 /// this report, the incorporation date is filled from the Companies House
-/// profile when absent, and the signatory defaults to the first director.
+/// profile when absent, the signatory defaults to the first director, and
+/// the employee counts default to 1 for each of the two financial years.
 /// The fields that cannot be inferred — the publication and authorisation
-/// dates, the employee counts and the signature — are required here.
-/// [`Self::into_meta`] converts the whole thing into the required
-/// [`AccountsMeta`] the reports consume.
+/// dates and the signature — are required here.  [`Self::into_meta`]
+/// converts the whole thing into the required [`AccountsMeta`] the reports
+/// consume.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AccountsConfig {
     /// The return period; resolved from [`Self::accounts_made_up_to`] or the
@@ -357,8 +359,10 @@ pub struct AccountsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signed_by: Option<String>,
     /// Average monthly number of employees, indexed by calendar year
-    /// (required; `{}` for none).
-    pub average_employees: HashMap<String, u32>,
+    /// (optional; each of the two financial years defaults to 1 when not
+    /// specified).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub average_employees: Option<HashMap<String, u32>>,
     /// Accounts taxonomy dimension values, fixed for this report.
     #[serde(default = "default_accounting_standards_dimension")]
     pub accounting_standards_dimension: String,
@@ -375,8 +379,9 @@ impl AccountsConfig {
     /// metadata and the defaulted fields carry through, and the optional
     /// incorporation date and signatory fall back to blank defaults (the
     /// builder later fills the signatory from the first director when the
-    /// config omitted it).  The period is left as given — the builder sets
-    /// the resolved return period.
+    /// config omitted it).  The employee counts default to 1 for each of
+    /// the two financial years.  The period is left as given — the builder
+    /// sets the resolved return period.
     pub(crate) fn into_meta(self) -> AccountsMeta {
         AccountsMeta {
             period: self.period,
@@ -389,7 +394,14 @@ impl AccountsConfig {
             authorised_date: self.authorised_date,
             incorporation_date: self.incorporation_date.unwrap_or_default(),
             signed_by: self.signed_by.unwrap_or_default(),
-            average_employees: self.average_employees,
+            // The employee counts default to 1 for each of the two financial
+            // years; a year explicitly given in the config wins.
+            average_employees: {
+                let mut employees = self.average_employees.unwrap_or_default();
+                employees.entry(self.fy1_year.to_string()).or_insert(1);
+                employees.entry(self.fy2_year.to_string()).or_insert(1);
+                employees
+            },
             accounting_standards_dimension: self.accounting_standards_dimension,
             accounts_type_dimension: self.accounts_type_dimension,
             accounts_status_dimension: self.accounts_status_dimension,
@@ -842,7 +854,9 @@ mod tests {
             report_date: date(2021, 3, 1),
             authorised_date: date(2021, 2, 1),
             signed_by: Some("B Smith".into()),
-            average_employees: HashMap::new(),
+            // The employee counts are left out: they default to 1 per
+            // financial year.
+            average_employees: None,
             accounting_standards_dimension: DEFAULT_ACCOUNTING_STANDARDS_DIMENSION.into(),
             accounts_type_dimension: DEFAULT_ACCOUNTS_TYPE_DIMENSION.into(),
             accounts_status_dimension: DEFAULT_ACCOUNTS_STATUS_DIMENSION.into(),
@@ -1101,6 +1115,11 @@ mod tests {
         assert_eq!(resolved.accounts.period().start, date(2020, 1, 1));
         assert_eq!(resolved.accounts.period().end, date(2020, 12, 31));
         assert_eq!(resolved.accounts.fy1_year, 2019);
+        // An explicit per-year map passes through unchanged.
+        assert_eq!(
+            resolved.accounts.average_employees,
+            HashMap::from([("2019".to_string(), 1), ("2020".to_string(), 2)])
+        );
         assert_eq!(resolved.book_path, PathBuf::from("input.gnucash"));
         assert_eq!(resolved.out_dir, PathBuf::from("out"));
         assert_eq!(
@@ -1293,10 +1312,11 @@ mod tests {
         assert_eq!(file.accounts.report_date, date(2021, 3, 1));
         assert_eq!(file.accounts.authorised_date, date(2021, 2, 1));
         assert_eq!(file.accounts.signed_by, None);
-        assert_eq!(file.accounts.average_employees, HashMap::new());
+        assert_eq!(file.accounts.average_employees, None);
         assert_eq!(file.accounts.signature_b64, "");
         // The enrichment fills the profile blanks and passes the metadata
-        // through into the required report types.
+        // through into the required report types; the employee counts
+        // default to 1 for each of the two financial years.
         assert_eq!(
             file.company.clone().into_profile(),
             CompanyProfile::default()
@@ -1305,8 +1325,39 @@ mod tests {
         assert_eq!(meta.report_date, date(2021, 3, 1));
         assert_eq!(meta.authorised_date, date(2021, 2, 1));
         assert_eq!(meta.signed_by, "");
-        assert_eq!(meta.average_employees, HashMap::new());
+        assert_eq!(
+            meta.average_employees,
+            HashMap::from([("2019".to_string(), 1), ("2020".to_string(), 1)])
+        );
         assert_eq!(meta.signature_b64, "");
+    }
+
+    /// The employee counts default per financial year: an explicit year
+    /// wins, and a year the config left out defaults to 1.
+    #[test]
+    fn average_employees_default_per_financial_year_overlay() {
+        // Both years given: pass through unchanged.
+        let both = AccountsConfig {
+            average_employees: Some(HashMap::from([("2019".to_string(), 3)])),
+            fy1_year: 2019,
+            fy2_year: 2020,
+            ..accounts_config(true, None)
+        };
+        assert_eq!(
+            both.into_meta().average_employees,
+            HashMap::from([("2019".to_string(), 3), ("2020".to_string(), 1)])
+        );
+        // Only one year given: the other financial year defaults to 1.
+        let one = AccountsConfig {
+            average_employees: Some(HashMap::from([("2020".to_string(), 2)])),
+            fy1_year: 2019,
+            fy2_year: 2020,
+            ..accounts_config(true, None)
+        };
+        assert_eq!(
+            one.into_meta().average_employees,
+            HashMap::from([("2019".to_string(), 1), ("2020".to_string(), 2)])
+        );
     }
 
     /// The config types serialise omitting absent options: a blank company
@@ -1321,7 +1372,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&accounts_config(false, None)).unwrap(),
-            "{\"fy1_year\":2019,\"fy2_year\":2020,\"fy1_rate\":19.0,\"fy2_rate\":19.0,\"report_date\":\"2021-03-01\",\"authorised_date\":\"2021-02-01\",\"signed_by\":\"B Smith\",\"average_employees\":{},\"accounting_standards_dimension\":\"uk-bus:Micro-entities\",\"accounts_type_dimension\":\"uk-bus:AbridgedAccounts\",\"accounts_status_dimension\":\"uk-bus:AuditExempt-NoAccountantsReport\",\"signature_b64\":\"\"}"
+            "{\"fy1_year\":2019,\"fy2_year\":2020,\"fy1_rate\":19.0,\"fy2_rate\":19.0,\"report_date\":\"2021-03-01\",\"authorised_date\":\"2021-02-01\",\"signed_by\":\"B Smith\",\"accounting_standards_dimension\":\"uk-bus:Micro-entities\",\"accounts_type_dimension\":\"uk-bus:AbridgedAccounts\",\"accounts_status_dimension\":\"uk-bus:AuditExempt-NoAccountantsReport\",\"signature_b64\":\"\"}"
         );
     }
 
@@ -1398,6 +1449,12 @@ mod tests {
         assert_eq!(accounts.period().end, date(2025, 12, 31));
         // The signatory defaults to the first director.
         assert_eq!(accounts.signed_by, "A Bloggs");
+        // The employee counts default to 1 for each of the two financial
+        // years (the config left them out).
+        assert_eq!(
+            accounts.average_employees,
+            HashMap::from([("2019".to_string(), 1), ("2020".to_string(), 1)])
+        );
         // The profile also supplies the registration date, anchoring the
         // registration-date schedule used as the fallback.
         assert_eq!(resolved.company.registration_date, date(2001, 1, 1));

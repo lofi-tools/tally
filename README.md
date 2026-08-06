@@ -136,9 +136,9 @@ The full details live in the [tally-cli README](apps/tally-cli/README.md#configu
   Companies House profile when an API key is set (address, SIC codes,
   jurisdiction, directors). Logo optional.
 - **Accounts metadata** (`accounts.*`) — required: `report_date`,
-  `authorised_date`, `average_employees`, `signature_b64`. `signed_by`
-  defaults to the first director; `period` and `incorporation_date`
-  optional; taxonomy dimensions defaulted.
+  `authorised_date`, `signature_b64`. `signed_by` defaults to the first
+  director; `average_employees` to 1 per financial year; `period` and
+  `incorporation_date` optional; taxonomy dimensions defaulted.
 
 ### Example configs
 
@@ -156,7 +156,7 @@ export COMPANY_UNIQUE_TAXPAYER_REF=8596148860
 
 Most company fields can be left out (resolved from calling Companies House API).
 You only need to fill in the required accounts metadata (the fields that
-cannot be inferred — the dates, employee counts and signature;
+cannot be inferred — the dates and signature;
 the period can be left out and is resolved from Companies House):
 
 ```json
