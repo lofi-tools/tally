@@ -26,7 +26,14 @@ See [roadmap](docs/current-state-and-roadmap.md) for planned features & progress
 
 ## Quickstart
 
-Produce the CT600 Corporation Tax return a UK limited company files with HMRC
+`tally` turns your accounting data into the CT600 Corporation Tax return ready to file with HMRC. It does **NOT** file the return. You provide:
+
+1. **A config file** (`--config-path`) — the company's identity (name,
+   registration number, tax reference) and the accounts metadata
+   (directors, SIC codes, address, …).  Anything left out is filled in
+   automatically from the company's Companies House profile when an API
+   key is set.
+2. **Your books** (`--book`) — the GnuCash ledger (`input.gnucash`);
 
 ```bash
 tally ct600 \
@@ -36,17 +43,8 @@ tally ct600 \
   # -> writes .cache/ct600/ct600.xml
 ```
 
-`tally` turns your accounting data into the Corporation Tax return a UK
-limited company files with HMRC. You provide:
-
-1. **A config file** (`--config-path`) — the company's identity (name,
-   registration number, tax reference) and the accounts metadata
-   (directors, SIC codes, address, …).  Anything left out is filled in
-   automatically from the company's Companies House profile when an API
-   key is set.
-2. **Your books** (`--book`) — the GnuCash ledger (`input.gnucash`);
-
-See [tally-cli configuration](#tally-cli-configuration) for the
+See the [example config file](libs/ixbrl/example_data/example2/input_config.json)
+And the detailed [tally-cli config options](#tally-cli-configuration) for 
 flags, config, and defaults.
 
 
@@ -165,22 +163,11 @@ export COMPANY_NUMBER=12345678
 export COMPANY_UNIQUE_TAXPAYER_REF=8596148860
 ```
 
-<!--```json
+Most company fields can be left out (resolved from calling Companies House API).
+You only need to fill in the accounts metadata:
+
+```json
 {
-  "company": {
-    "directors": ["A Bloggs"],
-    "contact_name": "Corporate Enquiries",
-    "address_lines": ["123 Leadbarton Street"],
-    "county": "Minchingshire",
-    "location": "Threapminchington",
-    "postcode": "QQ99 9ZZ",
-    "email": "corporate@example.org",
-    "website_url": "https://example.org/corporate",
-    "sic_codes": ["62020"],
-    "activities": "Computer security consultancy",
-    "jurisdiction": "England and Wales",
-    "...": "remaining required company.* profile fields — copy them from libs/ixbrl/example_data/example2/input_config.json"
-  },
   "accounts": {
     "period": {
       "start": "2020-01-01",
@@ -189,7 +176,7 @@ export COMPANY_UNIQUE_TAXPAYER_REF=8596148860
     "...": "remaining required accounts.* report fields — copy them from libs/ixbrl/example_data/example2/input_config.json"
   }
 }
-```-->
+```
 
 **Without an API key** — the company block must be complete, because nothing
 can be resolved at runtime:
