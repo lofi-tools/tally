@@ -19,7 +19,7 @@ plus a GnuCash ledger into the CT600 GovTalk message:
 
 ```bash
 tally ct600 --config-path <config> --book <book> --out <dir>
-# -> writes <dir>/ct600.xml
+# -> writes <dir>/ct600-<company-number>.xml
 ```
 
 It produces the return; it does **not** submit it (see "What it doesn't
@@ -74,9 +74,8 @@ byte for byte (modulo random element ids).
 ## What it doesn't handle
 
 - **No submission from the CLI.** The `tally ct600` command writes
-  `ct600.xml` only. The full HMRC submission lifecycle exists in the `ct600`
-  library (`HmrcCorpTaxClient::submit_and_poll()`) but is not wired into any
-  command.
+  `ct600-<company-number>.xml` only. The full HMRC submission lifecycle
+  exists in the `ct600` library (`HmrcCorpTaxClient::submit_and_poll()`) but is not wired to the live HRMC service (yet)
 - **No automatic data gathering.** The pipeline starts from an existing
   GnuCash ledger. There are no Open Banking connectors and no CSV/records
   importer for bank transactions (the `example3.csv` fixture has no code

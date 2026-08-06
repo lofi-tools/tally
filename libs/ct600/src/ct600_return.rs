@@ -1198,10 +1198,10 @@ mod tests {
 
         let xml = filing.to_xml();
 
-        // Write the generated message to .cache/rust-ct600 for inspection /
-        // the LTS.
-        std::fs::create_dir_all("../../.cache/rust-ct600").unwrap();
-        std::fs::write("../../.cache/rust-ct600/ct600-rust.xml", &xml).unwrap();
+        // Write the generated message to .cache/ct600-rs-tests for
+        // inspection / the LTS.
+        std::fs::create_dir_all("../../.cache/ct600-rs-tests").unwrap();
+        std::fs::write("../../.cache/ct600-rs-tests/ct600-example2.xml", &xml).unwrap();
 
         // -- envelope --------------------------------------------------------
         assert!(xml.contains("<Class>HMRC-CT-CT600</Class>"));

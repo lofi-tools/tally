@@ -39,8 +39,8 @@ See [roadmap](docs/current-state-and-roadmap.md) for planned features & progress
 tally ct600 \
   --config-path libs/ixbrl/example_data/example2/input_config.json \
   --book libs/ixbrl/example_data/example2/input.gnucash \
-  --out .cache/ct600
-  # -> writes .cache/ct600/ct600.xml
+  --out .cache/tally-cli
+  # -> writes .cache/tally-cli/ct600-<company-number>.xml
 ```
 
 See the [example config file](libs/ixbrl/example_data/example2/input_config.json)
@@ -58,8 +58,8 @@ flags, config, and defaults.
    cargo run -p tally-cli -- ct600 \
      --config-path libs/ixbrl/example_data/example2/input_config.json \
      --book libs/ixbrl/example_data/example2/input.gnucash \
-     --out .cache/ct600
-     # -> writes .cache/ct600/ct600.xml
+     --out .cache/tally-cli
+     # -> writes .cache/tally-cli/ct600-<company-number>.xml
    ```
 
 4. Run the tests (with stub data, no remote APIs, no config needed):

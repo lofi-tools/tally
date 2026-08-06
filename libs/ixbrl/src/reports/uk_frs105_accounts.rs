@@ -1892,8 +1892,12 @@ mod tests {
         let out = accounts.to_ixbrl();
 
         // Write the Rust output for external validation (arelle).
-        std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
-        std::fs::write("../../.cache/rust-ixbrl/accts-micro-rust.html", &out).unwrap();
+        std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
+        std::fs::write(
+            "../../.cache/ixbrl-rs-tests/accts-micro-example2.html",
+            &out,
+        )
+        .unwrap();
 
         let expected =
             std::fs::read_to_string("example_data/example2/output-accounts.html")
@@ -1987,15 +1991,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_accounts_ixbrl_round_trip() {
-        // Serialise, write the output to .cache/rust-ixbrl, then deserialise
-        // in two steps (XML -> XmlNode -> Frs105Accounts) and compare against
-        // the original.
+        // Serialise, write the output to .cache/ixbrl-rs-tests, then
+        // deserialise in two steps (XML -> XmlNode -> Frs105Accounts) and
+        // compare against the original.
         let (company, gnucash) = load_example().await;
         let accounts = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta());
         let html = accounts.to_ixbrl();
 
-        std::fs::create_dir_all("../../.cache/rust-ixbrl").unwrap();
-        std::fs::write("../../.cache/rust-ixbrl/accts-micro-roundtrip.html", &html).unwrap();
+        std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
+        std::fs::write(
+            "../../.cache/ixbrl-rs-tests/accts-micro-roundtrip-example2.html",
+            &html,
+        )
+        .unwrap();
 
         let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
         let back = Frs105Accounts::from_ixbrl_node(&node, &company, &example_accounts_meta());

@@ -189,7 +189,11 @@ async fn run_ct600(args: CliArgs) -> Result<()> {
 
     std::fs::create_dir_all(&resolved.out_dir)
         .with_context(|| format!("create output directory '{}'", resolved.out_dir.display()))?;
-    let out_path = resolved.out_dir.join("ct600.xml");
+    // The company number names the output file, so live runs are
+    // distinguishable by their data source.
+    let out_path = resolved
+        .out_dir
+        .join(format!("ct600-{}.xml", resolved.company.company_number));
     std::fs::write(&out_path, xml)
         .with_context(|| format!("write '{}'", out_path.display()))?;
     println!("wrote {}", out_path.display());

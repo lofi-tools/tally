@@ -2,7 +2,8 @@
 
 `tally` generates the CT600 Corporation Tax return — the XML message a UK limited
 company files with HMRC — from a company config file and a GnuCash book, writing it
-to `<out>/ct600.xml`.  It produces the return; it does not submit it.
+to `<out>/ct600-<company-number>.xml`.  It produces the return; it does not
+submit it.
 
 ```bash
 tally ct600 --config-path <config> --book <book> --out <dir>
@@ -23,7 +24,7 @@ limited company files with HMRC. You provide:
    [Resolving the company identity](#resolving-the-company-identity));
 2. **Your books** (`--book`) — the GnuCash ledger (`input.gnucash`);
 3. **An output directory** (`--out`) — where the CT600 message is written
-   (`<out>/ct600.xml`).
+   (`<out>/ct600-<company-number>.xml`).
 
 From those, `tally` reads the book, builds the accounts and the
 corporation-tax calculation, and assembles everything into the CT600 XML
@@ -43,7 +44,7 @@ is optional.  There is no environment-variable fallback.
 |------|---------|
 | `--config-path <config>` | JSON config: company identity + accounts metadata |
 | `--book <book>` | GnuCash ledger (`input.gnucash`) |
-| `--out <dir>` | output directory; the CT600 message is written to `<dir>/ct600.xml` |
+| `--out <dir>` | output directory; the CT600 message is written to `<dir>/ct600-<company-number>.xml` |
 | `--accounts-made-up-to <date>` | date at which the accounts are made (`YYYY-MM-DD`); the return period is deduced as the 12 months ending on it (wins over the config's `accounts.accounts_made_up_to`) |
 
 ### Config file
@@ -192,7 +193,7 @@ cargo build -p tally-cli
 cargo run -p tally-cli -- ct600 \
   --config-path libs/ixbrl/example_data/example2/input_config.json \
   --book libs/ixbrl/example_data/example2/input.gnucash \
-  --out .cache/ct600
+  --out .cache/tally-cli
 ```
 
 ## Tests
