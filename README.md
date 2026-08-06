@@ -121,46 +121,23 @@ Tax reference is never resolved from Companies House.)
 
 ## tally-cli configuration
 
-All the flags, config-file keys and defaults baked into the message are
-documented in the [tally-cli README](apps/tally-cli/README.md#configuration).
-In short:
+The full details live in the [tally-cli README](apps/tally-cli/README.md#configuration).
 
-- `--config-path`, `--book` and `--out` are required; `--accounts-made-up-to`
-  is optional — the flags have no environment-variable fallback;
-- the company-identity fields in the config are **optional**, each with its
-  own default: the name is resolved from Companies House at runtime when an
-  API key is configured (the registration date too, when the config carries
-  no identity details at all), the company number comes from `COMPANY_NUMBER`
-  (winning) or `company.company_number`, and the first still-missing field
-  fails with a clear error explaining how to resolve it;
-- the Corporation Tax reference (UTR) cannot be resolved from Companies
-  House: it comes from the `COMPANY_UNIQUE_TAXPAYER_REF` environment variable
-  (winning) or the config's `company.tax_reference`, so one of the two must
-  be present;
-- the return period lives in the config's `accounts` sub-object and is
-  optional too: an explicit `accounts.period` (both dates) or an
-  `accounts.accounts_made_up_to` date in the config (or the
-  `--accounts-made-up-to` flag) gives the period; otherwise it defaults to
-  the company's next accounting period to file, resolved from the Companies
-  House profile;
-- the company's descriptive profile fields (`company.*`: directors,
-  contacts, accountant/auditor, SIC codes, ...) are optional: an absent
-  field parses to `None`, serialises back as omitted, and the reports
-  render empty values for it — leave them out (as in `minimal_config.json`)
-  or copy them from the example config below.  When an API key is set, the
-  fields Companies House holds — the registered-office address (lines,
-  county, location, postcode), the SIC codes, the jurisdiction and the
-  current directors (from the officers list) — are filled from the profile
-  at runtime instead of rendering blank; the company logo
-  (`company.logo_b64`) is one such optional asset;
-- the accounts' report metadata that *cannot* be inferred — the publication
-  and authorisation dates, the signatory, the employee counts and the
-  signature (`accounts.report_date`, `accounts.authorised_date`,
-  `accounts.signed_by`, `accounts.average_employees`,
-  `accounts.signature_b64`) — is **required** in the config; the return
-  period and the incorporation date remain optional (resolved from the
-  period / Companies House profile), and the accounts taxonomy dimensions
-  default to the values fixed for the report.
+- **CLI flags** — `--config-path`, `--book`, `--out` required; `--accounts-made-up-to` optional.
+- **Company identity** (`company.*`) — optional. Name, registration date and
+  number come from Companies House when an API key is set (`COMPANY_NUMBER`
+  wins for the number).
+- **Tax reference (UTR)**
+  `COMPANY_UNIQUE_TAXPAYER_REF` (env, wins) or `company.tax_reference`; one is required.
+- **Return period** (`accounts.period`) — optional. `accounts.period`,
+  `accounts.accounts_made_up_to` / `--accounts-made-up-to`, else the
+  company's next accounting period from Companies House.
+- **Company Profile** (`company.*`) — optional, blank when absent; filled from the
+  Companies House profile when an API key is set (address, SIC codes,
+  jurisdiction, directors). Logo optional.
+- **Accounts metadata** (`accounts.*`) — required: `report_date`,
+  `authorised_date`, `signed_by`, `average_employees`, `signature_b64`.
+  `period` and `incorporation_date` optional; taxonomy dimensions defaulted.
 
 ### Example configs
 
