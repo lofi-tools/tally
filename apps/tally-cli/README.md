@@ -52,12 +52,15 @@ A JSON file with the same shape as
 `libs/ixbrl/example_data/example2/input_config.json` (use it as a template): a nested
 `company` block (identity + descriptive profile) and an `accounts` sub-object
 (period + report metadata).  This is also the config the tests and the
-`tally-example2` script run against.
+`tally-example2` script run against.  A blank template with no identity,
+period or report data — `libs/ixbrl/example_data/example2/minimal_config.json`
+— is what the live enrichment test resolves entirely from the environment
+and the Companies House API.
 
 | Key | Type | Default |
 |-----|------|---------|
 | `company.name` | string (optional) | resolved from Companies House when an API key is configured |
-| `company.tax_reference` | string (required) | `UNIQUE_TAXPAYER_REF` environment variable wins when set; it cannot be resolved from Companies House, so one of the two must be present |
+| `company.tax_reference` | string (required) | `COMPANY_UNIQUE_TAXPAYER_REF` environment variable wins when set; it cannot be resolved from Companies House, so one of the two must be present |
 | `company.company_number` | string (optional) | `COMPANY_NUMBER` environment variable wins when set |
 | `company.directors`, `company.contact_name`, `company.address_lines`, `company.email`, `company.accountant_name`, `company.auditor_name`, ... | required | — |
 | `company.logo_b64` | string (optional) | none — the logo is only embedded on the title page when present |
@@ -104,7 +107,7 @@ can be built:
 - the **company number** comes from the `COMPANY_NUMBER` environment
   variable (which wins) or the config's `company.company_number`;
 - the **Corporation Tax reference (UTR)** cannot be resolved from Companies
-  House: it comes from the `UNIQUE_TAXPAYER_REF` environment variable
+  House: it comes from the `COMPANY_UNIQUE_TAXPAYER_REF` environment variable
   (which wins) or the config's `company.tax_reference`, so one of the two
   must always be present;
 - the **return period** lives in the config's `accounts` sub-object and is
@@ -126,7 +129,7 @@ error: cannot resolve the config from 'config.json': company.name is missing —
 ### Environment variables
 
 Producing the CT600 needs the Corporation Tax reference, which comes from
-`UNIQUE_TAXPAYER_REF` (winning) or the config's `company.tax_reference`.  The
+`COMPANY_UNIQUE_TAXPAYER_REF` (winning) or the config's `company.tax_reference`.  The
 underlying libraries also read a few variables for live Companies House
 resolution and HMRC submission (future features): `COMPANY_NUMBER`,
 `COMPANIES_HOUSE_API_KEY` / `COMPANIES_HOUSE_SANDBOX_API_KEY`, `CT600_CACHE_DIR`,
@@ -145,10 +148,13 @@ used, otherwise the profile is fetched from the live API.
 A config file carrying the required `company.*` profile fields (directors,
 contacts, accountant/auditor, ...) and `accounts.*` report fields (report
 title, dates, employee counts, ...) — copy
-`libs/ixbrl/example_data/example2/input_config.json` — plus a Corporation Tax
-reference — either a `UNIQUE_TAXPAYER_REF` environment variable or the
-config's `company.tax_reference` — and either a company number or a
-`COMPANY_NUMBER` environment variable.  The company name and return period
+`libs/ixbrl/example_data/example2/input_config.json`, or start from
+`libs/ixbrl/example_data/example2/minimal_config.json` (all required fields
+blank: with a Companies House API key, `COMPANY_NUMBER` and
+`COMPANY_UNIQUE_TAXPAYER_REF`, everything is resolved at runtime) — plus a
+Corporation Tax reference — either a `COMPANY_UNIQUE_TAXPAYER_REF`
+environment variable or the config's `company.tax_reference` — and either a
+company number or a `COMPANY_NUMBER` environment variable.  The company name and return period
 are only needed when no Companies House API key is configured: with a key,
 the name and the next accounting period to file are resolved from the
 company's profile at runtime (the period can also be given explicitly or

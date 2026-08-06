@@ -11,7 +11,7 @@ path = "src/main.rs"
 # Live Companies House enrichment integration test (in `src/config.rs`, the
 # `live_tests` module).  Enabled by default so `cargo test` exercises the
 # real (or sandbox) API (needs a key + `COMPANY_NUMBER` +
-# `UNIQUE_TAXPAYER_REF`); disable with `cargo test -p tally-cli
+# `COMPANY_UNIQUE_TAXPAYER_REF`); disable with `cargo test -p tally-cli
 # --no-default-features` to run fully offline — the live test is then
 # reported as ignored.
 default = ["api_tests"]

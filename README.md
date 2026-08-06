@@ -200,8 +200,15 @@ can be resolved at runtime:
 }
 ```
 
-The UTR can also come from `UNIQUE_TAXPAYER_REF`, which wins over
+The UTR can also come from `COMPANY_UNIQUE_TAXPAYER_REF`, which wins over
 `company.tax_reference`.
+
+A committed blank version of the above —
+`libs/ixbrl/example_data/example2/minimal_config.json` — has no identity,
+period or report data, and is the config the tally-cli live enrichment test
+(`live_minimal_config_enriched_from_api_and_cached`) resolves from the API
+(needs `COMPANIES_HOUSE_API_KEY`, `COMPANY_NUMBER` and
+`COMPANY_UNIQUE_TAXPAYER_REF`).
 
 ## Docs & Links
 

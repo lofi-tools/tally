@@ -13,7 +13,7 @@
 //! |-------|--------------------------|
 //! | `company.name` | config file → Companies House (needs an API key + company number) |
 //! | `company.company_number` | `COMPANY_NUMBER` (env, wins) → config file |
-//! | `company.tax_reference` (UTR) | `UNIQUE_TAXPAYER_REF` (env, wins) → config file |
+//! | `company.tax_reference` (UTR) | `COMPANY_UNIQUE_TAXPAYER_REF` (env, wins) → config file |
 //! | `accounts.period` | config file (both dates) → deduced from the made-up-to date (`--accounts-made-up-to` wins over `accounts.accounts_made_up_to`; the 12 months ending on it) → Companies House next accounting period |
 //! | `accounts.accounts_made_up_to` / `--accounts-made-up-to` | command line (flag, wins) → config file; deduces the return period as the 12 months ending on the date |
 //! | `accounts.fy1_year` / `fy2_year` / `fy1_rate` / `fy2_rate` | config file → defaults (2019 / 2020 at 19%) |
@@ -264,8 +264,8 @@ impl ConfigBuilder {
     /// The name is enriched from the profile when the config carries none;
     /// the registration date only when the config had no identity at all, so
     /// partial inputs don't skew the accounting periods.  The UTR cannot
-    /// come from Companies House: `UNIQUE_TAXPAYER_REF` wins over the config
-    /// file.
+    /// come from Companies House: `COMPANY_UNIQUE_TAXPAYER_REF` wins over
+    /// the config file.
     async fn resolve_identity(
         &self,
         company_number: &str,
@@ -323,8 +323,8 @@ impl ConfigBuilder {
                     &self.cli.config_path,
                     "company.tax_reference",
                     "the Corporation Tax reference (UTR) cannot be resolved from \
-                     Companies House; set the UNIQUE_TAXPAYER_REF environment variable \
-                     or add company.tax_reference to the config file",
+                     Companies House; set the COMPANY_UNIQUE_TAXPAYER_REF environment \
+                     variable or add company.tax_reference to the config file",
                 )
             })?;
 
@@ -575,7 +575,7 @@ mod tests {
         assert!(msg.contains("COMPANIES_HOUSE_API_KEY"), "{msg}");
 
         // With a name but no UTR, the error names `company.tax_reference`
-        // and the `UNIQUE_TAXPAYER_REF` alternative.
+        // and the `COMPANY_UNIQUE_TAXPAYER_REF` alternative.
         let no_utr = company_config(Some("Example Biz Ltd."), None, Some("12345678"));
         let err = builder(empty_env.clone(), no_utr, accounts_meta(true, None))
             .build()
@@ -583,7 +583,7 @@ mod tests {
             .expect_err("a missing UTR must error");
         let msg = format!("{err:#}");
         assert!(msg.contains("company.tax_reference"), "{msg}");
-        assert!(msg.contains("UNIQUE_TAXPAYER_REF"), "{msg}");
+        assert!(msg.contains("COMPANY_UNIQUE_TAXPAYER_REF"), "{msg}");
 
         // Empty-string fields count as absent: an empty name or UTR errors.
         let empty_name = company_config(Some(""), Some("8596148860"), Some("12345678"));
@@ -599,7 +599,7 @@ mod tests {
             .expect_err("an empty company.tax_reference must error");
         assert!(format!("{err:#}").contains("company.tax_reference"));
 
-        // The captured `UNIQUE_TAXPAYER_REF` wins over the config's.
+        // The captured `COMPANY_UNIQUE_TAXPAYER_REF` wins over the config's.
         let company = builder(
             env(Some("1111111111"), None, None, None),
             complete.clone(),
@@ -911,6 +911,26 @@ mod tests {
         );
     }
 
+    /// The committed minimal config
+    /// (`libs/ixbrl/example_data/example2/minimal_config.json`) parses to a
+    /// blank identity, no period and no report data — everything the live
+    /// test enriches from the environment and the Companies House API.
+    #[test]
+    fn minimal_config_parses_blank() {
+        let path = Path::new("../../libs/ixbrl/example_data/example2/minimal_config.json");
+        let file = ConfigFile::from_file(path).expect("parse the minimal config");
+        assert_eq!(file.company.name, None);
+        assert_eq!(file.company.tax_reference, None);
+        assert_eq!(file.company.company_number, None);
+        assert_eq!(file.accounts.period, None);
+        assert_eq!(file.accounts.accounts_made_up_to, None);
+        assert!(file.accounts.report_title.is_empty());
+        // The blank profile: no directors, no contacts, no accountant.
+        assert!(file.company.profile.directors.is_empty());
+        assert!(file.company.profile.contact_name.is_empty());
+        assert!(file.company.profile.accountant_name.is_empty());
+    }
+
     /// With an API key, a company number and a cached profile, the return
     /// period defaults to the profile's next accounting period — no network
     /// access (the profile is seeded into a scratch cache directory).
@@ -976,16 +996,19 @@ mod live_tests {
     /// House API, and the cache-first second run.
     ///
     /// With `COMPANIES_HOUSE_API_KEY` (or `COMPANIES_HOUSE_SANDBOX_API_KEY`),
-    /// `COMPANY_NUMBER` and `UNIQUE_TAXPAYER_REF` exported, an empty config
-    /// is enriched entirely from the live profile (name, registration date,
-    /// next accounting period).  The profile lands in the ambient cache
-    /// directory (idempotent: a warm cache simply skips the network); a
-    /// second run with a placeholder key proves the cache serves the
-    /// response.
+    /// `COMPANY_NUMBER` and `COMPANY_UNIQUE_TAXPAYER_REF` exported, the
+    /// committed minimal config
+    /// (`libs/ixbrl/example_data/example2/minimal_config.json` — no identity,
+    /// no period, blank profile and report metadata) is enriched entirely
+    /// from the live profile (name, registration date, next accounting
+    /// period), and the resolved inputs are printed.  The profile lands in
+    /// the ambient cache directory (idempotent: a warm cache simply skips
+    /// the network); a second run with a placeholder key proves the cache
+    /// serves the response.
     #[tokio::test]
     #[cfg_attr(
         not(feature = "api_tests"),
-        ignore = "requires a Companies House API key, COMPANY_NUMBER and UNIQUE_TAXPAYER_REF"
+        ignore = "requires a Companies House API key, COMPANY_NUMBER and COMPANY_UNIQUE_TAXPAYER_REF"
     )]
     async fn live_minimal_config_enriched_from_api_and_cached() {
         let env = EnvVars::from_env();
@@ -999,23 +1022,17 @@ mod live_tests {
                      live API, a sandbox test company for the sandbox API",
         );
         let utr = env.unique_taxpayer_ref.as_deref().expect(
-            "the api_tests feature needs UNIQUE_TAXPAYER_REF (the Corporation Tax \
-                     reference is never resolved from Companies House)",
+            "the api_tests feature needs COMPANY_UNIQUE_TAXPAYER_REF (the Corporation \
+                     Tax reference is never resolved from Companies House)",
         );
 
-        // The minimum config: an empty `company` block and `accounts`
-        // sub-object, nothing to resolve from.
-        let file = ConfigFile {
-            company: RawCompanyConfig {
-                name: None,
-                tax_reference: None,
-                company_number: None,
-                profile: CompanyProfile::default(),
-            },
-            accounts: AccountsMeta::default(),
-        };
+        // The committed minimal config: no identity, no period, blank
+        // profile and report metadata — nothing for resolution to use, so
+        // everything comes from the environment and the live API.
+        let path = Path::new("../../libs/ixbrl/example_data/example2/minimal_config.json");
+        let file = ConfigFile::from_file(path).expect("parse the minimal config");
         let cli = CliArgs {
-            config_path: PathBuf::from("live.json"),
+            config_path: path.to_path_buf(),
             accounts_made_up_to: None,
             book_path: Some(PathBuf::from("book.gnucash")),
             out_dir: Some(PathBuf::from("out")),
@@ -1031,6 +1048,7 @@ mod live_tests {
         .build()
         .await
         .expect("resolve the minimum config from the live API");
+        println!("resolved inputs from the live API:\n{resolved:#?}");
         let company = resolved.company;
         assert_eq!(company.company_number, number);
         assert_eq!(company.tax_reference, utr);

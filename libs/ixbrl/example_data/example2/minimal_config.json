@@ -1,0 +1,43 @@
+{
+  "company": {
+    "directors": [],
+    "contact_name": "",
+    "address_lines": [],
+    "county": "",
+    "location": "",
+    "postcode": "",
+    "email": "",
+    "phone_country": "",
+    "phone_area": "",
+    "phone_number": "",
+    "website_url": "",
+    "website_description": "",
+    "vat_registration": "",
+    "sic_codes": [],
+    "activities": "",
+    "jurisdiction": "",
+    "accountant_name": "",
+    "accountant_business": "",
+    "accountant_address": "",
+    "auditor_name": "",
+    "auditor_business": "",
+    "auditor_address": "",
+    "industry_sector_dimension": "",
+    "legal_form_dimension": "",
+    "country_dimension": "",
+    "contact_country_dimension": "",
+    "phone_type_dimension": ""
+  },
+  "accounts": {
+    "report_title": "",
+    "report_date": "1970-01-01",
+    "authorised_date": "1970-01-01",
+    "incorporation_date": "1970-01-01",
+    "signed_by": "",
+    "average_employees": {},
+    "accounting_standards_dimension": "",
+    "accounts_type_dimension": "",
+    "accounts_status_dimension": "",
+    "signature_b64": ""
+  }
+}
