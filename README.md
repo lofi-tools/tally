@@ -147,7 +147,11 @@ In short:
   contacts, accountant/auditor, SIC codes, ...) are optional: an absent
   field parses to `None`, serialises back as omitted, and the reports
   render empty values for it — leave them out (as in `minimal_config.json`)
-  or copy them from the example config below; the company logo
+  or copy them from the example config below.  When an API key is set, the
+  fields Companies House holds — the registered-office address (lines,
+  county, location, postcode), the SIC codes, the jurisdiction and the
+  current directors (from the officers list) — are filled from the profile
+  at runtime instead of rendering blank; the company logo
   (`company.logo_b64`) is one such optional asset;
 - the accounts' report metadata that *cannot* be inferred — the publication
   and authorisation dates, the signatory, the employee counts and the
@@ -220,13 +224,6 @@ can be resolved at runtime:
 
 The UTR can also come from `COMPANY_UNIQUE_TAXPAYER_REF`, which wins over
 `company.tax_reference`.
-
-A committed blank version of the above —
-`libs/ixbrl/example_data/example2/minimal_config.json` — has no identity,
-period or report data, and is the config the tally-cli live enrichment test
-(`live_minimal_config_enriched_from_api_and_cached`) resolves from the API
-(needs `COMPANIES_HOUSE_API_KEY`, `COMPANY_NUMBER` and
-`COMPANY_UNIQUE_TAXPAYER_REF`).
 
 ## Docs & Links
 

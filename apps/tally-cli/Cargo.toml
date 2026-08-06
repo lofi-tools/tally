@@ -26,6 +26,8 @@ serde_json.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 # errors
 anyhow.workspace = true
+# logs (best-effort enrichment warnings)
+log = "0.4"
 # internal
 # default-features = false: ct600's only feature is `api_tests` (live
 # Companies House integration tests, a default of ct600 itself).  Kept off

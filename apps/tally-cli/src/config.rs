@@ -25,7 +25,7 @@
 //! | `accounts.fy1_year` / `fy2_year` / `fy1_rate` / `fy2_rate` | config file → defaults (2019 / 2020 at 19%) |
 //! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default |
 //! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
-//! | `company.*` profile fields (directors, contacts, accountant/auditor, ...) | config file only (optional — blank when absent) |
+//! | `company.*` profile fields (directors, contacts, accountant/auditor, ...) | config file (wins) → Companies House when absent (registered-office address, SIC codes, jurisdiction, directors) → blank defaults |
 //! | `accounts.*` unguessable report metadata (report_date, authorised_date, signed_by, average_employees, signature_b64) | config file only (required) |
 //! | `accounts.incorporation_date` | config file → Companies House profile when absent |
 //! | `accounts.*` taxonomy dimensions | defaulted to the values fixed for this report |
@@ -36,7 +36,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{Duration, Months, NaiveDate};
-use ct600::companies_house::{CompanyProfile as ChProfile, next_accounting_period_from};
+use ct600::companies_house::{
+    CompanyProfile as ChProfile, OfficerList, next_accounting_period_from,
+};
 use ct600::{CompaniesHouseClient, CompaniesHouseClientType};
 use ixbrl::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use serde::{Deserialize, Serialize};
@@ -150,9 +152,11 @@ impl ConfigFile {
 /// identity fields plus the optional descriptive profile (directors,
 /// contacts, accountant/auditor, ...).  Every field is optional and
 /// serialises back as omitted when absent.  The builder enriches the
-/// identity into the required [`Company`], and [`Self::into_profile`] fills
-/// the profile's blanks into the required [`CompanyProfile`] the reports
-/// consume.
+/// identity into the required [`Company`]; [`Self::enrich_from_ch`] fills
+/// the descriptive fields the config left absent from the Companies House
+/// profile and officers (registered-office address, SIC codes,
+/// jurisdiction, directors), and [`Self::into_profile`] turns the result
+/// into the required [`CompanyProfile`] the reports consume.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CompanyConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -220,6 +224,58 @@ pub struct CompanyConfig {
 }
 
 impl CompanyConfig {
+    /// Fill the descriptive profile fields the config left absent (empty
+    /// counts as absent) from a resolved Companies House profile and its
+    /// officers: the registered-office address (lines, county, location,
+    /// postcode), the SIC codes, the jurisdiction and the current
+    /// directors.  Config values always win — Companies House only supplies
+    /// what the config omitted.  Fields Companies House does not hold
+    /// (contacts, accountant/auditor, dimensions, logo) stay as configured.
+    pub(crate) fn enrich_from_ch(
+        &mut self,
+        profile: Option<&ChProfile>,
+        officers: Option<&OfficerList>,
+    ) {
+        let Some(profile) = profile else { return };
+        if self.directors.as_deref().is_none_or(|d| d.is_empty())
+            && let Some(officers) = officers
+        {
+            self.directors = Some(officers.directors());
+        }
+        if let Some(office) = &profile.registered_office_address {
+            if self.address_lines.as_deref().is_none_or(|l| l.is_empty()) {
+                let lines = [
+                    office.premises.as_deref(),
+                    office.address_line_1.as_deref(),
+                    office.address_line_2.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+                if !lines.is_empty() {
+                    self.address_lines = Some(lines);
+                }
+            }
+            if self.county.as_deref().is_none_or(|s| s.is_empty()) {
+                self.county = office.region.clone();
+            }
+            if self.location.as_deref().is_none_or(|s| s.is_empty()) {
+                self.location = office.locality.clone();
+            }
+            if self.postcode.as_deref().is_none_or(|s| s.is_empty()) {
+                self.postcode = office.postal_code.clone();
+            }
+        }
+        if self.sic_codes.as_deref().is_none_or(|s| s.is_empty()) {
+            self.sic_codes = profile.sic_codes.clone();
+        }
+        if self.jurisdiction.as_deref().is_none_or(|s| s.is_empty()) {
+            self.jurisdiction = profile.jurisdiction.clone();
+        }
+    }
+
     /// Fill the optional profile into the required report profile: absent
     /// fields become blank defaults (empty strings / empty lists, no logo).
     pub(crate) fn into_profile(self) -> CompanyProfile {
@@ -418,8 +474,11 @@ impl ConfigBuilder {
     /// Each resolution concern is a sub-method — [`ConfigBuilder::resolve_company_number`],
     /// [`ConfigBuilder::resolve_identity`], [`ConfigBuilder::resolve_period`],
     /// [`ConfigBuilder::resolve_paths`] — and errors on the first input the
-    /// sources cannot provide.
-    pub async fn build(self) -> Result<ResolvedInputs> {
+    /// sources cannot provide.  The descriptive profile fields the config
+    /// left absent are then filled from the fetched Companies House profile
+    /// and officers (best-effort), before the required report types are
+    /// built.
+    pub async fn build(mut self) -> Result<ResolvedInputs> {
         let ch = self.env.ch_config();
         let company_number = self.resolve_company_number()?;
         let api = self
@@ -442,10 +501,35 @@ impl ConfigBuilder {
             .await?;
         let (book_path, out_dir) = self.resolve_paths()?;
 
-        // The config's optional fields are enriched into the required
-        // report types here: the profile fills blanks, and the accounts
-        // carry the resolved return period.  The incorporation date is
-        // filled from the shared profile when the config omits it.
+        // The current directors are enriched from the officers list when the
+        // config left them absent and a profile was fetched (best-effort: a
+        // failed officers fetch is logged and the directors stay as
+        // configured).
+        let officers = match (&api, &ch_profile) {
+            (Some(client), Some(_))
+                if self
+                    .file
+                    .company
+                    .directors
+                    .as_deref()
+                    .is_none_or(|d| d.is_empty()) =>
+            {
+                match client.get_officers(&company_number).await {
+                    Ok(officers) => Some(officers),
+                    Err(e) => {
+                        log::warn!("failed to fetch the directors from Companies House: {e}");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        // The config's optional fields are enriched into the required report
+        // types here: the profile fills blanks from the fetched profile (+ the
+        // officers), and the accounts carry the resolved return period.  The
+        // incorporation date is filled from the shared profile when the
+        // config omits it.
         let incorporation_from_config = self.file.accounts.incorporation_date;
         let mut accounts = self.file.accounts.into_meta();
         accounts.period = Some(period);
@@ -461,6 +545,9 @@ impl ConfigBuilder {
         if let Some(date) = registration_date {
             company.registration_date = date;
         }
+        self.file
+            .company
+            .enrich_from_ch(ch_profile.as_ref(), officers.as_ref());
 
         Ok(ResolvedInputs {
             company,
@@ -1235,6 +1322,15 @@ mod tests {
                 "company_number": "12345678",
                 "company_name": "CACHED CORP LTD",
                 "date_of_creation": "2001-01-01",
+                "jurisdiction": "England and Wales",
+                "registered_office_address": {
+                    "address_line_1": "123 Leadbarton Street",
+                    "address_line_2": "Dumpston Trading Estate",
+                    "locality": "Threapminchington",
+                    "region": "Minchingshire",
+                    "postal_code": "QQ99 9ZZ"
+                },
+                "sic_codes": ["62020", "62021"],
                 "accounts": {
                     "next_accounts": {
                         "period_start_on": "2025-01-01",
@@ -1246,6 +1342,19 @@ mod tests {
             .to_string(),
         )
         .expect("seed the profile cache");
+        // The officers cache feeds the directors enrichment (also offline).
+        std::fs::write(
+            cache_dir.join("companies-house-12345678-officers.json"),
+            serde_json::json!({
+                "items": [
+                    { "name": "A Bloggs", "officer_role": "director" },
+                    { "name": "B Smith", "officer_role": "director", "resigned_on": "2020-01-01" },
+                    { "name": "C Jones", "officer_role": "secretary" }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("seed the officers cache");
 
         let mut env = env(None, None, Some("test-key"), None);
         env.cache_dir = Some(cache_dir.clone());
@@ -1265,6 +1374,20 @@ mod tests {
         // The profile also supplies the registration date, anchoring the
         // registration-date schedule used as the fallback.
         assert_eq!(resolved.company.registration_date, date(2001, 1, 1));
+        // The descriptive profile is enriched from the same cached profile
+        // and officers: the address, SIC codes and jurisdiction from the
+        // profile, and the current (non-resigned, director-role) officers.
+        let profile = resolved.profile;
+        assert_eq!(
+            profile.address_lines,
+            vec!["123 Leadbarton Street", "Dumpston Trading Estate"]
+        );
+        assert_eq!(profile.county, "Minchingshire");
+        assert_eq!(profile.location, "Threapminchington");
+        assert_eq!(profile.postcode, "QQ99 9ZZ");
+        assert_eq!(profile.sic_codes, vec!["62020", "62021"]);
+        assert_eq!(profile.jurisdiction, "England and Wales");
+        assert_eq!(profile.directors, vec!["A Bloggs"]);
 
         let _ = std::fs::remove_dir_all(&cache_dir);
     }
@@ -1288,12 +1411,13 @@ mod live_tests {
     /// committed minimal config
     /// (`libs/ixbrl/example_data/example2/minimal_config.json` — no identity,
     /// no period, blank profile; the required report metadata comes from the
-    /// config) is enriched from the live profile (name, registration date,
-    /// next accounting period), and the resolved inputs are printed.  The
-    /// profile lands in
-    /// the ambient cache directory (idempotent: a warm cache simply skips
-    /// the network); a second run with a placeholder key proves the cache
-    /// serves the response.
+    /// config) is enriched from the live profile and officers (name,
+    /// registration date, next accounting period, and the descriptive
+    /// profile: registered-office address, SIC codes, jurisdiction and the
+    /// current directors), and the resolved inputs are printed.  The profile
+    /// and officers land in the ambient cache directory (idempotent: a warm
+    /// cache simply skips the network); a second run with a placeholder key
+    /// proves the cache serves the response.
     #[tokio::test]
     #[cfg_attr(
         not(feature = "api_tests"),
@@ -1356,17 +1480,43 @@ mod live_tests {
         // the ordering is pinned).
         let period = resolved.accounts.period();
         assert!(period.start < period.end, "the return period is ordered");
+        // The descriptive profile is enriched from the live profile and
+        // officers: the registered-office address, the SIC codes and the
+        // jurisdiction from the profile, and the current directors from the
+        // officers list.
+        let profile = resolved.profile;
+        assert!(
+            !profile.address_lines.is_empty() && !profile.postcode.is_empty(),
+            "the registered-office address comes from the profile"
+        );
+        assert!(
+            !profile.sic_codes.is_empty(),
+            "the SIC codes come from the profile"
+        );
+        assert!(
+            !profile.jurisdiction.is_empty(),
+            "the jurisdiction comes from the profile"
+        );
+        assert!(
+            !profile.directors.is_empty(),
+            "the current directors come from the officers list"
+        );
 
-        // The profile is cached for the next run.
-        let cache_file = env
-            .ch_config()
-            .cache_dir()
-            .join(format!("companies-house-{number}.json"));
+        // The profile and the officers are cached for the next run.
+        let ch = env.ch_config();
+        let cache_dir = ch.cache_dir();
+        let cache_file = cache_dir.join(format!("companies-house-{number}.json"));
         assert!(cache_file.exists(), "the fetched profile is cached on disk");
         let cached = std::fs::read_to_string(&cache_file).expect("read the cache file");
         assert!(
             cached.contains("company_name"),
             "the cache holds the profile JSON"
+        );
+        assert!(
+            cache_dir
+                .join(format!("companies-house-{number}-officers.json"))
+                .exists(),
+            "the fetched officers are cached on disk"
         );
 
         // Run 2: the same cache, but a placeholder key that could never
@@ -1395,5 +1545,8 @@ mod live_tests {
             period2.end, period.end,
             "the return period is the same on the cached run"
         );
+        // The enriched profile is served from the same caches.
+        assert_eq!(from_cache.profile.directors, profile.directors);
+        assert_eq!(from_cache.profile.sic_codes, profile.sic_codes);
     }
 }

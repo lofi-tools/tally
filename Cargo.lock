@@ -2349,6 +2349,7 @@ dependencies = [
  "chrono",
  "ct600",
  "ixbrl",
+ "log",
  "serde",
  "serde_json",
  "tempfile",

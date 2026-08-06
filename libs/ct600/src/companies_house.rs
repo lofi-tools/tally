@@ -322,6 +322,27 @@ impl CompaniesHouseClient {
         Ok(history)
     }
 
+    /// Fetch a company's officers.
+    ///
+    /// `GET /company/{companyNumber}/officers`
+    ///
+    /// Returns the officers of the company (directors, secretaries, ...);
+    /// the current directors — the officers whose role is a director role
+    /// and who have not resigned — are exposed via [`OfficerList::directors`].
+    /// Like the company profile and the filing history, the response is
+    /// cached on disk (`companies-house-{number}-officers.json`).
+    pub async fn get_officers(&self, company_number: &str) -> ApiResult<OfficerList> {
+        let cache_dir = self.config.cache_dir();
+        if let Some(officers) = read_cached_officers(cache_dir, company_number) {
+            return Ok(officers);
+        }
+        let officers: OfficerList = self
+            .get_json(&format!("/company/{company_number}/officers"))
+            .await?;
+        write_cached_officers(cache_dir, company_number, &officers);
+        Ok(officers)
+    }
+
     /// The next accounting period to file, with its filing deadlines.
     ///
     /// The period's start and end come from Companies House's own expectation
@@ -511,6 +532,12 @@ fn filing_history_cache_path(cache_dir: &Path, company_number: &str) -> PathBuf 
     ))
 }
 
+/// The cache file for a company number's officers, e.g.
+/// `companies-house-12345678-officers.json`.
+fn officers_cache_path(cache_dir: &Path, company_number: &str) -> PathBuf {
+    cache_dir.join(format!("companies-house-{company_number}-officers.json"))
+}
+
 /// Read a cached company profile, if present and decodable.
 fn read_cached_profile(cache_dir: &Path, company_number: &str) -> Option<CompanyProfile> {
     let data = std::fs::read_to_string(cache_path(cache_dir, company_number)).ok()?;
@@ -541,6 +568,23 @@ fn write_cached_filing_history(cache_dir: &Path, company_number: &str, history: 
         write_cache_file(
             cache_dir,
             &format!("companies-house-{company_number}-filing-history.json"),
+            &data,
+        );
+    }
+}
+
+/// Read a cached officer list, if present and decodable.
+fn read_cached_officers(cache_dir: &Path, company_number: &str) -> Option<OfficerList> {
+    let data = std::fs::read_to_string(officers_cache_path(cache_dir, company_number)).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+/// Write an officer list to the cache, best-effort (non-fatal on failure).
+fn write_cached_officers(cache_dir: &Path, company_number: &str, officers: &OfficerList) {
+    if let Ok(data) = serde_json::to_vec(officers) {
+        write_cache_file(
+            cache_dir,
+            &format!("companies-house-{company_number}-officers.json"),
             &data,
         );
     }
@@ -802,6 +846,52 @@ impl FilingHistory {
         self.items
             .iter()
             .filter(|item| item.category.as_deref() == Some("accounts"))
+    }
+}
+
+/// A single company officer (`GET /company/{number}/officers`).
+///
+/// Only the commonly used fields are modelled; all optional fields are
+/// tolerated when absent from the response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Officer {
+    /// The officer's name, as registered (e.g. `"BLOGGS, A"`).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The officer's role, e.g. `director`, `corporate-director`, `secretary`.
+    #[serde(default)]
+    pub officer_role: Option<String>,
+    /// The date the officer was appointed (`YYYY-MM-DD`).
+    #[serde(default)]
+    pub appointed_on: Option<String>,
+    /// The date the officer resigned (`YYYY-MM-DD`); absent while serving.
+    #[serde(default)]
+    pub resigned_on: Option<String>,
+}
+
+/// The officers of a company (`GET /company/{number}/officers`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OfficerList {
+    /// The (first page of) officers, in the API's order.
+    #[serde(default)]
+    pub items: Vec<Officer>,
+}
+
+impl OfficerList {
+    /// The names of the current directors — the officers whose role is a
+    /// director role and who have not resigned — in the API's order.
+    pub fn directors(&self) -> Vec<String> {
+        self.items
+            .iter()
+            .filter(|officer| {
+                officer.resigned_on.is_none()
+                    && officer
+                        .officer_role
+                        .as_deref()
+                        .is_some_and(|role| role.ends_with("director"))
+            })
+            .filter_map(|officer| officer.name.clone())
+            .collect()
     }
 }
 
@@ -1748,6 +1838,64 @@ mod tests {
         .unwrap();
     }
 
+    fn seed_officers(cache_dir: &Path, company_number: &str, officers: &OfficerList) {
+        std::fs::create_dir_all(cache_dir).unwrap();
+        std::fs::write(
+            officers_cache_path(cache_dir, company_number),
+            serde_json::to_vec(officers).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// The cached officer list is served without any network access, and
+    /// [`OfficerList::directors`] surfaces the current directors' names —
+    /// excluding resigned officers and non-director roles.
+    #[tokio::test]
+    async fn get_officers_serves_from_cache_and_filters_directors() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
+
+        let officers = OfficerList {
+            items: vec![
+                Officer {
+                    name: Some("A Bloggs".to_string()),
+                    officer_role: Some("director".to_string()),
+                    appointed_on: Some("2001-01-01".to_string()),
+                    resigned_on: None,
+                },
+                // A resigned director is not a current director.
+                Officer {
+                    name: Some("B Smith".to_string()),
+                    officer_role: Some("director".to_string()),
+                    appointed_on: Some("2001-01-01".to_string()),
+                    resigned_on: Some("2020-01-01".to_string()),
+                },
+                // A corporate director counts as a director role.
+                Officer {
+                    name: Some("C Jones Ltd".to_string()),
+                    officer_role: Some("corporate-director".to_string()),
+                    appointed_on: Some("2005-01-01".to_string()),
+                    resigned_on: None,
+                },
+                // A secretary is not a director.
+                Officer {
+                    name: Some("D Gray".to_string()),
+                    officer_role: Some("secretary".to_string()),
+                    appointed_on: Some("2005-01-01".to_string()),
+                    resigned_on: None,
+                },
+            ],
+        };
+        seed_officers(cache_dir.path(), "12345678", &officers);
+
+        let fetched = client
+            .get_officers("12345678")
+            .await
+            .expect("serving from cache should succeed");
+        assert_eq!(fetched.items.len(), 4);
+        assert_eq!(fetched.directors(), vec!["A Bloggs", "C Jones Ltd"]);
+    }
+
     /// The cached filing history is served without any network access, and the
     /// `accounts` filter surfaces the previous accounts filings with their
     /// registration dates.
@@ -2149,6 +2297,35 @@ mod live_tests {
                 "an accounts filing carries a registration date: {item:?}"
             );
         }
+    }
+
+    /// A real company's officers decode, and the current directors can be
+    /// read off them.
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "api_tests"),
+        ignore = "requires a Companies House API key and COMPANY_NUMBER"
+    )]
+    async fn live_officers_decode() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let number = company_number();
+        let officers = live_client(cache_dir.path())
+            .get_officers(&number)
+            .await
+            .expect("fetch the officers");
+
+        // A company has officers, each carrying a name the parser can read,
+        // and the current directors are a non-empty subset of them.
+        for officer in &officers.items {
+            assert!(
+                officer.name.as_deref().is_some_and(|n| !n.is_empty()),
+                "an officer carries a name: {officer:?}"
+            );
+        }
+        assert!(
+            !officers.directors().is_empty(),
+            "a company has current directors"
+        );
     }
 
     /// The next accounting period to file resolves from the live profile with
