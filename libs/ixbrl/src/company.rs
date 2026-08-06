@@ -162,9 +162,9 @@ impl AccountingPeriod {
 ///
 /// A set of accounts: the return period ([`AccountingPeriod`]), the
 /// financial-year tax parameters (fy1/fy2 years and rates) the computation
-/// runs on, and the report metadata (title, dates, signatory, employee
-/// counts and the accounts-related taxonomy dimension values).  The period
-/// is optional here because it can be resolved — from
+/// runs on, and the report metadata (dates, signatory, employee counts and
+/// the accounts-related taxonomy dimension values).  The period is optional
+/// here because it can be resolved — from
 /// [`Self::accounts_made_up_to`] (the 12 months ending on that date), or
 /// from the company's next accounting period to file at Companies House —
 /// before the reports are built; the fy fields default to 2019/2020 at 19%.
@@ -187,8 +187,6 @@ pub struct AccountsMeta {
     pub fy1_rate: f64,
     #[serde(default = "default_fy2_rate")]
     pub fy2_rate: f64,
-    /// Report title, shown on the title page.
-    pub report_title: String,
     /// Date the report was published / issued.
     pub report_date: NaiveDate,
     /// Date the financial statements were authorised for issue.
@@ -224,7 +222,6 @@ impl Default for AccountsMeta {
             fy2_year: DEFAULT_FY2_YEAR,
             fy1_rate: DEFAULT_FY1_RATE,
             fy2_rate: DEFAULT_FY2_RATE,
-            report_title: String::new(),
             report_date: NaiveDate::default(),
             authorised_date: NaiveDate::default(),
             incorporation_date: NaiveDate::default(),

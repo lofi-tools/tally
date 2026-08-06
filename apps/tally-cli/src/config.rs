@@ -5,7 +5,11 @@
 //! loaded by a [`ConfigBuilder`] in precedence order (CLI flags first, the
 //! environment overriding the config file) and resolved into a strict
 //! [`ResolvedInputs`], erroring on the first field the sources cannot
-//! provide.
+//! provide.  The config file's optional fields — the identity, the
+//! descriptive profile ([`CompanyConfig`]) and the report metadata
+//! ([`AccountsConfig`]) — are enriched here, from the environment /
+//! Companies House or to blank defaults, into the required report types
+//! ([`CompanyProfile`], [`AccountsMeta`]) before the libraries consume them.
 //!
 //! Precedence, field by field:
 //!
@@ -19,10 +23,11 @@
 //! | `accounts.fy1_year` / `fy2_year` / `fy1_rate` / `fy2_rate` | config file → defaults (2019 / 2020 at 19%) |
 //! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default |
 //! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
-//! | `company.profile.*` (directors, contacts, accountant/auditor, ...) | config file only |
-//! | `accounts.*` report metadata (report_title, dates, employees, ...) | config file only |
+//! | `company.*` profile fields (directors, contacts, accountant/auditor, ...) | config file only (optional — blank when absent) |
+//! | `accounts.*` report metadata (dates, employees, ...) | config file only (optional — blank when absent) |
 //! | `--book`, `--out` | command line only |
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -30,7 +35,7 @@ use chrono::{Duration, Months, NaiveDate};
 use ct600::companies_house::{CompanyProfile as ChProfile, next_accounting_period_from};
 use ct600::{CompaniesHouseClient, CompaniesHouseClientType};
 use ixbrl::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// The values `tally` reads from the environment, captured once via
 /// [`EnvVars::from_env`] (empty variables count as unset).
@@ -110,15 +115,21 @@ fn non_empty_env(name: &str) -> Option<String> {
 
 /// The JSON config file's contents (`--config-path`): the nested `company`
 /// block and the `accounts` sub-object.
+///
+/// Everything here is optional; [`ConfigBuilder::build`] enriches the
+/// missing values — from the environment / Companies House (identity) or to
+/// blank defaults (profile and report metadata) — into the required report
+/// types before the libraries consume them.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
-    /// The `company` block: optional identity fields plus the required
-    /// descriptive profile ([`CompanyProfile`], flattened).
-    pub company: RawCompanyConfig,
-    /// The `accounts` sub-object ([`AccountsMeta`]): the optional return
-    /// period and financial-year parameters, plus the required report
-    /// metadata.
-    pub accounts: AccountsMeta,
+    /// The `company` block: the optional identity fields plus the optional
+    /// descriptive profile (directors, contacts, accountant/auditor, ...).
+    #[serde(default)]
+    pub company: CompanyConfig,
+    /// The `accounts` sub-object ([`AccountsConfig`]): the optional return
+    /// period, financial-year parameters and report metadata.
+    #[serde(default)]
+    pub accounts: AccountsConfig,
 }
 
 impl ConfigFile {
@@ -130,18 +141,224 @@ impl ConfigFile {
     }
 }
 
-/// The company block of the config file (`company.*`): the optional identity
-/// fields plus the required descriptive profile ([`CompanyProfile`],
-/// flattened).
-#[derive(Debug, Clone, Deserialize)]
-pub struct RawCompanyConfig {
+/// The `company` block of the config file (`company.*`): the optional
+/// identity fields plus the optional descriptive profile (directors,
+/// contacts, accountant/auditor, ...).  Every field is optional and
+/// serialises back as omitted when absent.  The builder enriches the
+/// identity into the required [`Company`], and [`Self::into_profile`] fills
+/// the profile's blanks into the required [`CompanyProfile`] the reports
+/// consume.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CompanyConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tax_reference: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub company_number: Option<String>,
-    /// The required descriptive profile (directors, contacts, accountant /
-    /// auditor, ...), flattened into the `company.*` keys.
-    #[serde(flatten)]
-    pub profile: CompanyProfile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directors: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address_lines: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub county: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postcode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_country: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_area: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub website_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub website_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vat_registration: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sic_codes: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activities: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jurisdiction: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accountant_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accountant_business: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accountant_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auditor_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auditor_business: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auditor_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub industry_sector_dimension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legal_form_dimension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country_dimension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_country_dimension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_type_dimension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo_b64: Option<String>,
+}
+
+impl CompanyConfig {
+    /// Fill the optional profile into the required report profile: absent
+    /// fields become blank defaults (empty strings / empty lists, no logo).
+    pub(crate) fn into_profile(self) -> CompanyProfile {
+        CompanyProfile {
+            directors: self.directors.unwrap_or_default(),
+            contact_name: self.contact_name.unwrap_or_default(),
+            address_lines: self.address_lines.unwrap_or_default(),
+            county: self.county.unwrap_or_default(),
+            location: self.location.unwrap_or_default(),
+            postcode: self.postcode.unwrap_or_default(),
+            email: self.email.unwrap_or_default(),
+            phone_country: self.phone_country.unwrap_or_default(),
+            phone_area: self.phone_area.unwrap_or_default(),
+            phone_number: self.phone_number.unwrap_or_default(),
+            website_url: self.website_url.unwrap_or_default(),
+            website_description: self.website_description.unwrap_or_default(),
+            vat_registration: self.vat_registration.unwrap_or_default(),
+            sic_codes: self.sic_codes.unwrap_or_default(),
+            activities: self.activities.unwrap_or_default(),
+            jurisdiction: self.jurisdiction.unwrap_or_default(),
+            accountant_name: self.accountant_name.unwrap_or_default(),
+            accountant_business: self.accountant_business.unwrap_or_default(),
+            accountant_address: self.accountant_address.unwrap_or_default(),
+            auditor_name: self.auditor_name.unwrap_or_default(),
+            auditor_business: self.auditor_business.unwrap_or_default(),
+            auditor_address: self.auditor_address.unwrap_or_default(),
+            industry_sector_dimension: self.industry_sector_dimension.unwrap_or_default(),
+            legal_form_dimension: self.legal_form_dimension.unwrap_or_default(),
+            country_dimension: self.country_dimension.unwrap_or_default(),
+            contact_country_dimension: self.contact_country_dimension.unwrap_or_default(),
+            phone_type_dimension: self.phone_type_dimension.unwrap_or_default(),
+            logo_b64: self.logo_b64,
+        }
+    }
+}
+
+/// The `accounts` sub-object of the config file (`accounts.*`): the optional
+/// return period, financial-year parameters and report metadata.  The fy
+/// parameters default to 2019 / 2020 at 19% (matching [`AccountsMeta`]);
+/// [`Self::into_meta`] fills the optional metadata into the required
+/// [`AccountsMeta`] the reports consume.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AccountsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub period: Option<AccountingPeriod>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts_made_up_to: Option<NaiveDate>,
+    #[serde(default = "default_fy1_year")]
+    pub fy1_year: i32,
+    #[serde(default = "default_fy2_year")]
+    pub fy2_year: i32,
+    #[serde(default = "default_fy1_rate")]
+    pub fy1_rate: f64,
+    #[serde(default = "default_fy2_rate")]
+    pub fy2_rate: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_date: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorised_date: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incorporation_date: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub average_employees: Option<HashMap<String, u32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounting_standards_dimension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts_type_dimension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts_status_dimension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_b64: Option<String>,
+}
+
+impl Default for AccountsConfig {
+    /// The default set of accounts: no period, the default financial-year
+    /// tax parameters (fy1 2019, fy2 2020, both 19%) and no report
+    /// metadata.  Matches the serde defaults, so a config without the
+    /// `accounts` sub-object behaves like one with it.
+    fn default() -> Self {
+        Self {
+            period: None,
+            accounts_made_up_to: None,
+            fy1_year: DEFAULT_FY1_YEAR,
+            fy2_year: DEFAULT_FY2_YEAR,
+            fy1_rate: DEFAULT_FY1_RATE,
+            fy2_rate: DEFAULT_FY2_RATE,
+            report_date: None,
+            authorised_date: None,
+            incorporation_date: None,
+            signed_by: None,
+            average_employees: None,
+            accounting_standards_dimension: None,
+            accounts_type_dimension: None,
+            accounts_status_dimension: None,
+            signature_b64: None,
+        }
+    }
+}
+
+impl AccountsConfig {
+    /// Fill the optional accounts into the required report set of accounts:
+    /// absent report metadata becomes blank defaults.  The period is left
+    /// as given — the builder sets the resolved return period.
+    pub(crate) fn into_meta(self) -> AccountsMeta {
+        AccountsMeta {
+            period: self.period,
+            accounts_made_up_to: self.accounts_made_up_to,
+            fy1_year: self.fy1_year,
+            fy2_year: self.fy2_year,
+            fy1_rate: self.fy1_rate,
+            fy2_rate: self.fy2_rate,
+            report_date: self.report_date.unwrap_or_default(),
+            authorised_date: self.authorised_date.unwrap_or_default(),
+            incorporation_date: self.incorporation_date.unwrap_or_default(),
+            signed_by: self.signed_by.unwrap_or_default(),
+            average_employees: self.average_employees.unwrap_or_default(),
+            accounting_standards_dimension: self.accounting_standards_dimension.unwrap_or_default(),
+            accounts_type_dimension: self.accounts_type_dimension.unwrap_or_default(),
+            accounts_status_dimension: self.accounts_status_dimension.unwrap_or_default(),
+            signature_b64: self.signature_b64.unwrap_or_default(),
+        }
+    }
+}
+
+// The default financial-year tax parameters, mirroring `AccountsMeta`'s
+// defaults in libs/ixbrl (keep the two in sync).
+const DEFAULT_FY1_YEAR: i32 = 2019;
+const DEFAULT_FY2_YEAR: i32 = 2020;
+const DEFAULT_FY1_RATE: f64 = 19.0;
+const DEFAULT_FY2_RATE: f64 = 19.0;
+
+fn default_fy1_year() -> i32 {
+    DEFAULT_FY1_YEAR
+}
+fn default_fy2_year() -> i32 {
+    DEFAULT_FY2_YEAR
+}
+fn default_fy1_rate() -> f64 {
+    DEFAULT_FY1_RATE
+}
+fn default_fy2_rate() -> f64 {
+    DEFAULT_FY2_RATE
 }
 
 /// The `ct600` subcommand's command-line values.
@@ -215,7 +432,10 @@ impl ConfigBuilder {
             .await?;
         let (book_path, out_dir) = self.resolve_paths()?;
 
-        let mut accounts = self.file.accounts.clone();
+        // The config's optional fields are enriched into the required
+        // report types here: the profile fills blanks, and the accounts
+        // carry the resolved return period.
+        let mut accounts = self.file.accounts.into_meta();
         accounts.period = Some(period);
 
         let mut company = Company::new(name, tax_reference, company_number);
@@ -225,7 +445,7 @@ impl ConfigBuilder {
 
         Ok(ResolvedInputs {
             company,
-            profile: self.file.company.profile,
+            profile: self.file.company.into_profile(),
             accounts,
             book_path,
             out_dir,
@@ -471,26 +691,26 @@ mod tests {
         name: Option<&str>,
         tax_reference: Option<&str>,
         company_number: Option<&str>,
-    ) -> RawCompanyConfig {
-        RawCompanyConfig {
+    ) -> CompanyConfig {
+        CompanyConfig {
             name: name.map(str::to_string),
             tax_reference: tax_reference.map(str::to_string),
             company_number: company_number.map(str::to_string),
             // The profile is irrelevant to resolution; use the empty default.
-            profile: CompanyProfile::default(),
+            ..CompanyConfig::default()
         }
     }
 
     /// An `accounts` sub-object with the 2020 calendar-year return period
     /// (or none) and an optional made-up-to date.
-    fn accounts_meta(with_period: bool, made_up_to: Option<NaiveDate>) -> AccountsMeta {
-        AccountsMeta {
+    fn accounts_config(with_period: bool, made_up_to: Option<NaiveDate>) -> AccountsConfig {
+        AccountsConfig {
             period: with_period.then(|| AccountingPeriod {
                 start: date(2020, 1, 1),
                 end: date(2020, 12, 31),
             }),
             accounts_made_up_to: made_up_to,
-            ..AccountsMeta::default()
+            ..AccountsConfig::default()
         }
     }
 
@@ -511,7 +731,7 @@ mod tests {
 
     /// A builder over the given sources with dummy CLI paths, so the tests
     /// resolve without a real config file or command line.
-    fn builder(env: EnvVars, company: RawCompanyConfig, accounts: AccountsMeta) -> ConfigBuilder {
+    fn builder(env: EnvVars, company: CompanyConfig, accounts: AccountsConfig) -> ConfigBuilder {
         ConfigBuilder {
             env,
             file: ConfigFile { company, accounts },
@@ -540,7 +760,7 @@ mod tests {
         let company = builder(
             empty_env.clone(),
             complete.clone(),
-            accounts_meta(true, None),
+            accounts_config(true, None),
         )
         .build()
         .await
@@ -555,7 +775,7 @@ mod tests {
         // Incomplete config without an API key: the first missing field is
         // the company number.
         let incomplete = company_config(None, None, None);
-        let err = builder(empty_env.clone(), incomplete, accounts_meta(false, None))
+        let err = builder(empty_env.clone(), incomplete, accounts_config(false, None))
             .build()
             .await
             .expect_err("incomplete config must error");
@@ -566,7 +786,7 @@ mod tests {
         // With a number but no name, the error names `company.name` and the
         // key needed to resolve it.
         let no_name = company_config(None, Some("8596148860"), Some("12345678"));
-        let err = builder(empty_env.clone(), no_name, accounts_meta(true, None))
+        let err = builder(empty_env.clone(), no_name, accounts_config(true, None))
             .build()
             .await
             .expect_err("a missing name must error");
@@ -577,7 +797,7 @@ mod tests {
         // With a name but no UTR, the error names `company.tax_reference`
         // and the `COMPANY_UNIQUE_TAXPAYER_REF` alternative.
         let no_utr = company_config(Some("Example Biz Ltd."), None, Some("12345678"));
-        let err = builder(empty_env.clone(), no_utr, accounts_meta(true, None))
+        let err = builder(empty_env.clone(), no_utr, accounts_config(true, None))
             .build()
             .await
             .expect_err("a missing UTR must error");
@@ -587,13 +807,13 @@ mod tests {
 
         // Empty-string fields count as absent: an empty name or UTR errors.
         let empty_name = company_config(Some(""), Some("8596148860"), Some("12345678"));
-        let err = builder(empty_env.clone(), empty_name, accounts_meta(true, None))
+        let err = builder(empty_env.clone(), empty_name, accounts_config(true, None))
             .build()
             .await
             .expect_err("an empty company.name must error");
         assert!(format!("{err:#}").contains("company.name"));
         let empty_utr = company_config(Some("Example Biz Ltd."), Some(""), Some("12345678"));
-        let err = builder(empty_env.clone(), empty_utr, accounts_meta(true, None))
+        let err = builder(empty_env.clone(), empty_utr, accounts_config(true, None))
             .build()
             .await
             .expect_err("an empty company.tax_reference must error");
@@ -603,7 +823,7 @@ mod tests {
         let company = builder(
             env(Some("1111111111"), None, None, None),
             complete.clone(),
-            accounts_meta(true, None),
+            accounts_config(true, None),
         )
         .build()
         .await
@@ -616,7 +836,7 @@ mod tests {
         let company = builder(
             env(None, Some("12345678"), None, None),
             no_number,
-            accounts_meta(true, None),
+            accounts_config(true, None),
         )
         .build()
         .await
@@ -628,7 +848,7 @@ mod tests {
         let company = builder(
             env(None, Some("99999999"), None, None),
             complete.clone(),
-            accounts_meta(true, None),
+            accounts_config(true, None),
         )
         .build()
         .await
@@ -641,7 +861,7 @@ mod tests {
         let company = builder(
             env(None, None, Some("test-key"), None),
             complete,
-            accounts_meta(true, None),
+            accounts_config(true, None),
         )
         .build()
         .await
@@ -662,15 +882,15 @@ mod tests {
         let file = ConfigFile::from_file(path).expect("parse example config");
         assert_eq!(file.company.name.as_deref(), Some("Example Biz Ltd."));
         assert_eq!(
-            file.company.profile.directors,
-            vec!["A Bloggs", "B Smith", "C Jones"]
+            file.company.directors,
+            Some(vec!["A Bloggs".into(), "B Smith".into(), "C Jones".into()])
         );
-        assert_eq!(file.accounts.period().start, date(2020, 1, 1));
-        assert_eq!(file.accounts.period().end, date(2020, 12, 31));
-        assert_eq!(
-            file.accounts.report_title,
-            "Unaudited Micro-Entity Accounts"
-        );
+        let period = file
+            .accounts
+            .period
+            .expect("example config carries a period");
+        assert_eq!(period.start, date(2020, 1, 1));
+        assert_eq!(period.end, date(2020, 12, 31));
 
         // Without the CLI paths, resolution errors on the first missing one.
         let cli = CliArgs {
@@ -741,10 +961,6 @@ mod tests {
         assert_eq!(resolved.book_path, PathBuf::from("input.gnucash"));
         assert_eq!(resolved.out_dir, PathBuf::from("out"));
         assert_eq!(
-            resolved.accounts.report_title,
-            "Unaudited Micro-Entity Accounts"
-        );
-        assert_eq!(
             resolved.profile.directors,
             vec!["A Bloggs", "B Smith", "C Jones"]
         );
@@ -790,7 +1006,7 @@ mod tests {
         let accounts = builder(
             empty_env.clone(),
             identity.clone(),
-            accounts_meta(false, Some(date(2020, 12, 31))),
+            accounts_config(false, Some(date(2020, 12, 31))),
         )
         .build()
         .await
@@ -802,7 +1018,7 @@ mod tests {
         // The flag (the override) wins over the config's date.
         let file = ConfigFile {
             company: identity.clone(),
-            accounts: accounts_meta(false, Some(date(2020, 12, 31))),
+            accounts: accounts_config(false, Some(date(2020, 12, 31))),
         };
         let cli = CliArgs {
             config_path: PathBuf::from("test.json"),
@@ -826,7 +1042,7 @@ mod tests {
         // (config or flag).
         let file = ConfigFile {
             company: identity,
-            accounts: accounts_meta(true, Some(date(2020, 12, 31))),
+            accounts: accounts_config(true, Some(date(2020, 12, 31))),
         };
         let cli = CliArgs {
             config_path: PathBuf::from("test.json"),
@@ -857,7 +1073,7 @@ mod tests {
             Some("8596148860"),
             Some("12345678"),
         );
-        let err = builder(empty_env, raw, accounts_meta(false, None))
+        let err = builder(empty_env, raw, accounts_config(false, None))
             .build()
             .await
             .expect_err("the missing period must error");
@@ -873,7 +1089,7 @@ mod tests {
     async fn missing_number_with_api_key_errors() {
         let env = env(None, None, Some("test-key"), None);
         let raw = company_config(Some("Example Biz Ltd."), Some("8596148860"), None);
-        let err = builder(env, raw, accounts_meta(false, None))
+        let err = builder(env, raw, accounts_config(false, None))
             .build()
             .await
             .expect_err("the missing number must error");
@@ -896,7 +1112,7 @@ mod tests {
             env: EnvVars::default(),
             file: ConfigFile {
                 company: company_config(None, None, None),
-                accounts: accounts_meta(false, None),
+                accounts: accounts_config(false, None),
             },
             cli,
         }
@@ -924,11 +1140,32 @@ mod tests {
         assert_eq!(file.company.company_number, None);
         assert_eq!(file.accounts.period, None);
         assert_eq!(file.accounts.accounts_made_up_to, None);
-        assert!(file.accounts.report_title.is_empty());
-        // The blank profile: no directors, no contacts, no accountant.
-        assert!(file.company.profile.directors.is_empty());
-        assert!(file.company.profile.contact_name.is_empty());
-        assert!(file.company.profile.accountant_name.is_empty());
+        // The blank profile: no directors, no contacts, no accountant, and
+        // no report metadata.
+        assert_eq!(file.company.directors, None);
+        assert_eq!(file.company.contact_name, None);
+        assert_eq!(file.company.accountant_name, None);
+        // The enrichment fills the blanks into the required report types.
+        assert_eq!(
+            file.company.clone().into_profile(),
+            CompanyProfile::default()
+        );
+        assert_eq!(file.accounts.into_meta(), AccountsMeta::default());
+    }
+
+    /// The config types serialise omitting absent options: a blank company
+    /// config is an empty object, and a blank accounts config carries only
+    /// the defaulted financial-year parameters (the non-optional fields).
+    #[test]
+    fn config_serialization_omits_absent_options() {
+        assert_eq!(
+            serde_json::to_string(&CompanyConfig::default()).unwrap(),
+            "{}"
+        );
+        assert_eq!(
+            serde_json::to_string(&AccountsConfig::default()).unwrap(),
+            "{\"fy1_year\":2019,\"fy2_year\":2020,\"fy1_rate\":19.0,\"fy2_rate\":19.0}"
+        );
     }
 
     /// With an API key, a company number and a cached profile, the return
@@ -967,7 +1204,7 @@ mod tests {
             Some("8596148860"),
             Some("12345678"),
         );
-        let resolved = builder(env, raw, accounts_meta(false, None))
+        let resolved = builder(env, raw, accounts_config(false, None))
             .build()
             .await
             .expect("resolves from the cached profile");

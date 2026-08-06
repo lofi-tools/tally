@@ -146,8 +146,10 @@ In short:
 - the company's descriptive profile fields (`company.*`: directors,
   contacts, accountant/auditor, SIC codes, ...) and the accounts' report
   metadata (`accounts.*`: report title, dates, employee counts, ...) are
-  all required and have no defaults (copy them from the example config
-  below); the company logo (`company.logo_b64`) is the one optional asset.
+  all optional: an absent field parses to `None`, serialises back as
+  omitted, and the reports render empty values for it — leave them out (as
+  in `minimal_config.json`) or copy them from the example config below; the
+  company logo (`company.logo_b64`) is one such optional asset.
 
 ### Example configs
 
@@ -172,8 +174,7 @@ You only need to fill in the accounts metadata:
     "period": {
       "start": "2020-01-01",
       "end": "2020-12-31"
-    },
-    "...": "remaining required accounts.* report fields — copy them from libs/ixbrl/example_data/example2/input_config.json"
+    },      "...": "remaining accounts.* report fields (optional) — copy them from libs/ixbrl/example_data/example2/input_config.json"
   }
 }
 ```
@@ -187,15 +188,14 @@ can be resolved at runtime:
     "name": "Example Biz Ltd.",
     "tax_reference": "8596148860",
     "company_number": "12345678",
-    "directors": ["A Bloggs"],
-    "...": "remaining required company.* profile fields (as in the example above)"
+    "directors": ["A Bloggs"],      "...": "remaining company.* profile fields (optional — as in the example above)"
   },
   "accounts": {
     "period": {
       "start": "2020-01-01",
       "end": "2020-12-31"
     },
-    "...": "remaining required accounts.* report fields (as in the example above)"
+    "...": "remaining accounts.* report fields (optional — as in the example above)"
   }
 }
 ```

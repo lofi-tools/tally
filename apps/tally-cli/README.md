@@ -62,23 +62,26 @@ and the Companies House API.
 | `company.name` | string (optional) | resolved from Companies House when an API key is configured |
 | `company.tax_reference` | string (required) | `COMPANY_UNIQUE_TAXPAYER_REF` environment variable wins when set; it cannot be resolved from Companies House, so one of the two must be present |
 | `company.company_number` | string (optional) | `COMPANY_NUMBER` environment variable wins when set |
-| `company.directors`, `company.contact_name`, `company.address_lines`, `company.email`, `company.accountant_name`, `company.auditor_name`, ... | required | — |
+| `company.directors`, `company.contact_name`, `company.address_lines`, `company.email`, `company.accountant_name`, `company.auditor_name`, ... | optional | none — an omitted (or blank) field parses to `None`, serialises back as omitted, and the reports render empty values for it |
 | `company.logo_b64` | string (optional) | none — the logo is only embedded on the title page when present |
 | `accounts.period.start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts.accounts_made_up_to` or the Companies House next period |
 | `accounts.period.end` | date (optional) | none — see `accounts.period.start` |
 | `accounts.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
 | `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 |
 | `accounts.fy1_rate` / `fy2_rate` | number (optional) | 19 / 19 (percent) |
-| `accounts.report_title`, `accounts.report_date`, `accounts.signed_by`, `accounts.average_employees`, ... | required | — |
-| `accounts.signature_b64` | string (required) | none — base64 image of the director's signature, embedded on the statement of financial position (an empty string is accepted but renders an empty image) |
+| `accounts.report_date`, `accounts.signed_by`, `accounts.average_employees`, ... | optional | none — as for the `company.*` profile fields (the report title is auto-generated) |
+| `accounts.signature_b64` | string (optional) | none — base64 image of the director's signature, embedded on the statement of financial position (omitted or empty renders no image) |
 
 The company-identity fields, the return period and the financial-year
 parameters are all optional in the config file (see
 [Resolving the company identity](#resolving-the-company-identity) for how the
 missing ones are filled in and what must always be present).  The company
-profile fields (`company.*`) and the report metadata (`accounts.*`) are all
-required — the parser applies no defaults, so copy the example config and edit
-it.  The company logo (`company.logo_b64`) is the one optional asset.
+profile fields (`company.*`) and the report metadata (`accounts.*`) are
+optional too: an omitted field parses to `None`, serialises back as omitted,
+and the reports render empty values for it — copy the example config (or
+start from the blank `minimal_config.json`) and fill in what the report
+should show.  The company logo (`company.logo_b64`) is one such optional
+asset.
 
 ### Defaults baked into the message
 
@@ -145,16 +148,16 @@ used, otherwise the profile is fetched from the live API.
 
 ## Minimum configuration
 
-A config file carrying the required `company.*` profile fields (directors,
+A config file with the optional `company.*` profile fields (directors,
 contacts, accountant/auditor, ...) and `accounts.*` report fields (report
 title, dates, employee counts, ...) — copy
 `libs/ixbrl/example_data/example2/input_config.json`, or start from
-`libs/ixbrl/example_data/example2/minimal_config.json` (all required fields
-blank: with a Companies House API key, `COMPANY_NUMBER` and
-`COMPANY_UNIQUE_TAXPAYER_REF`, everything is resolved at runtime) — plus a
-Corporation Tax reference — either a `COMPANY_UNIQUE_TAXPAYER_REF`
-environment variable or the config's `company.tax_reference` — and either a
-company number or a `COMPANY_NUMBER` environment variable.  The company name and return period
+`libs/ixbrl/example_data/example2/minimal_config.json` (empty blocks: with a
+Companies House API key, `COMPANY_NUMBER` and `COMPANY_UNIQUE_TAXPAYER_REF`,
+everything is resolved at runtime) — plus a Corporation Tax reference —
+either a `COMPANY_UNIQUE_TAXPAYER_REF` environment variable or the config's
+`company.tax_reference` — and either a company number or a `COMPANY_NUMBER`
+environment variable.  The company name and return period
 are only needed when no Companies House API key is configured: with a key,
 the name and the next accounting period to file are resolved from the
 company's profile at runtime (the period can also be given explicitly or

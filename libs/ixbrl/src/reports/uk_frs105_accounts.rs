@@ -29,6 +29,11 @@ use crate::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use crate::ixbrl_fmt::*;
 use crate::GnucashBook;
 
+/// The report title written into the generated document (the title page and
+/// the hidden `uk-bus:ReportTitle` fact).  Auto-generated here — the config
+/// file no longer carries a `report_title`.
+const REPORT_TITLE: &str = "Unaudited Micro-Entity Accounts";
+
 /// The unaudited micro-entity accounts (FRS 105) statement of financial
 /// position.
 ///
@@ -269,7 +274,7 @@ impl Frs105Accounts {
         // -- ix:header ------------------------------------------------------
 
         let hidden = elt("ix:hidden", &[]).children(vec![
-            non_numeric("uk-bus:ReportTitle", "ctxt-0", &self.accounts.report_title),
+            non_numeric("uk-bus:ReportTitle", "ctxt-0", REPORT_TITLE),
             non_numeric_fmt(
                 "uk-bus:BusinessReportPublicationDate",
                 "ctxt-1",
@@ -616,7 +621,7 @@ impl Frs105Accounts {
 
         let doc = elt("html", ACCTS_HTML_ATTRS).children(vec![
             elt("head", &[]).children(vec![
-                elt_text("title", &[], "Unaudited Micro-Entity Accounts"),
+                elt_text("title", &[], REPORT_TITLE),
                 elt_text(
                     "style",
                     &[("type", "text/css")],
@@ -794,12 +799,11 @@ impl Frs105Accounts {
             logo_b64: imgs.get("Company logo").cloned(),
         };
 
-        // The report metadata (title, dates, signatory, employee counts and
-        // the accounts-related dimensions) is serialised to iXBRL and
-        // recovered from the document; the period and fy parameters come
-        // from the earlier `accounts` binding.
+        // The report metadata (dates, signatory, employee counts and the
+        // accounts-related dimensions) is serialised to iXBRL and recovered
+        // from the document; the period and fy parameters come from the
+        // earlier `accounts` binding.
         let accounts = AccountsMeta {
-            report_title: text("uk-bus:ReportTitle"),
             report_date: parse_date(&text("uk-bus:BusinessReportPublicationDate")),
             authorised_date: parse_date(&text("uk-core:DateAuthorisationFinancialStatementsForIssue")),
             incorporation_date: parse_date(&text("uk-bus:DateFormationOrIncorporation")),
@@ -925,7 +929,7 @@ impl Frs105Accounts {
             div("title", vec![span(vec![span(vec![non_numeric(
                 "uk-bus:ReportTitle",
                 "ctxt-0",
-                &self.accounts.report_title,
+                REPORT_TITLE,
             )])])]),
             div("subtitle", vec![span(vec![
                 span_text("For the year ended "),
@@ -1992,7 +1996,6 @@ mod tests {
             back.profile.auditor_address,
             accounts.profile.auditor_address
         );
-        assert_eq!(back.accounts.report_title, accounts.accounts.report_title);
         assert_eq!(back.accounts.report_date, accounts.accounts.report_date);
         assert_eq!(
             back.accounts.authorised_date,

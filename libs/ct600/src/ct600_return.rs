@@ -940,7 +940,6 @@ mod tests {
                 start: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
                 end: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
             }),
-            report_title: "Unaudited Micro-Entity Accounts".into(),
             report_date: NaiveDate::from_ymd_opt(2021, 3, 1).unwrap(),
             authorised_date: NaiveDate::from_ymd_opt(2021, 2, 1).unwrap(),
             incorporation_date: NaiveDate::from_ymd_opt(2017, 4, 5).unwrap(),
