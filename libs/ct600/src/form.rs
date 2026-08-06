@@ -581,11 +581,11 @@ mod tests {
         assert_eq!(values.company.type_of_company, 0);
         assert_eq!(
             values.company.start,
-            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
+            NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()
         );
         assert_eq!(
             values.company.end,
-            NaiveDate::from_ymd_opt(2025, 12, 31).unwrap()
+            NaiveDate::from_ymd_opt(2026, 12, 31).unwrap()
         );
     }
 
@@ -608,11 +608,11 @@ mod tests {
         assert_eq!(by_number(&map, 4).value, Some(FieldValue::Number(0.0)));
         assert_eq!(
             by_number(&map, 30).value,
-            Some(FieldValue::Text("1 January 2025".to_string()))
+            Some(FieldValue::Text("1 January 2026".to_string()))
         );
         assert_eq!(
             by_number(&map, 35).value,
-            Some(FieldValue::Text("31 December 2025".to_string()))
+            Some(FieldValue::Text("31 December 2026".to_string()))
         );
         assert_eq!(by_number(&map, 40).value, Some(FieldValue::Bool(false)));
         assert_eq!(by_number(&map, 80).value, Some(FieldValue::Bool(true)));

@@ -1325,14 +1325,14 @@ pub mod test_utils {
             Self::fixture_profile(Self::sample_company_number(), "Acme Ltd", "2020-01-01")
         }
 
-        /// The sample company's set of accounts: the 2025 return period and
+        /// The sample company's set of accounts: the 2026 return period and
         /// the default financial-year parameters — the `accounts` the sample
         /// tax computation is built on.
         pub fn sample_accounts_meta() -> AccountsMeta {
             AccountsMeta {
                 period: Some(AccountingPeriod {
-                    start: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-                    end: NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
+                    start: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+                    end: NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
                 }),
                 ..AccountsMeta::default()
             }
@@ -1372,11 +1372,11 @@ pub mod test_utils {
             );
             facts.non_numeric.insert(
                 "ct-comp:PeriodOfAccountStartDate".to_string(),
-                "1 January 2025".to_string(),
+                "1 January 2026".to_string(),
             );
             facts.non_numeric.insert(
                 "ct-comp:PeriodOfAccountEndDate".to_string(),
-                "31 December 2025".to_string(),
+                "31 December 2026".to_string(),
             );
             for (name, ctx, v) in [
                 ("ct-comp:NetTradingProfits", "ctxt-3", 12345.0),

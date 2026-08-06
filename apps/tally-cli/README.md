@@ -67,8 +67,7 @@ against the environment and the Companies House API.
 | `accounts.period.start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts.accounts_made_up_to` or the Companies House next period |
 | `accounts.period.end` | date (optional) | none — see `accounts.period.start` |
 | `accounts.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
-| `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 |
-| `accounts.fy1_rate` / `fy2_rate` | number (optional) | 19 / 19 (percent) |
+| `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 — the tax regime derives from the year (flat 19% up to FY2022/23, marginal relief from FY2023/24) |
 | `accounts.report_date` | date (required) | the publication date — cannot be inferred |
 | `accounts.authorised_date` | date (required) | the authorisation date — cannot be inferred |
 | `accounts.signed_by` | string (optional) | defaults to the first director |
@@ -106,7 +105,7 @@ From the libraries' `Default` implementations (no config hook yet):
 |-------|---------|
 | GovTalk envelope | class `HMRC-CT-CT600`, `GatewayTest` 1, username `CTUser100` / password `password`, vendor `1234`, software `ct600` 1.0.0 |
 | Principal contact | `Ms Sarah McAcre`, sarah@example.org |
-| Financial years / rates | FY1 2019, FY2 2020, both 19% (`AccountsMeta` defaults) |
+| Financial years | FY1 2019, FY2 2020 (`AccountsMeta` defaults); the tax regime derives from the year — flat 19% up to FY2022/23, marginal relief from FY2023/24 |
 | Declaration (boxes 975 / 985) | contact name / `Director`; box 980 (date) = today |
 
 ### Resolving the company identity

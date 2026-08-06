@@ -161,12 +161,14 @@ async fn run_ct600(args: CliArgs) -> Result<()> {
     println!("  registration date: {registration_date}");
     let period = resolved.accounts.period();
     println!("  return period: {} to {}", period.start, period.end);
+    let fy1_calc = ixbrl::calc_corp_tax::for_fy(resolved.accounts.fy1_year);
+    let fy2_calc = ixbrl::calc_corp_tax::for_fy(resolved.accounts.fy2_year);
     println!(
-        "  financial years: FY{} at {}%, FY{} at {}%",
+        "  financial years: FY{} ({}), FY{} ({})",
         resolved.accounts.fy1_year,
-        resolved.accounts.fy1_rate,
+        fy1_calc.name(),
         resolved.accounts.fy2_year,
-        resolved.accounts.fy2_rate
+        fy2_calc.name()
     );
     println!("  book: {}", resolved.book_path.display());
     println!("  out: {}", resolved.out_dir.display());

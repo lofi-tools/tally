@@ -182,13 +182,13 @@ impl AccountingPeriod {
 /// The `accounts` sub-object of the config file (`accounts.*`).
 ///
 /// A set of accounts: the return period ([`AccountingPeriod`]), the
-/// financial-year tax parameters (fy1/fy2 years and rates) the computation
-/// runs on, and the report metadata (dates, signatory, employee counts and
-/// the accounts-related taxonomy dimension values).  The period is optional
-/// here because it can be resolved — from
-/// [`Self::accounts_made_up_to`] (the 12 months ending on that date), or
-/// from the company's next accounting period to file at Companies House —
-/// before the reports are built; the fy fields default to 2019/2020 at 19%.
+/// financial years (fy1/fy2) the computation runs on, and the report
+/// metadata (dates, signatory, employee counts and the accounts-related
+/// taxonomy dimension values).  The period is optional here because it can
+/// be resolved — from [`Self::accounts_made_up_to`] (the 12 months ending
+/// on that date), or from the company's next accounting period to file at
+/// Companies House — before the reports are built; the fy years default to
+/// 2019/2020.
 /// The report metadata is only available from the config file and is
 /// required there.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -204,10 +204,6 @@ pub struct AccountsMeta {
     pub fy1_year: i32,
     #[serde(default = "default_fy2_year")]
     pub fy2_year: i32,
-    #[serde(default = "default_fy1_rate")]
-    pub fy1_rate: f64,
-    #[serde(default = "default_fy2_rate")]
-    pub fy2_rate: f64,
     /// Date the report was published / issued.
     pub report_date: NaiveDate,
     /// Date the financial statements were authorised for issue.
@@ -231,18 +227,16 @@ pub struct AccountsMeta {
 }
 
 impl Default for AccountsMeta {
-    /// The default set of accounts: no period, the default financial-year
-    /// tax parameters (fy1 2019, fy2 2020, both 19%) and empty report
-    /// metadata.  Matches the serde defaults, so a config without the
-    /// `accounts` sub-object behaves like one with it.
+    /// The default set of accounts: no period, the default financial years
+    /// (fy1 2019, fy2 2020) and empty report metadata.  Matches the serde
+    /// defaults, so a config without the `accounts` sub-object behaves like
+    /// one with it.
     fn default() -> Self {
         Self {
             period: None,
             accounts_made_up_to: None,
             fy1_year: DEFAULT_FY1_YEAR,
             fy2_year: DEFAULT_FY2_YEAR,
-            fy1_rate: DEFAULT_FY1_RATE,
-            fy2_rate: DEFAULT_FY2_RATE,
             report_date: NaiveDate::default(),
             authorised_date: NaiveDate::default(),
             incorporation_date: NaiveDate::default(),
@@ -258,8 +252,6 @@ impl Default for AccountsMeta {
 
 const DEFAULT_FY1_YEAR: i32 = 2019;
 const DEFAULT_FY2_YEAR: i32 = 2020;
-const DEFAULT_FY1_RATE: f64 = 19.0;
-const DEFAULT_FY2_RATE: f64 = 19.0;
 
 fn default_fy1_year() -> i32 {
     DEFAULT_FY1_YEAR
@@ -269,17 +261,8 @@ fn default_fy2_year() -> i32 {
     DEFAULT_FY2_YEAR
 }
 
-fn default_fy1_rate() -> f64 {
-    DEFAULT_FY1_RATE
-}
-
-fn default_fy2_rate() -> f64 {
-    DEFAULT_FY2_RATE
-}
-
 impl AccountsMeta {
-    /// The default financial-year tax parameters (fy1 2019, fy2 2020, both
-    /// 19%), with no period.
+    /// The default financial years (fy1 2019, fy2 2020), with no period.
     pub fn defaults() -> Self {
         Self::default()
     }
@@ -402,8 +385,6 @@ mod tests {
         let accounts = AccountsMeta::defaults();
         assert_eq!(accounts.fy1_year, 2019);
         assert_eq!(accounts.fy2_year, 2020);
-        assert_eq!(accounts.fy1_rate, 19.0);
-        assert_eq!(accounts.fy2_rate, 19.0);
         assert_eq!(accounts.period, None);
         assert_eq!(accounts.resolved_period(), None);
     }

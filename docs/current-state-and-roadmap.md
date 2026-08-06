@@ -115,5 +115,5 @@ Features that are not implemented yet:
    `tally` so the produced return can be filed, using the `HMRC_CT_*`
    credentials.
 5. **Config hooks for the baked-in defaults** — make the GovTalk envelope
-   credentials, principal contact, financial years / rates and declaration
-   boxes configurable instead of `Default`-baked.
+   credentials, principal contact, financial years and declaration boxes
+   configurable instead of `Default`-baked.

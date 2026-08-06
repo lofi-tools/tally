@@ -2,6 +2,7 @@ use std::fmt;
 
 use snafu::Snafu;
 
+pub mod calc_corp_tax;
 pub mod company;
 pub mod ixbrl_fmt;
 pub mod reports {

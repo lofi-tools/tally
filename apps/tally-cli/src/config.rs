@@ -22,7 +22,7 @@
 //! | `company.tax_reference` (UTR) | `COMPANY_UNIQUE_TAXPAYER_REF` (env, wins) → config file |
 //! | `accounts.period` | config file (both dates) → deduced from the made-up-to date (`--accounts-made-up-to` wins over `accounts.accounts_made_up_to`; the 12 months ending on it) → Companies House next accounting period |
 //! | `accounts.accounts_made_up_to` / `--accounts-made-up-to` | command line (flag, wins) → config file; deduces the return period as the 12 months ending on the date |
-//! | `accounts.fy1_year` / `fy2_year` / `fy1_rate` / `fy2_rate` | config file → defaults (2019 / 2020 at 19%) |
+//! | `accounts.fy1_year` / `fy2_year` | config file → defaults (2019 / 2020) |
 //! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default |
 //! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
 //! | `company.*` profile fields (directors, contacts, accountant/auditor, ...) | config file (wins) → Companies House when absent (registered-office address, SIC codes, jurisdiction, directors) → blank defaults |
@@ -324,9 +324,9 @@ impl CompanyConfig {
 ///
 /// What can be guessed or inferred stays optional or defaulted: the return
 /// period comes from [`Self::period`] / [`Self::accounts_made_up_to`] or the
-/// company's next accounting period at Companies House, the fy parameters
-/// and the accounts taxonomy dimensions default to the values fixed for
-/// this report, the incorporation date is filled from the Companies House
+/// company's next accounting period at Companies House, the fy years and
+/// the accounts taxonomy dimensions default to the values fixed for this
+/// report, the incorporation date is filled from the Companies House
 /// profile when absent, the signatory defaults to the first director, and
 /// the employee counts default to 1 for each of the two financial years.
 /// The fields that cannot be inferred — the publication and authorisation
@@ -347,10 +347,6 @@ pub struct AccountsConfig {
     pub fy1_year: i32,
     #[serde(default = "default_fy2_year")]
     pub fy2_year: i32,
-    #[serde(default = "default_fy1_rate")]
-    pub fy1_rate: f64,
-    #[serde(default = "default_fy2_rate")]
-    pub fy2_rate: f64,
     /// Date the report was published / issued (required: cannot be inferred).
     pub report_date: NaiveDate,
     /// Date the financial statements were authorised for issue (required).
@@ -393,8 +389,6 @@ impl AccountsConfig {
             accounts_made_up_to: self.accounts_made_up_to,
             fy1_year: self.fy1_year,
             fy2_year: self.fy2_year,
-            fy1_rate: self.fy1_rate,
-            fy2_rate: self.fy2_rate,
             report_date: self.report_date,
             authorised_date: self.authorised_date,
             incorporation_date: self.incorporation_date.unwrap_or_default(),
@@ -422,8 +416,6 @@ impl AccountsConfig {
 // keeps them blank for its library-only paths).
 const DEFAULT_FY1_YEAR: i32 = 2019;
 const DEFAULT_FY2_YEAR: i32 = 2020;
-const DEFAULT_FY1_RATE: f64 = 19.0;
-const DEFAULT_FY2_RATE: f64 = 19.0;
 const DEFAULT_ACCOUNTING_STANDARDS_DIMENSION: &str = "uk-bus:Micro-entities";
 const DEFAULT_ACCOUNTS_TYPE_DIMENSION: &str = "uk-bus:AbridgedAccounts";
 const DEFAULT_ACCOUNTS_STATUS_DIMENSION: &str = "uk-bus:AuditExempt-NoAccountantsReport";
@@ -433,12 +425,6 @@ fn default_fy1_year() -> i32 {
 }
 fn default_fy2_year() -> i32 {
     DEFAULT_FY2_YEAR
-}
-fn default_fy1_rate() -> f64 {
-    DEFAULT_FY1_RATE
-}
-fn default_fy2_rate() -> f64 {
-    DEFAULT_FY2_RATE
 }
 fn default_accounting_standards_dimension() -> String {
     DEFAULT_ACCOUNTING_STANDARDS_DIMENSION.into()
@@ -883,8 +869,6 @@ mod tests {
             accounts_made_up_to: made_up_to,
             fy1_year: DEFAULT_FY1_YEAR,
             fy2_year: DEFAULT_FY2_YEAR,
-            fy1_rate: DEFAULT_FY1_RATE,
-            fy2_rate: DEFAULT_FY2_RATE,
             report_date: date(2021, 3, 1),
             authorised_date: date(2021, 2, 1),
             signed_by: Some("B Smith".into()),
@@ -1421,7 +1405,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&accounts_config(false, None)).unwrap(),
-            "{\"fy1_year\":2019,\"fy2_year\":2020,\"fy1_rate\":19.0,\"fy2_rate\":19.0,\"report_date\":\"2021-03-01\",\"authorised_date\":\"2021-02-01\",\"signed_by\":\"B Smith\",\"accounting_standards_dimension\":\"uk-bus:Micro-entities\",\"accounts_type_dimension\":\"uk-bus:AbridgedAccounts\",\"accounts_status_dimension\":\"uk-bus:AuditExempt-NoAccountantsReport\",\"signature_b64\":\"\"}"
+            "{\"fy1_year\":2019,\"fy2_year\":2020,\"report_date\":\"2021-03-01\",\"authorised_date\":\"2021-02-01\",\"signed_by\":\"B Smith\",\"accounting_standards_dimension\":\"uk-bus:Micro-entities\",\"accounts_type_dimension\":\"uk-bus:AbridgedAccounts\",\"accounts_status_dimension\":\"uk-bus:AuditExempt-NoAccountantsReport\",\"signature_b64\":\"\"}"
         );
     }
 

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::GnucashBook;
+use crate::calc_corp_tax::{CorporationTaxCalculation, for_fy};
 use crate::company::{AccountingPeriod, AccountsMeta, Company};
 use crate::ixbrl_fmt::*;
 
@@ -47,11 +48,17 @@ pub struct Frs105CorpTax {
     pub fy2_profit: f64,
     pub fy1_tax: f64,
     pub fy2_tax: f64,
+    /// The per-FY tax calculations (main rate, marginal relief, effective
+    /// rate), kept so the worksheets can show the threshold breakdown.
+    pub fy1_calc_result: CorporationTaxCalculation,
+    pub fy2_calc_result: CorporationTaxCalculation,
     pub corporation_tax_chargeable: f64,
     pub prev_fy1_profit: f64,
     pub prev_fy2_profit: f64,
     pub prev_fy1_tax: f64,
     pub prev_fy2_tax: f64,
+    pub prev_fy1_calc_result: CorporationTaxCalculation,
+    pub prev_fy2_calc_result: CorporationTaxCalculation,
     pub prev_corporation_tax_chargeable: f64,
     pub prev_profit_chargeable: f64,
     pub marginal_relief: f64,
@@ -137,65 +144,20 @@ fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CorporationTaxCalculation {
-    pub taxable_profit: f64,
-    pub tax_at_main_rate: f64,
-    pub marginal_relief: f64,
-    pub corporation_tax: f64,
-    pub effective_rate: f64,
-}
-
-/// Calculate Corporation Tax for UK 2025/26 tax year using marginal relief formula.
-///
-/// Rates and thresholds:
-/// - Up to £50,000: 19% (Small Profits Rate)
-/// - £50,001 to £250,000: Marginal Relief (gradual transition from 19% to 25%)
-/// - £250,000 and above: 25% (Main Rate)
-///
-/// Formula: Corporation Tax = (Profits × 25%) - Marginal Relief
-/// Marginal Relief = (Upper Limit - Profits) × 3/200
-pub fn calculate_corporation_tax_2025(taxable_profit: f64) -> CorporationTaxCalculation {
-    const SMALL_PROFITS_LIMIT: f64 = 50_000.0;
-    const UPPER_LIMIT: f64 = 250_000.0;
-    const MAIN_RATE: f64 = 0.25;
-    const MARGINAL_RELIEF_FRACTION: f64 = 3.0 / 200.0;
-
-    let tax_at_main_rate = round2(taxable_profit * MAIN_RATE);
-
-    let marginal_relief = if taxable_profit <= SMALL_PROFITS_LIMIT {
-        // Below small profits limit - no marginal relief needed
-        // Tax is simply profit × 19%
-        0.0
-    } else if taxable_profit <= UPPER_LIMIT {
-        // In marginal relief band
-        round2((UPPER_LIMIT - taxable_profit) * MARGINAL_RELIEF_FRACTION)
-    } else {
-        // Above upper limit - no marginal relief
-        0.0
+/// Split a period into the days in FY1 (up to and including `split_end`)
+/// and the days in FY2 (after it).  `split_end` is 31 March of the second
+/// financial year.
+fn fy_day_split(period: AccountingPeriod, split_end: chrono::NaiveDate) -> (i64, i64) {
+    let total_days = (period.end - period.start).num_days() + 1;
+    let fy1_days = {
+        let end = split_end.min(period.end);
+        if end >= period.start {
+            (end - period.start).num_days() + 1
+        } else {
+            0
+        }
     };
-
-    let corporation_tax = if taxable_profit <= SMALL_PROFITS_LIMIT {
-        // Use small profits rate directly
-        round2(taxable_profit * 0.19)
-    } else {
-        // Use main rate minus marginal relief
-        round2(tax_at_main_rate - marginal_relief)
-    };
-
-    let effective_rate = if taxable_profit > 0.0 {
-        round2((corporation_tax / taxable_profit) * 100.0)
-    } else {
-        0.0
-    };
-
-    CorporationTaxCalculation {
-        taxable_profit,
-        tax_at_main_rate,
-        marginal_relief,
-        corporation_tax,
-        effective_rate,
-    }
+    (fy1_days, total_days - fy1_days)
 }
 
 #[allow(clippy::type_complexity)]
@@ -366,19 +328,20 @@ impl Frs105CorpTax {
         let profits_chargeable = profits_before_charges;
 
         let fy1_end = chrono::NaiveDate::from_ymd_opt(accounts.fy2_year, 3, 31).unwrap();
-        let total_days =
-            (period.end - period.start).num_days() + 1;
-        let fy1_days = {
-            let s = period.start;
-            let e = fy1_end.min(period.end);
-            if e >= s { (e - s).num_days() + 1 } else { 0 }
-        };
-        let fy2_days = total_days - fy1_days;
+        let (fy1_days, fy2_days) = fy_day_split(period, fy1_end);
+        let total_days = fy1_days + fy2_days;
 
         let fy1_profit = (profits_chargeable * fy1_days as f64 / total_days as f64).round();
         let fy2_profit = (profits_chargeable * fy2_days as f64 / total_days as f64).round();
-        let fy1_tax = round2(fy1_profit * accounts.fy1_rate / 100.0);
-        let fy2_tax = round2(fy2_profit * accounts.fy2_rate / 100.0);
+        // Each financial year is taxed under its own regime (flat 19% for
+        // FY2022/23 and earlier, marginal relief from FY2023/24), with the
+        // limits time-apportioned between the years.
+        let fy1_calc_result =
+            for_fy(accounts.fy1_year).tax(fy1_profit, fy1_days as f64 / total_days as f64);
+        let fy2_calc_result =
+            for_fy(accounts.fy2_year).tax(fy2_profit, fy2_days as f64 / total_days as f64);
+        let fy1_tax = fy1_calc_result.corporation_tax;
+        let fy2_tax = fy2_calc_result.corporation_tax;
         let corporation_tax_chargeable = round2(fy1_tax + fy2_tax);
 
         let marginal_relief = 0.0;
@@ -442,20 +405,22 @@ impl Frs105CorpTax {
         let prev_profit_chargeable = prev_ct_trading_profits;
         let prev_period_start = period.previous().start;
         let prev_period_end = period.previous().end;
-        let prev_total_days = (prev_period_end - prev_period_start).num_days() + 1;
         let prev_fy1_end = chrono::NaiveDate::from_ymd_opt(accounts.fy2_year - 1, 3, 31).unwrap();
-        let prev_fy1_days = {
-            let s = prev_period_start;
-            let e = prev_fy1_end.min(prev_period_end);
-            if e >= s { (e - s).num_days() + 1 } else { 0 }
-        };
-        let prev_fy2_days = prev_total_days - prev_fy1_days;
+        let (prev_fy1_days, prev_fy2_days) = fy_day_split(
+            AccountingPeriod { start: prev_period_start, end: prev_period_end },
+            prev_fy1_end,
+        );
+        let prev_total_days = prev_fy1_days + prev_fy2_days;
         let prev_fy1_profit =
             (prev_profit_chargeable * prev_fy1_days as f64 / prev_total_days as f64).round();
         let prev_fy2_profit =
             (prev_profit_chargeable * prev_fy2_days as f64 / prev_total_days as f64).round();
-        let prev_fy1_tax = round2(prev_fy1_profit * accounts.fy1_rate / 100.0);
-        let prev_fy2_tax = round2(prev_fy2_profit * accounts.fy2_rate / 100.0);
+        let prev_fy1_calc_result = for_fy(accounts.fy1_year - 1)
+            .tax(prev_fy1_profit, prev_fy1_days as f64 / prev_total_days as f64);
+        let prev_fy2_calc_result = for_fy(accounts.fy2_year - 1)
+            .tax(prev_fy2_profit, prev_fy2_days as f64 / prev_total_days as f64);
+        let prev_fy1_tax = prev_fy1_calc_result.corporation_tax;
+        let prev_fy2_tax = prev_fy2_calc_result.corporation_tax;
         let prev_corporation_tax_chargeable = round2(prev_fy1_tax + prev_fy2_tax);
 
         let mut expenses_by_fy: HashMap<String, HashMap<i32, f64>> = HashMap::new();
@@ -506,11 +471,15 @@ impl Frs105CorpTax {
 
             fy1_profit,
             fy2_profit,
+            fy1_calc_result,
+            fy2_calc_result,
             fy1_tax,
             fy2_tax,
             corporation_tax_chargeable,
             prev_fy1_profit,
             prev_fy2_profit,
+            prev_fy1_calc_result,
+            prev_fy2_calc_result,
             prev_fy1_tax,
             prev_fy2_tax,
             prev_corporation_tax_chargeable,
@@ -838,10 +807,10 @@ impl Frs105CorpTax {
     ///
     /// The `company` parameter supplies fields that are not represented in the
     /// iXBRL output (such as `company_number` and `registration_date`), and the
-    /// `accounts` parameter supplies the default financial-year tax parameters.
-    /// Any data that *is* present in the facts (name, tax reference, the
-    /// accounting-period dates, financial-year numbers, tax rates) overrides the
-    /// corresponding values on the supplied inputs.
+    /// `accounts` parameter supplies the default financial years.  Any data
+    /// that *is* present in the facts (name, tax reference, the accounting-
+    /// period dates, financial-year numbers) overrides the corresponding
+    /// values on the supplied inputs.
     ///
     /// Numeric fields that have no corresponding iXBRL fact (e.g. `turnover`,
     /// `total_costs`, `gross_profit`, `tax_expense`, `profit_after_tax`) are set
@@ -901,10 +870,13 @@ impl Frs105CorpTax {
             accounts_made_up_to: None,
             fy1_year,
             fy2_year,
-            fy1_rate: num("ct-comp:FY1FirstRateOfTax", "ctxt-1"),
-            fy2_rate: num("ct-comp:FY2FirstRateOfTax", "ctxt-1"),
             ..AccountsMeta::default()
         };
+
+        // The reported period comes from the facts; use it for the FY day
+        // split below too, so the calc results always match the reported
+        // period even when the caller's `accounts` carry a different one.
+        let period = accounts.period();
 
         let fy1 = accounts.fy1_year;
         let fy2 = accounts.fy2_year;
@@ -976,6 +948,24 @@ impl Frs105CorpTax {
         let prev_fy2_tax = num("ct-comp:FY2TaxAtFirstRate", "ctxt-16");
         let prev_corporation_tax_chargeable = num("ct-comp:CorporationTaxChargeable", "ctxt-16");
         let prev_profit_chargeable = num("ct-comp:NetTradingProfits", "ctxt-16");
+
+        // The tax regimes derive from the financial years; the limits are
+        // time-apportioned across the return period, as in `from_splits`.
+        let (fy1_days, fy2_days) =
+            fy_day_split(period, chrono::NaiveDate::from_ymd_opt(fy2_year, 3, 31).unwrap());
+        let total_days = fy1_days + fy2_days;
+        let fy1_calc_result = for_fy(fy1_year).tax(fy1_profit, fy1_days as f64 / total_days as f64);
+        let fy2_calc_result = for_fy(fy2_year).tax(fy2_profit, fy2_days as f64 / total_days as f64);
+        let prev_period = period.previous();
+        let (prev_fy1_days, prev_fy2_days) = fy_day_split(
+            prev_period,
+            chrono::NaiveDate::from_ymd_opt(fy2_year - 1, 3, 31).unwrap(),
+        );
+        let prev_total_days = prev_fy1_days + prev_fy2_days;
+        let prev_fy1_calc_result = for_fy(fy1_year - 1)
+            .tax(prev_fy1_profit, prev_fy1_days as f64 / prev_total_days as f64);
+        let prev_fy2_calc_result = for_fy(fy2_year - 1)
+            .tax(prev_fy2_profit, prev_fy2_days as f64 / prev_total_days as f64);
 
         let marginal_relief = num(
             "ct-comp:MarginalRateReliefForRingFenceTradesPayable",
@@ -1056,11 +1046,15 @@ impl Frs105CorpTax {
 
             fy1_profit,
             fy2_profit,
+            fy1_calc_result,
+            fy2_calc_result,
             fy1_tax,
             fy2_tax,
             corporation_tax_chargeable,
             prev_fy1_profit,
             prev_fy2_profit,
+            prev_fy1_calc_result,
+            prev_fy2_calc_result,
             prev_fy1_tax,
             prev_fy2_tax,
             prev_corporation_tax_chargeable,
@@ -1391,14 +1385,14 @@ impl Frs105CorpTax {
                     "FY1 first rate of tax",
                     "ct-comp:FY1FirstRateOfTax",
                     "ctxt-1",
-                    self.accounts.fy1_rate,
+                    self.fy1_calc_result.effective_rate,
                 ),
                 self.build_fact_numeric(
                     "425",
                     "FY2 first rate of tax",
                     "ct-comp:FY2FirstRateOfTax",
                     "ctxt-1",
-                    self.accounts.fy2_rate,
+                    self.fy2_calc_result.effective_rate,
                 ),
                 self.build_fact_numeric(
                     "430",
@@ -1970,8 +1964,49 @@ impl Frs105CorpTax {
                 vec![span_text("Corporation tax chargeable")],
             )],
         ));
+        // The threshold breakdown (tax at the main rate, less the marginal
+        // relief) for marginal-relief years; flat-rate years show the single
+        // tax row only.
+        let fy1_calc = &self.fy1_calc_result;
+        let fy2_calc = &self.fy2_calc_result;
+        let prev_fy1_calc = &self.prev_fy1_calc_result;
+        let prev_fy2_calc = &self.prev_fy2_calc_result;
+        if fy1_calc.marginal_relief > 0.0 || fy2_calc.marginal_relief > 0.0 {
+            rows.push(tr(
+                Some("row"),
+                vec![td(
+                    "label breakdown heading cell",
+                    vec![span_text("Corporation tax, by financial year")],
+                )],
+            ));
+            for (label, calc, prev_calc) in [
+                ("FY1 tax at main rate", fy1_calc, prev_fy1_calc),
+                ("FY1 less marginal relief", fy1_calc, prev_fy1_calc),
+                ("FY2 tax at main rate", fy2_calc, prev_fy2_calc),
+                ("FY2 less marginal relief", fy2_calc, prev_fy2_calc),
+            ] {
+                let value = if label.ends_with("main rate") {
+                    -calc.tax_at_main_rate
+                } else {
+                    calc.marginal_relief
+                };
+                let prev_value = if label.ends_with("main rate") {
+                    -prev_calc.tax_at_main_rate
+                } else {
+                    prev_calc.marginal_relief
+                };
+                rows.push(tr(
+                    Some("row"),
+                    vec![
+                        td("label breakdown item cell", vec![span_text(label)]),
+                        data_cell(value),
+                        data_cell(prev_value),
+                    ],
+                ));
+            }
+        }
         rows.push(table_row_ix_neg(
-            "FY1 (19%)",
+            &format!("FY1 ({}%)", fy1_calc.effective_rate),
             "ct-comp:FY1TaxAtFirstRate",
             "ctxt-3",
             "ctxt-16",
@@ -1979,7 +2014,7 @@ impl Frs105CorpTax {
             self.prev_fy1_tax,
         ));
         rows.push(table_row_ix_neg(
-            "FY2 (19%)",
+            &format!("FY2 ({}%)", fy2_calc.effective_rate),
             "ct-comp:FY2TaxAtFirstRate",
             "ctxt-3",
             "ctxt-16",
@@ -2103,14 +2138,16 @@ impl Frs105CorpTax {
         self.fy2_profit
     }
 
-    /// Box 340 — FY1 first rate of tax.
+    /// Box 340 — FY1 first rate of tax: the flat rate for the old regime,
+    /// the effective computed rate for marginal relief.
     pub fn fy1_tax_rate(&self) -> f64 {
-        self.accounts.fy1_rate
+        self.fy1_calc_result.effective_rate
     }
 
-    /// Box 390 — FY2 first rate of tax.
+    /// Box 390 — FY2 first rate of tax: the flat rate for the old regime,
+    /// the effective computed rate for marginal relief.
     pub fn fy2_tax_rate(&self) -> f64 {
-        self.accounts.fy2_rate
+        self.fy2_calc_result.effective_rate
     }
 
     /// Box 345 — FY1 tax at first rate.
@@ -2416,125 +2453,6 @@ mod tests {
         assert!(ixbrl.contains("breakdown total cell"));
     }
 
-    #[test]
-    fn test_corporation_tax_2025_example_from_spec() {
-        let calc = calculate_corporation_tax_2025(150_000.0);
-        assert_eq!(calc.taxable_profit, 150_000.0);
-        assert_eq!(calc.tax_at_main_rate, 37_500.0);
-        assert_eq!(calc.marginal_relief, 1_500.0);
-        assert_eq!(calc.corporation_tax, 36_000.0);
-        assert_eq!(calc.effective_rate, 24.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_below_small_profits_limit() {
-        let calc = calculate_corporation_tax_2025(50_000.0);
-        assert_eq!(calc.taxable_profit, 50_000.0);
-        assert_eq!(calc.tax_at_main_rate, 12_500.0);
-        assert_eq!(calc.marginal_relief, 0.0);
-        assert_eq!(calc.corporation_tax, 9_500.0);
-        assert_eq!(calc.effective_rate, 19.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_just_above_small_profits_limit() {
-        let calc = calculate_corporation_tax_2025(50_001.0);
-        assert_eq!(calc.taxable_profit, 50_001.0);
-        assert_eq!(calc.tax_at_main_rate, 12_500.25);
-        assert_eq!(calc.marginal_relief, 2_999.98);
-        assert_eq!(calc.corporation_tax, 9_500.27);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_at_upper_limit() {
-        let calc = calculate_corporation_tax_2025(250_000.0);
-        assert_eq!(calc.taxable_profit, 250_000.0);
-        assert_eq!(calc.tax_at_main_rate, 62_500.0);
-        assert_eq!(calc.marginal_relief, 0.0);
-        assert_eq!(calc.corporation_tax, 62_500.0);
-        assert_eq!(calc.effective_rate, 25.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_just_above_upper_limit() {
-        let calc = calculate_corporation_tax_2025(250_001.0);
-        assert_eq!(calc.taxable_profit, 250_001.0);
-        assert_eq!(calc.tax_at_main_rate, 62_500.25);
-        assert_eq!(calc.marginal_relief, 0.0);
-        assert_eq!(calc.corporation_tax, 62_500.25);
-        assert_eq!(calc.effective_rate, 25.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_zero_profit() {
-        let calc = calculate_corporation_tax_2025(0.0);
-        assert_eq!(calc.taxable_profit, 0.0);
-        assert_eq!(calc.tax_at_main_rate, 0.0);
-        assert_eq!(calc.marginal_relief, 0.0);
-        assert_eq!(calc.corporation_tax, 0.0);
-        assert_eq!(calc.effective_rate, 0.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_small_profit() {
-        let calc = calculate_corporation_tax_2025(10_000.0);
-        assert_eq!(calc.taxable_profit, 10_000.0);
-        assert_eq!(calc.tax_at_main_rate, 2_500.0);
-        assert_eq!(calc.marginal_relief, 0.0);
-        assert_eq!(calc.corporation_tax, 1_900.0);
-        assert_eq!(calc.effective_rate, 19.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_mid_marginal_band() {
-        let calc = calculate_corporation_tax_2025(100_000.0);
-        assert_eq!(calc.taxable_profit, 100_000.0);
-        assert_eq!(calc.tax_at_main_rate, 25_000.0);
-        assert_eq!(calc.marginal_relief, 2_250.0);
-        assert_eq!(calc.corporation_tax, 22_750.0);
-        assert_eq!(calc.effective_rate, 22.75);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_large_profit() {
-        let calc = calculate_corporation_tax_2025(1_000_000.0);
-        assert_eq!(calc.taxable_profit, 1_000_000.0);
-        assert_eq!(calc.tax_at_main_rate, 250_000.0);
-        assert_eq!(calc.marginal_relief, 0.0);
-        assert_eq!(calc.corporation_tax, 250_000.0);
-        assert_eq!(calc.effective_rate, 25.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_midpoint_of_marginal_band() {
-        let calc = calculate_corporation_tax_2025(150_000.0);
-        assert_eq!(calc.taxable_profit, 150_000.0);
-        assert_eq!(calc.tax_at_main_rate, 37_500.0);
-        assert_eq!(calc.marginal_relief, 1_500.0);
-        assert_eq!(calc.corporation_tax, 36_000.0);
-        assert_eq!(calc.effective_rate, 24.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_near_small_profits_limit() {
-        let calc = calculate_corporation_tax_2025(49_999.0);
-        assert_eq!(calc.taxable_profit, 49_999.0);
-        assert_eq!(calc.tax_at_main_rate, 12_499.75);
-        assert_eq!(calc.marginal_relief, 0.0);
-        assert_eq!(calc.corporation_tax, 9_499.81);
-        assert_eq!(calc.effective_rate, 19.0);
-    }
-
-    #[test]
-    fn test_corporation_tax_2025_near_upper_limit() {
-        let calc = calculate_corporation_tax_2025(249_999.0);
-        assert_eq!(calc.taxable_profit, 249_999.0);
-        assert_eq!(calc.tax_at_main_rate, 62_499.75);
-        assert_eq!(calc.marginal_relief, 0.02);
-        assert_eq!(calc.corporation_tax, 62_499.73);
-        assert_eq!(calc.effective_rate, 25.0);
-    }
-
     async fn build_example2_ct() -> Frs105CorpTax {
         let company = crate::test_utils::TestData::default_company();
         let accounts = crate::test_utils::TestData::default_accounts_meta();
@@ -2687,8 +2605,8 @@ mod tests {
         assert_eq!(back.company.company_number, ct.company.company_number);
         assert_eq!(back.accounts.fy1_year, ct.accounts.fy1_year);
         assert_eq!(back.accounts.fy2_year, ct.accounts.fy2_year);
-        assert_eq!(back.accounts.fy1_rate, ct.accounts.fy1_rate);
-        assert_eq!(back.accounts.fy2_rate, ct.accounts.fy2_rate);
+        assert_eq!(back.fy1_calc_result, ct.fy1_calc_result);
+        assert_eq!(back.fy2_calc_result, ct.fy2_calc_result);
         assert_eq!(
             back.accounts.period().start,
             ct.accounts.period().start
@@ -2889,8 +2807,8 @@ mod tests {
         assert_eq!(ct.company.company_number, company.company_number);
         assert_eq!(ct.accounts.fy1_year, accounts.fy1_year);
         assert_eq!(ct.accounts.fy2_year, accounts.fy2_year);
-        assert_eq!(ct.accounts.fy1_rate, accounts.fy1_rate);
-        assert_eq!(ct.accounts.fy2_rate, accounts.fy2_rate);
+        assert_eq!(ct.fy1_calc_result.effective_rate, 19.0);
+        assert_eq!(ct.fy2_calc_result.effective_rate, 19.0);
         assert_eq!(
             ct.accounts.period().start,
             accounts.period().start
