@@ -333,11 +333,19 @@ impl Frs105Accounts {
                 &format_date(&period_end),
                 "ixt2:datedaymonthyearen",
             ),
-            non_numeric(
+        ]);
+        // The principal-activities description is a voluntary fact: it is
+        // omitted when the profile leaves it blank.  Its position here
+        // (after the balance-sheet date, before the SIC codes) must match
+        // the reference fixture's fact order.
+        if let Some(activities) = profile.activities.as_deref().filter(|v| !v.is_empty()) {
+            hidden_children.push(non_numeric(
                 "uk-bus:DescriptionPrincipalActivities",
                 "ctxt-0",
-                &profile.activities,
-            ),
+                activities,
+            ));
+        }
+        hidden_children.extend(vec![
             non_numeric(
                 "uk-bus:SICCodeRecordedUKCompaniesHouse1",
                 "ctxt-0",
@@ -833,7 +841,7 @@ impl Frs105Accounts {
             website_description: opt_text("uk-bus:DescriptionOrOtherInformationOnWebsite"),
             vat_registration: opt_text("uk-bus:VATRegistrationNumber"),
             sic_codes,
-            activities: text("uk-bus:DescriptionPrincipalActivities"),
+            activities: opt_text("uk-bus:DescriptionPrincipalActivities"),
             jurisdiction: String::new(), // not serialised to iXBRL
             accountant_name: text("uk-accrep:NameAccountantResponsible"),
             accountant_business: text("uk-bus:NameEntityAccountants"),
@@ -1934,6 +1942,7 @@ mod tests {
         let mut profile = example_profile();
         profile.county = None;
         profile.vat_registration = None;
+        profile.activities = None;
         profile.email = None;
         profile.phone_country = None;
         profile.phone_area = None;
@@ -1948,6 +1957,7 @@ mod tests {
         for fact in [
             "uk-bus:CountyRegion",
             "uk-bus:VATRegistrationNumber",
+            "uk-bus:DescriptionPrincipalActivities",
             "uk-bus:E-mailAddress",
             "uk-bus:CountryCode",
             "uk-bus:AreaCode",
@@ -1966,6 +1976,7 @@ mod tests {
         let back = Frs105Accounts::from_ixbrl_node(&node, &company, &example_accounts_meta());
         assert_eq!(back.profile.county, None);
         assert_eq!(back.profile.vat_registration, None);
+        assert_eq!(back.profile.activities, None);
         assert_eq!(back.profile.email, None);
         assert_eq!(back.profile.phone_country, None);
         assert_eq!(back.profile.phone_area, None);

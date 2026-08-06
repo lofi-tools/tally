@@ -281,9 +281,9 @@ impl CompanyConfig {
     /// Fill the optional profile into the required report profile: absent
     /// fields become blank defaults (empty strings / empty lists, no logo).
     /// The voluntary facts (registered-office county, VAT registration
-    /// number, e-mail, phone, website) stay `None` when the config omitted
-    /// them (empty counts as absent), so the report omits their facts
-    /// entirely.
+    /// number, business activities, e-mail, phone, website) stay `None`
+    /// when the config omitted them (empty counts as absent), so the report
+    /// omits their facts entirely.
     pub(crate) fn into_profile(self) -> CompanyProfile {
         CompanyProfile {
             directors: self.directors.unwrap_or_default(),
@@ -300,7 +300,7 @@ impl CompanyConfig {
             website_description: self.website_description.filter(|s| !s.is_empty()),
             vat_registration: self.vat_registration.filter(|s| !s.is_empty()),
             sic_codes: self.sic_codes.unwrap_or_default(),
-            activities: self.activities.unwrap_or_default(),
+            activities: self.activities.filter(|s| !s.is_empty()),
             jurisdiction: self.jurisdiction.unwrap_or_default(),
             accountant_name: self.accountant_name.unwrap_or_default(),
             accountant_business: self.accountant_business.unwrap_or_default(),

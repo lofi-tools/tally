@@ -62,7 +62,7 @@ against the environment and the Companies House API.
 | `company.name` | string (optional) | resolved from Companies House when an API key is configured |
 | `company.tax_reference` | string (required) | `COMPANY_UNIQUE_TAXPAYER_REF` environment variable wins when set; it cannot be resolved from Companies House, so one of the two must be present |
 | `company.company_number` | string (optional) | `COMPANY_NUMBER` environment variable wins when set |
-| `company.directors`, `company.contact_name`, `company.address_lines`, `company.email`, `company.accountant_name`, `company.auditor_name`, ... | optional | none — an omitted (or blank) field parses to `None` and serialises back as omitted; the reports render empty values for the required fields, and omit the voluntary facts (county, VAT number, e-mail, phone, website) entirely when absent; when an API key is set, the fields Companies House holds (registered-office address, SIC codes, jurisdiction, current directors) are filled from the profile instead |
+| `company.directors`, `company.contact_name`, `company.address_lines`, `company.email`, `company.accountant_name`, `company.auditor_name`, ... | optional | none — an omitted (or blank) field parses to `None` and serialises back as omitted; the reports render empty values for the required fields, and omit the voluntary facts (county, VAT number, business activities, e-mail, phone, website) entirely when absent; when an API key is set, the fields Companies House holds (registered-office address, SIC codes, jurisdiction, current directors) are filled from the profile instead |
 | `company.logo_b64` | string (optional) | none — the logo is only embedded on the title page when present |
 | `accounts.period.start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts.accounts_made_up_to` or the Companies House next period |
 | `accounts.period.end` | date (optional) | none — see `accounts.period.start` |
@@ -83,9 +83,9 @@ parameters are all optional in the config file (see
 missing ones are filled in and what must always be present).  The company
 profile fields (`company.*`) are optional too: an omitted field parses to
 `None`, serialises back as omitted — the reports render empty values for the
-required fields, and leave the voluntary facts (county, VAT number, e-mail,
-phone, website) out of the filing entirely — so copy the example config (or
-start
+required fields, and leave the voluntary facts (county, VAT number, business
+activities, e-mail, phone, website) out of the filing entirely — so copy the
+example config (or start
 from `minimal_config.json`) and fill in what the report should show.  With a
 Companies House API key, the fields
 Companies House holds (registered-office address, SIC codes, jurisdiction,

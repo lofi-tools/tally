@@ -1012,7 +1012,7 @@ mod tests {
             website_description: None,
             vat_registration: None,
             sic_codes: vec!["62020".into(), "62021".into()],
-            activities: String::new(),
+            activities: None,
             jurisdiction: "England and Wales".into(),
             accountant_name: String::new(),
             accountant_business: String::new(),
