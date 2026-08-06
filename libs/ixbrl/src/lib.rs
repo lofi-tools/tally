@@ -383,6 +383,72 @@ impl GnucashBook {
         }
     }
 
+    /// Build a [`GnucashBook`] from pre-parsed parts — the raw accounts,
+    /// transactions and splits — skipping the GnuCash file/SQLite parsing.
+    ///
+    /// The account tree and net assets are derived from the parts (each
+    /// account's balance is the sum of its splits), so the book is
+    /// equivalent to one parsed from a file.  Useful for tests that need a
+    /// ledger for dates the example books don't cover, and for feeding a
+    /// book from another ledger source.
+    pub fn from_raw_parts(
+        raw_accounts: Vec<RawAccount>,
+        raw_txns: Vec<RawTransaction>,
+        raw_splits: Vec<RawSplit>,
+    ) -> Self {
+        let guid_to_idx: std::collections::HashMap<String, usize> = raw_accounts
+            .iter()
+            .enumerate()
+            .map(|(i, a)| (a.guid.clone(), i))
+            .collect();
+
+        let mut balances = vec![rucash::Num::from(0); raw_accounts.len()];
+        for split in &raw_splits {
+            if let Some(&idx) = guid_to_idx.get(&split.account_guid) {
+                balances[idx] = balances[idx] + split.value;
+            }
+        }
+
+        let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); raw_accounts.len()];
+        let mut roots = Vec::new();
+        for (i, acc) in raw_accounts.iter().enumerate() {
+            match guid_to_idx.get(&acc.parent_guid) {
+                Some(&parent_idx) => children_of[parent_idx].push(i),
+                None => roots.push(i),
+            }
+        }
+
+        let tree: Vec<AccountNode> = roots
+            .iter()
+            .map(|&idx| build_tree_from_raw(&raw_accounts, &balances, &children_of, idx))
+            .collect();
+
+        let top_level: Vec<usize> = roots
+            .iter()
+            .flat_map(|&idx| &children_of[idx])
+            .copied()
+            .collect();
+
+        let net_assets: rucash::Num = top_level
+            .iter()
+            .map(|&idx| {
+                let account_type = AccountType::try_from(raw_accounts[idx].r#type.as_str())
+                    .unwrap_or(AccountType::Expense);
+                (account_type, &balances[idx])
+            })
+            .filter(|(t, _)| t.is_balance_sheet())
+            .map(|(_, bal)| bal)
+            .sum();
+
+        GnucashBook {
+            accounts: tree,
+            net_assets,
+            raw_accounts,
+            raw_txns,
+            raw_splits,
+        }
+    }
+
     pub fn raw_accounts(&self) -> &[RawAccount] {
         &self.raw_accounts
     }

@@ -2909,4 +2909,148 @@ mod tests {
         // corporation_tax_chargeable must equal fy1_tax + fy2_tax
         assert_eq!(ct.fy1_tax + ct.fy2_tax, ct.corporation_tax_chargeable);
     }
+
+    /// The full report pipeline for an accounting period straddling
+    /// FY2022/23 and FY2023/24 (the 31 March 2023 boundary): the FY1 slice
+    /// is taxed at the flat 19%, the FY2 slice under marginal relief with
+    /// the £50k/£250k limits time-apportioned to the FY2 share of the
+    /// period (HMRC CTM03955) — verified on the computed result and in the
+    /// serialised iXBRL output.
+    #[test]
+    fn test_straddling_fy2022_23_to_fy2023_24_apportions_limits() {
+        // A pre-parsed book: £120,000 of UK sales in mid-2023, no expenses.
+        // The committed example books are dated 2019/20 and cannot drive a
+        // 2023 return period, so the test builds its own minimal ledger
+        // from raw parts instead of a GnuCash file.
+        let raw_accounts = vec![
+            crate::RawAccount {
+                guid: "root".into(),
+                name: "Root Account".into(),
+                r#type: "ROOT".into(),
+                parent_guid: String::new(),
+            },
+            crate::RawAccount {
+                guid: "income".into(),
+                name: "Income".into(),
+                r#type: "INCOME".into(),
+                parent_guid: "root".into(),
+            },
+            crate::RawAccount {
+                guid: "sales-uk".into(),
+                name: "Sales:UK".into(),
+                r#type: "INCOME".into(),
+                parent_guid: "income".into(),
+            },
+            crate::RawAccount {
+                guid: "bank".into(),
+                name: "Bank".into(),
+                r#type: "BANK".into(),
+                parent_guid: "root".into(),
+            },
+        ];
+        let raw_txns = vec![crate::RawTransaction {
+            guid: "txn-sales".into(),
+            post_datetime: chrono::NaiveDate::from_ymd_opt(2023, 6, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        }];
+        let raw_splits = vec![
+            crate::RawSplit {
+                tx_guid: "txn-sales".into(),
+                account_guid: "sales-uk".into(),
+                value: rucash::Num::from(120_000),
+            },
+            crate::RawSplit {
+                tx_guid: "txn-sales".into(),
+                account_guid: "bank".into(),
+                value: rucash::Num::from(-120_000),
+            },
+        ];
+        let gnucash = crate::GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits);
+
+        let company = crate::test_utils::TestData::default_company();
+        // Calendar-year 2023: FY1 = FY2022/23 (flat 19%), FY2 = FY2023/24
+        // (marginal relief).  The 31 March 2023 boundary splits the period
+        // into 90 FY1 days and 275 FY2 days.
+        let accounts = AccountsMeta {
+            period: Some(AccountingPeriod {
+                start: chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
+                end: chrono::NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+            }),
+            fy1_year: 2022,
+            fy2_year: 2023,
+            ..AccountsMeta::default()
+        };
+        let ct = Frs105CorpTax::builder(&gnucash, &company, &accounts).build();
+
+        let period = accounts.period();
+        let (fy1_days, fy2_days) =
+            fy_day_split(period, chrono::NaiveDate::from_ymd_opt(2023, 3, 31).unwrap());
+        assert_eq!((fy1_days, fy2_days), (90, 275));
+        let limit_scale = fy2_days as f64 / (fy1_days + fy2_days) as f64;
+
+        // Profits apportioned by days; the £120,000 lands £29,589 in FY1
+        // and £90,411 in FY2.
+        assert_eq!(ct.profits_chargeable_to_corporation_tax, 120_000.0);
+        assert_eq!(ct.fy1_profit, 29_589.0);
+        assert_eq!(ct.fy2_profit, 90_411.0);
+
+        // FY1 is a flat-19% year: the whole tax at the flat rate, no relief.
+        assert_eq!(ct.fy1_calc_result.effective_rate, 19.0);
+        assert_eq!(ct.fy1_calc_result.marginal_relief, 0.0);
+        assert_eq!(ct.fy1_tax, 5_621.91);
+
+        // FY2 is a marginal-relief year.  The £50k/£250k limits are scaled
+        // by the FY2 share of the period (£37,671.23 / £188,356.16), so
+        // £90,411 falls in the marginal band: tax at 25% less a relief
+        // computed against the *apportioned* upper limit.
+        let apportioned_lower = 50_000.0 * limit_scale;
+        let apportioned_upper = 250_000.0 * limit_scale;
+        assert!(
+            ct.fy2_profit > apportioned_lower && ct.fy2_profit < apportioned_upper,
+            "the apportioned profit sits in the marginal-relief band"
+        );
+        assert_eq!(ct.fy2_calc_result.tax_at_main_rate, 22_602.75);
+        let expected_relief = round2((apportioned_upper - ct.fy2_profit) * 3.0 / 200.0);
+        assert_eq!(ct.fy2_calc_result.marginal_relief, expected_relief);
+        assert_eq!(ct.fy2_calc_result.marginal_relief, 1_469.18);
+        assert_eq!(ct.fy2_calc_result.corporation_tax, 21_133.57);
+        assert_eq!(ct.fy2_calc_result.effective_rate, 23.37);
+        // Against the full, unapportioned £250,000 limit the relief would be
+        // £2,393.84 — the apportionment is what the code under test
+        // produces, and it must differ.
+        let unapportioned_relief = round2((250_000.0 - ct.fy2_profit) * 3.0 / 200.0);
+        assert_ne!(ct.fy2_calc_result.marginal_relief, unapportioned_relief);
+
+        // The serialised return carries both regimes and the breakdown:
+        // boxes 420 / 425 show the FY1 flat rate and the FY2 effective rate.
+        let html = ct.to_ixbrl();
+        let node = XmlNode::from_xml_string(&html).expect("parse output");
+        let facts = ParsedIxBrlFacts::from_node(&node);
+        let fact = |name: &str| -> f64 {
+            facts
+                .numeric_by_ctx
+                .get(&(name.to_string(), "ctxt-1".to_string()))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        assert_eq!(fact("ct-comp:FY1FirstRateOfTax"), 19.0);
+        assert_eq!(fact("ct-comp:FY2FirstRateOfTax"), 23.37);
+        // The tax-calculation worksheet breaks the FY2 tax into the main
+        // rate less the marginal relief (the FY1 rows are zero for the
+        // flat-rate year).
+        assert!(html.contains("FY1 tax at main rate"));
+        assert!(html.contains("FY1 less marginal relief"));
+        assert!(html.contains("FY2 tax at main rate"));
+        assert!(html.contains("FY2 less marginal relief"));
+        // The negative cell renders across separate spans, so assert on the
+        // unique formatted values rather than the parenthesised whole.
+        assert!(html.contains("22,602.75")); // FY2 tax at the main rate
+        assert!(html.contains("1,469.18")); // FY2 marginal relief
+        assert!(html.contains("5,621.91")); // FY1 tax at the flat rate
+        assert!(html.contains("21,133.57")); // FY2 tax after relief
+        assert!(html.contains("FY1 (19%)"));
+        assert!(html.contains("FY2 (23.37%)"));
+    }
 }
