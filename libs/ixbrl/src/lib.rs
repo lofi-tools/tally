@@ -152,6 +152,61 @@ fn write_tree(f: &mut fmt::Formatter<'_>, nodes: &[AccountNode], depth: usize) -
     Ok(())
 }
 
+/// Assemble a [`GnucashBook`] from the pre-parsed parts and the per-account
+/// balances: the account tree, net assets and the struct itself.  Shared by
+/// the file/SQLite parsers and [`GnucashBook::from_raw_parts`].
+fn assemble(
+    raw_accounts: Vec<RawAccount>,
+    balances: Vec<rucash::Num>,
+    raw_txns: Vec<RawTransaction>,
+    raw_splits: Vec<RawSplit>,
+) -> GnucashBook {
+    let guid_to_idx: std::collections::HashMap<String, usize> = raw_accounts
+        .iter()
+        .enumerate()
+        .map(|(i, a)| (a.guid.clone(), i))
+        .collect();
+
+    let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); raw_accounts.len()];
+    let mut roots = Vec::new();
+    for (i, acc) in raw_accounts.iter().enumerate() {
+        match guid_to_idx.get(&acc.parent_guid) {
+            Some(&parent_idx) => children_of[parent_idx].push(i),
+            None => roots.push(i),
+        }
+    }
+
+    let tree: Vec<AccountNode> = roots
+        .iter()
+        .map(|&idx| build_tree_from_raw(&raw_accounts, &balances, &children_of, idx))
+        .collect();
+
+    let top_level: Vec<usize> = roots
+        .iter()
+        .flat_map(|&idx| &children_of[idx])
+        .copied()
+        .collect();
+
+    let net_assets: rucash::Num = top_level
+        .iter()
+        .map(|&idx| {
+            let account_type = AccountType::try_from(raw_accounts[idx].r#type.as_str())
+                .unwrap_or(AccountType::Expense);
+            (account_type, &balances[idx])
+        })
+        .filter(|(t, _)| t.is_balance_sheet())
+        .map(|(_, bal)| bal)
+        .sum();
+
+    GnucashBook {
+        accounts: tree,
+        net_assets,
+        raw_accounts,
+        raw_txns,
+        raw_splits,
+    }
+}
+
 impl fmt::Display for GnucashBook {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write_tree(f, &self.accounts, 0)?;
@@ -187,27 +242,12 @@ impl GnucashBook {
         let txns = book.transactions().await?;
         let splits = book.splits().await?;
 
-        let mut guid_to_idx: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-        for (i, acc) in accounts.iter().enumerate() {
-            guid_to_idx.insert(acc.guid.clone(), i);
-        }
-
         let mut balances = vec![rucash::Num::from(0); accounts.len()];
         for (i, acc) in accounts.iter().enumerate() {
             if acc.commodity_guid.is_empty() {
                 continue;
             }
             balances[i] = acc.balance(book).await?;
-        }
-
-        let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); accounts.len()];
-        let mut roots = Vec::new();
-        for (i, acc) in accounts.iter().enumerate() {
-            match guid_to_idx.get(&acc.parent_guid) {
-                Some(&parent_idx) => children_of[parent_idx].push(i),
-                None => roots.push(i),
-            }
         }
 
         let raw_accounts: Vec<RawAccount> = accounts
@@ -219,29 +259,6 @@ impl GnucashBook {
                 parent_guid: a.parent_guid.clone(),
             })
             .collect();
-
-        let tree: Vec<AccountNode> = roots
-            .iter()
-            .map(|&idx| build_tree_from_raw(&raw_accounts, &balances, &children_of, idx))
-            .collect();
-
-        let top_level: Vec<usize> = roots
-            .iter()
-            .flat_map(|&idx| &children_of[idx])
-            .copied()
-            .collect();
-
-        let net_assets: rucash::Num = top_level
-            .iter()
-            .map(|&idx| {
-                let account_type = AccountType::try_from(raw_accounts[idx].r#type.as_str())
-                    .unwrap_or(AccountType::Expense);
-                (account_type, &balances[idx])
-            })
-            .filter(|(t, _)| t.is_balance_sheet())
-            .map(|(_, bal)| bal)
-            .sum();
-
         let raw_txns: Vec<RawTransaction> = txns
             .iter()
             .map(|t| RawTransaction {
@@ -258,13 +275,7 @@ impl GnucashBook {
             })
             .collect();
 
-        Ok(GnucashBook {
-            accounts: tree,
-            net_assets,
-            raw_accounts,
-            raw_txns,
-            raw_splits,
-        })
+        Ok(assemble(raw_accounts, balances, raw_txns, raw_splits))
     }
 
     pub async fn try_from_sqlite_book(
@@ -274,27 +285,12 @@ impl GnucashBook {
         let txns = book.transactions().await?;
         let splits = book.splits().await?;
 
-        let mut guid_to_idx: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-        for (i, acc) in accounts.iter().enumerate() {
-            guid_to_idx.insert(acc.guid.clone(), i);
-        }
-
         let mut balances = vec![rucash::Num::from(0); accounts.len()];
         for (i, acc) in accounts.iter().enumerate() {
             if acc.commodity_guid.is_empty() {
                 continue;
             }
             balances[i] = acc.balance(book).await?;
-        }
-
-        let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); accounts.len()];
-        let mut roots = Vec::new();
-        for (i, acc) in accounts.iter().enumerate() {
-            match guid_to_idx.get(&acc.parent_guid) {
-                Some(&parent_idx) => children_of[parent_idx].push(i),
-                None => roots.push(i),
-            }
         }
 
         let raw_accounts: Vec<RawAccount> = accounts
@@ -306,29 +302,6 @@ impl GnucashBook {
                 parent_guid: a.parent_guid.clone(),
             })
             .collect();
-
-        let tree: Vec<AccountNode> = roots
-            .iter()
-            .map(|&idx| build_tree_from_raw(&raw_accounts, &balances, &children_of, idx))
-            .collect();
-
-        let top_level: Vec<usize> = roots
-            .iter()
-            .flat_map(|&idx| &children_of[idx])
-            .copied()
-            .collect();
-
-        let net_assets: rucash::Num = top_level
-            .iter()
-            .map(|&idx| {
-                let account_type = AccountType::try_from(raw_accounts[idx].r#type.as_str())
-                    .unwrap_or(AccountType::Expense);
-                (account_type, &balances[idx])
-            })
-            .filter(|(t, _)| t.is_balance_sheet())
-            .map(|(_, bal)| bal)
-            .sum();
-
         let raw_txns: Vec<RawTransaction> = txns
             .iter()
             .map(|t| RawTransaction {
@@ -345,13 +318,7 @@ impl GnucashBook {
             })
             .collect();
 
-        Ok(GnucashBook {
-            accounts: tree,
-            net_assets,
-            raw_accounts,
-            raw_txns,
-            raw_splits,
-        })
+        Ok(assemble(raw_accounts, balances, raw_txns, raw_splits))
     }
 
     pub async fn try_from_gnucash_file(path: &str) -> Result<Self, GnucashError> {
@@ -409,44 +376,7 @@ impl GnucashBook {
             }
         }
 
-        let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); raw_accounts.len()];
-        let mut roots = Vec::new();
-        for (i, acc) in raw_accounts.iter().enumerate() {
-            match guid_to_idx.get(&acc.parent_guid) {
-                Some(&parent_idx) => children_of[parent_idx].push(i),
-                None => roots.push(i),
-            }
-        }
-
-        let tree: Vec<AccountNode> = roots
-            .iter()
-            .map(|&idx| build_tree_from_raw(&raw_accounts, &balances, &children_of, idx))
-            .collect();
-
-        let top_level: Vec<usize> = roots
-            .iter()
-            .flat_map(|&idx| &children_of[idx])
-            .copied()
-            .collect();
-
-        let net_assets: rucash::Num = top_level
-            .iter()
-            .map(|&idx| {
-                let account_type = AccountType::try_from(raw_accounts[idx].r#type.as_str())
-                    .unwrap_or(AccountType::Expense);
-                (account_type, &balances[idx])
-            })
-            .filter(|(t, _)| t.is_balance_sheet())
-            .map(|(_, bal)| bal)
-            .sum();
-
-        GnucashBook {
-            accounts: tree,
-            net_assets,
-            raw_accounts,
-            raw_txns,
-            raw_splits,
-        }
+        assemble(raw_accounts, balances, raw_txns, raw_splits)
     }
 
     pub fn raw_accounts(&self) -> &[RawAccount] {
