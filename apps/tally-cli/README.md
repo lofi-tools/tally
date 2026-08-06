@@ -67,7 +67,7 @@ against the environment and the Companies House API.
 | `accounts.period.start` | date (optional) | none — the two dates must be given together; otherwise the period is deduced from `accounts.accounts_made_up_to` or the Companies House next period |
 | `accounts.period.end` | date (optional) | none — see `accounts.period.start` |
 | `accounts.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
-| `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 — the tax regime derives from the year (flat 19% up to FY2022/23, marginal relief from FY2023/24) |
+| `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 — the tax regime derives from the year (flat 19% up to FY2022/23, marginal relief from FY2023/24); profits and limits are time-apportioned between the years (see [Corporation-tax calculation](#corporation-tax-calculation)) |
 | `accounts.report_date` | date (required) | the publication date — cannot be inferred |
 | `accounts.authorised_date` | date (required) | the authorisation date — cannot be inferred |
 | `accounts.signed_by` | string (optional) | defaults to the first director |
@@ -107,6 +107,30 @@ From the libraries' `Default` implementations (no config hook yet):
 | Principal contact | `Ms Sarah McAcre`, sarah@example.org |
 | Financial years | FY1 2019, FY2 2020 (`AccountsMeta` defaults); the tax regime derives from the year — flat 19% up to FY2022/23, marginal relief from FY2023/24 |
 | Declaration (boxes 975 / 985) | contact name / `Director`; box 980 (date) = today |
+
+### Corporation-tax calculation
+
+Each financial year is taxed under the regime for that year — the rate is
+derived from `accounts.fy1_year` / `fy2_year`, never configured:
+
+- **FY2022/23 and earlier** — a flat 19% on all profits;
+- **FY2023/24 onwards** — marginal relief: 19% on profits up to £50,000, a
+  band between £50,000 and £250,000 taxed at 25% less a relief that tapers
+  the effective rate between the two (fraction 3/200), and 25% above
+  £250,000.
+
+The accounting period usually spans two financial years (the split is 31
+March of the second year).  In that case the profits *and* the limits are
+time-apportioned between the years by days: each year's share of the profit
+is taxed under its own regime against its own scaled limits, independently
+of the other year — the profit of one financial year does not reduce the
+other's thresholds.
+
+Sources: the rates, limits and the 3/200 fraction are set out in
+[HMRC CTM03910](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03910);
+the time-apportionment of profits follows CTA 2010 s.8; the proportional
+reduction of the limits for a period straddling two financial years is
+described in [HMRC CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955).
 
 ### Resolving the company identity
 

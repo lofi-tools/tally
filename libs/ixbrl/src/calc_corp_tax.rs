@@ -15,6 +15,13 @@
 //! (the fraction of the accounting period falling in that financial year)
 //! that scales the limits.  The profit of one financial year does **not**
 //! reduce the other's thresholds.
+//!
+//! Sources: the rates, limits and the 3/200 fraction are set out in
+//! [HMRC CTM03910](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03910);
+//! the time-apportionment of profits between financial years follows CTA
+//! 2010 s.8; the proportional reduction of the limits for a period
+//! straddling two financial years is described in
+//! [HMRC CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955).
 
 /// The outcome of a single tax calculation: the taxable profit, the tax at
 /// the main rate, the marginal relief (zero for the flat-rate regime), the
@@ -89,12 +96,12 @@ impl CorpTaxCalc for FlatRate {
 
 /// The current calculation (FY2023/24 onwards): a small-profits rate up to
 /// the lower limit, a marginal-relief band between the limits, and the main
-/// rate above the upper limit.
+/// rate above the upper limit (CTA 2010 s.18B; [HMRC CTM03910](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03910)).
 ///
 /// Marginal relief: `tax = profit × main rate − (upper limit − profit) ×
 /// relief fraction`.  The limits are shared between the financial years of
 /// a return and time-apportioned per year through the `limit_scale`
-/// argument of [`CorpTaxCalc::tax`].
+/// argument of [`CorpTaxCalc::tax`] ([HMRC CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarginalRelief {
     /// Lower limit, below which the small-profits rate applies (£50,000).

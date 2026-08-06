@@ -147,6 +147,13 @@ fn round2(v: f64) -> f64 {
 /// Split a period into the days in FY1 (up to and including `split_end`)
 /// and the days in FY2 (after it).  `split_end` is 31 March of the second
 /// financial year.
+///
+/// The split drives the per-financial-year tax calculation: each year's
+/// profit is time-apportioned across the days (CTA 2010 s.8) and each
+/// year's marginal-relief limits are scaled by that year's share of the
+/// period ([HMRC CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955)),
+/// so every year is taxed independently under its own regime.  The profit
+/// of one financial year does **not** reduce the other's thresholds.
 fn fy_day_split(period: AccountingPeriod, split_end: chrono::NaiveDate) -> (i64, i64) {
     let total_days = (period.end - period.start).num_days() + 1;
     let fy1_days = {
@@ -335,7 +342,7 @@ impl Frs105CorpTax {
         let fy2_profit = (profits_chargeable * fy2_days as f64 / total_days as f64).round();
         // Each financial year is taxed under its own regime (flat 19% for
         // FY2022/23 and earlier, marginal relief from FY2023/24), with the
-        // limits time-apportioned between the years.
+        // limits time-apportioned between the years (see [`fy_day_split`]).
         let fy1_calc_result =
             for_fy(accounts.fy1_year).tax(fy1_profit, fy1_days as f64 / total_days as f64);
         let fy2_calc_result =
