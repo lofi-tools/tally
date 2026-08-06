@@ -214,3 +214,4 @@ The UTR can also come from `COMPANY_UNIQUE_TAXPAYER_REF`, which wins over
 - https://www.gov.uk/government/collections/corporation-tax-online-support-for-software-developers
 - [HMRC CT Inline XBRL Style Guide](https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/434588/xbrl-style-guide.pdf)
 - [Local Test Service](https://www.gov.uk/government/publications/local-test-service-and-lts-update-manager)
+- [Corporation tax iXBRL (2018)](https://assets.publishing.service.gov.uk/media/5d84bef7e5274a27c2c6d5aa/CT_Online_XBRL_Technical_Pack_2.0.pdf#2#1)
