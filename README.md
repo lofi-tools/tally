@@ -123,7 +123,9 @@ Tax reference is never resolved from Companies House.)
 
 See [tally-cli README](apps/tally-cli/README.md#configuration) for detailed config options.
 
-- **CLI flags** — `--config-path`, `--book`, `--out` required; `--accounts-made-up-to` optional.
+- **CLI flags** — `--config-path`, `--book` required; `--out` optional
+  (defaults to the tally repo's `.cache/tally-cli` when run from the
+  checkout, else `~/.cache/tally-cli`); `--accounts-made-up-to` optional.
 - **Company identity** (`company.*`) — optional. Name, registration date and
   number come from Companies House when an API key is set (`COMPANY_NUMBER`
   wins for the number).

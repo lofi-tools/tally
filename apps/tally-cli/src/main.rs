@@ -5,7 +5,7 @@
 //! corporation-tax return:
 //!
 //! ```text
-//! tally ct600 --config-path <config> --book <book> --out <dir>
+//! tally ct600 --config-path <config> --book <book> [--out <dir>]
 //! ```
 //!
 //! * `--config-path` — the JSON config (see
@@ -17,8 +17,10 @@
 //!   first still-missing input errors with how to resolve it (see
 //!   [`config`]);
 //! * `--book` — the GnuCash ledger (`input.gnucash`);
-//! * `--out` — the output directory; the CT600 GovTalk message is written
-//!   to `<out>/ct600.xml`.
+//! * `--out` — the output directory (optional; defaults to the tally
+//!   repo's `.cache/tally-cli` when run from the checkout, else
+//!   `~/.cache/tally-cli`); the CT600 GovTalk message is written to
+//!   `<out>/ct600-<company-number>.xml`.
 
 mod config;
 
@@ -95,13 +97,15 @@ fn parse_ct600_args() -> Result<CliArgs> {
 }
 
 const USAGE: &str = "\
-usage: tally ct600 --config-path <config> --book <book> --out <dir> [--accounts-made-up-to <date>]
+usage: tally ct600 --config-path <config> --book <book> [--out <dir>] [--accounts-made-up-to <date>]
 
 Produce (not submit) the CT600 corporation-tax return.
 
   --config-path <config>    JSON config: company + accounts metadata
   --book <book>             GnuCash ledger (input.gnucash)
-  --out <dir>               output directory; writes <dir>/ct600.xml
+  --out <dir>               output directory (default: the tally repo's
+                            .cache/tally-cli, else ~/.cache/tally-cli);
+                            writes <dir>/ct600-<company-number>.xml
   --accounts-made-up-to <date>
                             date at which the accounts are made (YYYY-MM-DD);
                             deduce the return period as the 12 months ending
@@ -194,8 +198,7 @@ async fn run_ct600(args: CliArgs) -> Result<()> {
     let out_path = resolved
         .out_dir
         .join(format!("ct600-{}.xml", resolved.company.company_number));
-    std::fs::write(&out_path, xml)
-        .with_context(|| format!("write '{}'", out_path.display()))?;
+    std::fs::write(&out_path, xml).with_context(|| format!("write '{}'", out_path.display()))?;
     println!("wrote {}", out_path.display());
 
     Ok(())

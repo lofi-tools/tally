@@ -31,7 +31,8 @@
 //! | `accounts.average_employees` | config file (optional) → defaults to 1 for each of the two financial years |
 //! | `accounts.incorporation_date` | config file → Companies House profile when absent |
 //! | `accounts.*` taxonomy dimensions | defaulted to the values fixed for this report |
-//! | `--book`, `--out` | command line only |
+//! | `--book` | command line only (required) |
+//! | `--out` | command line (optional) → the tally repo's `.cache/tally-cli` when run from the checkout, else `~/.cache/tally-cli` |
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -460,7 +461,9 @@ pub struct CliArgs {
     pub accounts_made_up_to: Option<NaiveDate>,
     /// The `--book` value (required; no other source).
     pub book_path: Option<PathBuf>,
-    /// The `--out` value (required; no other source).
+    /// The `--out` value (optional; defaults to the tally repo's
+    /// `.cache/tally-cli` when run from the checkout, else
+    /// `~/.cache/tally-cli`).
     pub out_dir: Option<PathBuf>,
 }
 
@@ -745,7 +748,9 @@ impl ConfigBuilder {
         ))
     }
 
-    /// The required CLI paths, `--book` and `--out` (no alternative source).
+    /// The CLI paths: `--book` (required — no alternative source) and
+    /// `--out` (optional; defaults to the tally repo's `.cache/tally-cli`
+    /// when run from the checkout, else `~/.cache/tally-cli`).
     fn resolve_paths(&self) -> Result<(PathBuf, PathBuf)> {
         let book_path = self.cli.book_path.clone().ok_or_else(|| {
             missing(
@@ -755,16 +760,41 @@ impl ConfigBuilder {
                  set the --book flag",
             )
         })?;
-        let out_dir = self.cli.out_dir.clone().ok_or_else(|| {
-            missing(
-                &self.cli.config_path,
-                "--out",
-                "the output directory cannot be resolved from the environment; \
-                 set the --out flag",
-            )
-        })?;
+        let out_dir = self.cli.out_dir.clone().unwrap_or_else(default_out_dir);
         Ok((book_path, out_dir))
     }
+}
+
+/// The default output directory when `--out` is omitted: the tally repo's
+/// `.cache/tally-cli` when run from inside the checkout (so the outputs
+/// land where the repo's other tooling looks), else `~/.cache/tally-cli`.
+fn default_out_dir() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    default_out_dir_from(&cwd, &home_dir())
+}
+
+/// The `--out` default for a given working directory and home directory:
+/// the tally workspace's `.cache/tally-cli` when `cwd` sits inside the
+/// checkout, else `<home>/.cache/tally-cli`.
+fn default_out_dir_from(cwd: &Path, home: &Path) -> PathBuf {
+    repo_root_from(cwd)
+        .map(|root| root.join(".cache/tally-cli"))
+        .unwrap_or_else(|| home.join(".cache/tally-cli"))
+}
+
+/// Walk up from `dir` looking for the tally workspace root: the directory
+/// holding the root `Cargo.toml` and the `apps/tally-cli` crate.
+fn repo_root_from(dir: &Path) -> Option<PathBuf> {
+    dir.ancestors()
+        .find(|d| d.join("Cargo.toml").is_file() && d.join("apps/tally-cli").is_dir())
+        .map(Path::to_path_buf)
+}
+
+/// The user's home directory (`$HOME`; `.` when unset).
+fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Fetch the company's profile at most once per build (cache-first); later
@@ -802,7 +832,7 @@ pub struct ResolvedInputs {
     /// The GnuCash ledger to read.
     pub book_path: PathBuf,
     /// The output directory; the CT600 GovTalk message is written to
-    /// `<out>/ct600.xml`.
+    /// `<out>/ct600-<company-number>.xml`.
     pub out_dir: PathBuf,
     /// Which Companies House API the config will use: live or sandbox,
     /// depending on which key is set; `None` when no key is configured.
@@ -1026,10 +1056,29 @@ mod tests {
         assert_eq!(company.name, "Example Biz Ltd.");
     }
 
+    /// The `--out` default: inside the tally checkout the repo's
+    /// `.cache/tally-cli` is used; elsewhere `<home>/.cache/tally-cli`.
+    #[test]
+    fn default_out_dir_prefers_repo_then_home() {
+        let cwd = std::env::current_dir().unwrap();
+        let repo = repo_root_from(&cwd).expect("the tests run inside the tally repo");
+        assert_eq!(
+            default_out_dir_from(&repo.join("apps/tally-cli"), Path::new("/tmp/home")),
+            repo.join(".cache/tally-cli")
+        );
+
+        let elsewhere = Path::new("/tmp/elsewhere");
+        assert_eq!(repo_root_from(elsewhere), None);
+        assert_eq!(
+            default_out_dir_from(elsewhere, Path::new("/tmp/home")),
+            PathBuf::from("/tmp/home/.cache/tally-cli")
+        );
+    }
+
     /// End-to-end through the per-source types: the example config file
     /// parses into a [`ConfigFile`], and a [`ConfigBuilder`] resolves it —
-    /// erroring on the first missing CLI path, succeeding once both are
-    /// present.
+    /// erroring on the missing `--book`, defaulting `--out` when absent and
+    /// succeeding once the book is present.
     #[tokio::test]
     async fn ct600_config_resolves_and_requires_paths() {
         let path = Path::new("../../libs/ixbrl/example_data/example2/input_config.json");
@@ -1075,27 +1124,23 @@ mod tests {
             "resolution fails fast on the first missing path: {msg}"
         );
 
-        // With only one path present, the error names the missing one.
+        // With `--book` but no `--out`, the output directory defaults to
+        // the conditional default instead of erroring.
         let cli = CliArgs {
             config_path: path.to_path_buf(),
             accounts_made_up_to: None,
             book_path: Some(PathBuf::from("input.gnucash")),
             out_dir: None,
         };
-        let err = ConfigBuilder {
+        let resolved = ConfigBuilder {
             env: empty_env.clone(),
             file: file.clone(),
             cli,
         }
         .build()
         .await
-        .expect_err("missing --out must error");
-        let msg = format!("{err:#}");
-        assert!(msg.contains("--out"), "{msg}");
-        assert!(
-            !msg.contains("--book"),
-            "the present path must not be reported: {msg}"
-        );
+        .expect("resolves with the default output directory");
+        assert_eq!(resolved.out_dir, default_out_dir());
 
         // With both, resolution succeeds and everything carries through.
         let cli = CliArgs {

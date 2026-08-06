@@ -23,8 +23,7 @@ limited company files with HMRC. You provide:
    with a clear error (see
    [Resolving the company identity](#resolving-the-company-identity));
 2. **Your books** (`--book`) — the GnuCash ledger (`input.gnucash`);
-3. **An output directory** (`--out`) — where the CT600 message is written
-   (`<out>/ct600-<company-number>.xml`).
+3. **An output directory** (`--out`, optional) — where to write the CT600 file; defaults to  `~/.cache/tally-cli`.
 
 From those, `tally` reads the book, builds the accounts and the
 corporation-tax calculation, and assembles everything into the CT600 XML
@@ -44,7 +43,7 @@ is optional.  There is no environment-variable fallback.
 |------|---------|
 | `--config-path <config>` | JSON config: company identity + accounts metadata |
 | `--book <book>` | GnuCash ledger (`input.gnucash`) |
-| `--out <dir>` | output directory; the CT600 message is written to `<dir>/ct600-<company-number>.xml` |
+| `--out <dir>` | output directory (optional); the CT600 message is written to `<dir>/ct600-<company-number>.xml`; defaults to the tally repo's `.cache/tally-cli` when run from the checkout, else `~/.cache/tally-cli` |
 | `--accounts-made-up-to <date>` | date at which the accounts are made (`YYYY-MM-DD`); the return period is deduced as the 12 months ending on it (wins over the config's `accounts.accounts_made_up_to`) |
 
 ### Config file

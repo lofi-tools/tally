@@ -309,13 +309,10 @@
 
           # Run our Rust tally CLI over the example2 data (config + GnuCash
           # book), writing the CT600 GovTalk message to .cache/tally-cli/ct600-<number>.xml.
-          tally-x2 = ''
-            HERE="${bash.wd}"
-            mkdir -p "$HERE/.cache/tally-cli"
+          ex2 = ''
             cargo run -p tally-cli -- ct600 \
-              --config-path "$HERE/libs/ixbrl/example_data/example2/input_config.json" \
-              --book "$HERE/libs/ixbrl/example_data/example2/input.gnucash" \
-              --out "$HERE/.cache/tally-cli"
+              --config-path "${wd}/libs/ixbrl/example_data/example2/input_config.json" \
+              --book "${wd}/libs/ixbrl/example_data/example2/input.gnucash"
           '';
           # packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
           # utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
