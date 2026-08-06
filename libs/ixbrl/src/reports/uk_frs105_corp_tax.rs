@@ -144,14 +144,29 @@ fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
+/// The number of days in the financial year starting 1 April of year `fy`
+/// (ending 31 March of `fy + 1`): 365, or 366 when `fy + 1` is a leap
+/// year.  The marginal-relief limits are apportioned by reference to this
+/// count (HMRC CTM03955), whereas profits are apportioned by the length of
+/// the accounting period (CTA 2010 s.8).
+fn days_in_fy(fy: i32) -> i64 {
+    if chrono::NaiveDate::from_ymd_opt(fy + 1, 2, 29).is_some() {
+        366
+    } else {
+        365
+    }
+}
+
 /// Split a period into the days in FY1 (up to and including `split_end`)
 /// and the days in FY2 (after it).  `split_end` is 31 March of the second
-/// financial year.
+/// financial year.  Actual calendar days are counted, so a leap-year
+/// February adds a day (e.g. 1 January 2024 – 31 March 2024 is 91 days).
 ///
 /// The split drives the per-financial-year tax calculation: each year's
-/// profit is time-apportioned across the days (CTA 2010 s.8) and each
-/// year's marginal-relief limits are scaled by that year's share of the
-/// period ([HMRC CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955)),
+/// profit is time-apportioned across the days of the accounting period
+/// (CTA 2010 s.8), while each year's marginal-relief limits are scaled by
+/// the part's share of *its* financial year (see [`days_in_fy`];
+/// [HMRC CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955)),
 /// so every year is taxed independently under its own regime.  The profit
 /// of one financial year does **not** reduce the other's thresholds.
 fn fy_day_split(period: AccountingPeriod, split_end: chrono::NaiveDate) -> (i64, i64) {
@@ -341,12 +356,18 @@ impl Frs105CorpTax {
         let fy1_profit = (profits_chargeable * fy1_days as f64 / total_days as f64).round();
         let fy2_profit = (profits_chargeable * fy2_days as f64 / total_days as f64).round();
         // Each financial year is taxed under its own regime (flat 19% for
-        // FY2022/23 and earlier, marginal relief from FY2023/24), with the
-        // limits time-apportioned between the years (see [`fy_day_split`]).
-        let fy1_calc_result =
-            for_fy(accounts.fy1_year).tax(fy1_profit, fy1_days as f64 / total_days as f64);
-        let fy2_calc_result =
-            for_fy(accounts.fy2_year).tax(fy2_profit, fy2_days as f64 / total_days as f64);
+        // FY2022/23 and earlier, marginal relief from FY2023/24).  The
+        // profits are split by days across the accounting period (CTA 2010
+        // s.8) and the limits by each part's share of its financial year
+        // (see [`days_in_fy`] / [`fy_day_split`]).
+        let fy1_calc_result = for_fy(accounts.fy1_year).tax(
+            fy1_profit,
+            fy1_days as f64 / days_in_fy(accounts.fy1_year) as f64,
+        );
+        let fy2_calc_result = for_fy(accounts.fy2_year).tax(
+            fy2_profit,
+            fy2_days as f64 / days_in_fy(accounts.fy2_year) as f64,
+        );
         let fy1_tax = fy1_calc_result.corporation_tax;
         let fy2_tax = fy2_calc_result.corporation_tax;
         let corporation_tax_chargeable = round2(fy1_tax + fy2_tax);
@@ -422,10 +443,14 @@ impl Frs105CorpTax {
             (prev_profit_chargeable * prev_fy1_days as f64 / prev_total_days as f64).round();
         let prev_fy2_profit =
             (prev_profit_chargeable * prev_fy2_days as f64 / prev_total_days as f64).round();
-        let prev_fy1_calc_result = for_fy(accounts.fy1_year - 1)
-            .tax(prev_fy1_profit, prev_fy1_days as f64 / prev_total_days as f64);
-        let prev_fy2_calc_result = for_fy(accounts.fy2_year - 1)
-            .tax(prev_fy2_profit, prev_fy2_days as f64 / prev_total_days as f64);
+        let prev_fy1_calc_result = for_fy(accounts.fy1_year - 1).tax(
+            prev_fy1_profit,
+            prev_fy1_days as f64 / days_in_fy(accounts.fy1_year - 1) as f64,
+        );
+        let prev_fy2_calc_result = for_fy(accounts.fy2_year - 1).tax(
+            prev_fy2_profit,
+            prev_fy2_days as f64 / days_in_fy(accounts.fy2_year - 1) as f64,
+        );
         let prev_fy1_tax = prev_fy1_calc_result.corporation_tax;
         let prev_fy2_tax = prev_fy2_calc_result.corporation_tax;
         let prev_corporation_tax_chargeable = round2(prev_fy1_tax + prev_fy2_tax);
@@ -957,22 +982,23 @@ impl Frs105CorpTax {
         let prev_profit_chargeable = num("ct-comp:NetTradingProfits", "ctxt-16");
 
         // The tax regimes derive from the financial years; the limits are
-        // time-apportioned across the return period, as in `from_splits`.
+        // scaled by each part's share of its financial year, as in
+        // `from_splits`.
         let (fy1_days, fy2_days) =
             fy_day_split(period, chrono::NaiveDate::from_ymd_opt(fy2_year, 3, 31).unwrap());
-        let total_days = fy1_days + fy2_days;
-        let fy1_calc_result = for_fy(fy1_year).tax(fy1_profit, fy1_days as f64 / total_days as f64);
-        let fy2_calc_result = for_fy(fy2_year).tax(fy2_profit, fy2_days as f64 / total_days as f64);
+        let fy1_calc_result = for_fy(fy1_year)
+            .tax(fy1_profit, fy1_days as f64 / days_in_fy(fy1_year) as f64);
+        let fy2_calc_result = for_fy(fy2_year)
+            .tax(fy2_profit, fy2_days as f64 / days_in_fy(fy2_year) as f64);
         let prev_period = period.previous();
         let (prev_fy1_days, prev_fy2_days) = fy_day_split(
             prev_period,
             chrono::NaiveDate::from_ymd_opt(fy2_year - 1, 3, 31).unwrap(),
         );
-        let prev_total_days = prev_fy1_days + prev_fy2_days;
         let prev_fy1_calc_result = for_fy(fy1_year - 1)
-            .tax(prev_fy1_profit, prev_fy1_days as f64 / prev_total_days as f64);
+            .tax(prev_fy1_profit, prev_fy1_days as f64 / days_in_fy(fy1_year - 1) as f64);
         let prev_fy2_calc_result = for_fy(fy2_year - 1)
-            .tax(prev_fy2_profit, prev_fy2_days as f64 / prev_total_days as f64);
+            .tax(prev_fy2_profit, prev_fy2_days as f64 / days_in_fy(fy2_year - 1) as f64);
 
         let marginal_relief = num(
             "ct-comp:MarginalRateReliefForRingFenceTradesPayable",
@@ -2943,7 +2969,9 @@ mod tests {
         let (fy1_days, fy2_days) =
             fy_day_split(period, chrono::NaiveDate::from_ymd_opt(2023, 3, 31).unwrap());
         assert_eq!((fy1_days, fy2_days), (90, 275));
-        let limit_scale = fy2_days as f64 / (fy1_days + fy2_days) as f64;
+        // The limits are scaled by the FY2 part's share of its financial
+        // year — FY2023/24 is a leap year, so 275/366 (HMRC CTM03955).
+        let limit_scale = fy2_days as f64 / days_in_fy(accounts.fy2_year) as f64;
 
         // Profits apportioned by days; the £120,000 lands £29,589 in FY1
         // and £90,411 in FY2.
@@ -2957,9 +2985,9 @@ mod tests {
         assert_eq!(ct.fy1_tax, 5_621.91);
 
         // FY2 is a marginal-relief year.  The £50k/£250k limits are scaled
-        // by the FY2 share of the period (£37,671.23 / £188,356.16), so
-        // £90,411 falls in the marginal band: tax at 25% less a relief
-        // computed against the *apportioned* upper limit.
+        // by the FY2 part's share of its financial year (£37,568.31 /
+        // £187,841.53), so £90,411 falls in the marginal band: tax at 25%
+        // less a relief computed against the *apportioned* upper limit.
         let apportioned_lower = 50_000.0 * limit_scale;
         let apportioned_upper = 250_000.0 * limit_scale;
         assert!(
@@ -2969,9 +2997,9 @@ mod tests {
         assert_eq!(ct.fy2_calc_result.tax_at_main_rate, 22_602.75);
         let expected_relief = round2((apportioned_upper - ct.fy2_profit) * 3.0 / 200.0);
         assert_eq!(ct.fy2_calc_result.marginal_relief, expected_relief);
-        assert_eq!(ct.fy2_calc_result.marginal_relief, 1_469.18);
-        assert_eq!(ct.fy2_calc_result.corporation_tax, 21_133.57);
-        assert_eq!(ct.fy2_calc_result.effective_rate, 23.37);
+        assert_eq!(ct.fy2_calc_result.marginal_relief, 1_461.46);
+        assert_eq!(ct.fy2_calc_result.corporation_tax, 21_141.29);
+        assert_eq!(ct.fy2_calc_result.effective_rate, 23.38);
         // Against the full, unapportioned £250,000 limit the relief would be
         // £2,393.84 — the apportionment is what the code under test
         // produces, and it must differ.
@@ -2991,7 +3019,7 @@ mod tests {
                 .unwrap_or(0.0)
         };
         assert_eq!(fact("ct-comp:FY1FirstRateOfTax"), 19.0);
-        assert_eq!(fact("ct-comp:FY2FirstRateOfTax"), 23.37);
+        assert_eq!(fact("ct-comp:FY2FirstRateOfTax"), 23.38);
         // The tax-calculation worksheet breaks the FY2 tax into the main
         // rate less the marginal relief (the FY1 rows are zero for the
         // flat-rate year).
@@ -3002,11 +3030,11 @@ mod tests {
         // The negative cell renders across separate spans, so assert on the
         // unique formatted values rather than the parenthesised whole.
         assert!(html.contains("22,602.75")); // FY2 tax at the main rate
-        assert!(html.contains("1,469.18")); // FY2 marginal relief
+        assert!(html.contains("1,461.46")); // FY2 marginal relief
         assert!(html.contains("5,621.91")); // FY1 tax at the flat rate
-        assert!(html.contains("21,133.57")); // FY2 tax after relief
+        assert!(html.contains("21,141.29")); // FY2 tax after relief
         assert!(html.contains("FY1 (19%)"));
-        assert!(html.contains("FY2 (23.37%)"));
+        assert!(html.contains("FY2 (23.38%)"));
     }
 
     /// A minimal pre-parsed book: a single UK-sales transaction of `amount`
@@ -3061,13 +3089,17 @@ mod tests {
 
     /// Companion to the FY2022/23–FY2023/24 straddle test: a period in
     /// which *both* financial years fall in the marginal-relief era
-    /// (FY2023/24 onwards), so both years' limits are time-apportioned and
-    /// both worksheet breakdowns are non-zero.
+    /// (FY2023/24 onwards), so both years' limits are apportioned and both
+    /// worksheet breakdowns are non-zero.
     ///
-    /// Because the profit and the limits are scaled by the same day
-    /// fraction, each year's position within its band matches the whole
-    /// period's: £150,000 sits at 60% of the £250,000 upper limit, so both
-    /// years show the same 24% effective rate.
+    /// 2024 is a leap year, so the two parts sit in financial years with
+    /// different day counts: the FY1 part (1 Jan – 31 Mar 2024, 91 days)
+    /// falls in the 366-day FY2023/24 and the FY2 part (275 days) in the
+    /// 365-day FY2024/25.  Each part's limits are scaled by its share of
+    /// its own financial year (HMRC CTM03955).  Profit and limits are
+    /// scaled by the same fraction within each part, so both years land at
+    /// 60% of their apportioned upper limit and show the same ~24%
+    /// effective rate (24.0 and 23.99 — the difference is rounding).
     #[test]
     fn test_straddling_fy2023_24_to_fy2024_25_apportions_both_years_limits() {
         let gnucash =
@@ -3091,19 +3123,24 @@ mod tests {
         let period = accounts.period();
         let (fy1_days, fy2_days) =
             fy_day_split(period, chrono::NaiveDate::from_ymd_opt(2024, 3, 31).unwrap());
-        assert_eq!((fy1_days, fy2_days), (90, 275));
-        let fy1_scale = fy1_days as f64 / (fy1_days + fy2_days) as f64;
-        let fy2_scale = fy2_days as f64 / (fy1_days + fy2_days) as f64;
+        // 2024 is a leap year: 91 days in FY1 (1 Jan – 31 Mar inclusive)
+        // and 275 in FY2.  Each part's limits are scaled by its share of
+        // its own financial year — FY2023/24 has 366 days, FY2024/25 has
+        // 365 (HMRC CTM03955).
+        assert_eq!((fy1_days, fy2_days), (91, 275));
+        let fy1_scale = fy1_days as f64 / days_in_fy(accounts.fy1_year) as f64;
+        let fy2_scale = fy2_days as f64 / days_in_fy(accounts.fy2_year) as f64;
 
         // Profits apportioned by days; the £150,000 lands £36,986 in FY1
         // and £113,014 in FY2.
         assert_eq!(ct.profits_chargeable_to_corporation_tax, 150_000.0);
-        assert_eq!(ct.fy1_profit, 36_986.0);
-        assert_eq!(ct.fy2_profit, 113_014.0);
+        assert_eq!(ct.fy1_profit, 37_295.0);
+        assert_eq!(ct.fy2_profit, 112_705.0);
 
         // Both years run marginal relief against their *own* apportioned
-        // limits (£12,328.77/£61,643.84 for FY1; £37,671.23/£188,356.16
-        // for FY2), and both apportioned profits land in the marginal band.
+        // limits (£12,431.69/£62,158.47 for FY1 in the leap-year
+        // FY2023/24; £37,671.23/£188,356.16 for FY2 in FY2024/25), and
+        // both apportioned profits land in the marginal band.
         let fy1_lower = 50_000.0 * fy1_scale;
         let fy1_upper = 250_000.0 * fy1_scale;
         let fy2_lower = 50_000.0 * fy2_scale;
@@ -3117,35 +3154,36 @@ mod tests {
             "FY2 profit sits in its apportioned marginal band"
         );
 
-        // FY1: 25% of £36,986 less relief against the £61,643.84 limit.
-        assert_eq!(ct.fy1_calc_result.tax_at_main_rate, 9_246.50);
+        // FY1: 25% of £37,295 less relief against the £62,158.47 limit.
+        assert_eq!(ct.fy1_calc_result.tax_at_main_rate, 9_323.75);
         assert_eq!(
             ct.fy1_calc_result.marginal_relief,
             round2((fy1_upper - ct.fy1_profit) * 3.0 / 200.0)
         );
-        assert_eq!(ct.fy1_calc_result.marginal_relief, 369.87);
-        assert_eq!(ct.fy1_calc_result.corporation_tax, 8_876.63);
+        assert_eq!(ct.fy1_calc_result.marginal_relief, 372.95);
+        assert_eq!(ct.fy1_calc_result.corporation_tax, 8_950.80);
 
-        // FY2: 25% of £113,014 less relief against the £188,356.16 limit.
-        assert_eq!(ct.fy2_calc_result.tax_at_main_rate, 28_253.50);
+        // FY2: 25% of £112,705 less relief against the £188,356.16 limit.
+        assert_eq!(ct.fy2_calc_result.tax_at_main_rate, 28_176.25);
         assert_eq!(
             ct.fy2_calc_result.marginal_relief,
             round2((fy2_upper - ct.fy2_profit) * 3.0 / 200.0)
         );
-        assert_eq!(ct.fy2_calc_result.marginal_relief, 1_130.13);
-        assert_eq!(ct.fy2_calc_result.corporation_tax, 27_123.37);
+        assert_eq!(ct.fy2_calc_result.marginal_relief, 1_134.77);
+        assert_eq!(ct.fy2_calc_result.corporation_tax, 27_041.48);
 
-        // Scale-invariance: profit and limits are apportioned by the same
-        // day fraction, so both years land at 60% of their upper limit and
-        // show the same 24% effective rate as the whole period.
+        // Profit and limits are scaled by the same fraction within each
+        // part, so both years land at 60% of their apportioned upper limit
+        // and show the same ~24% effective rate; the rounding of the
+        // apportioned profits separates them (24.0 vs 23.99).
         assert_eq!(ct.fy1_calc_result.effective_rate, 24.0);
-        assert_eq!(ct.fy2_calc_result.effective_rate, 24.0);
+        assert_eq!(ct.fy2_calc_result.effective_rate, 23.99);
         // Unapportioned limits would give FY1 a far larger relief.
         assert_ne!(
             ct.fy1_calc_result.marginal_relief,
             round2((250_000.0 - ct.fy1_profit) * 3.0 / 200.0)
         );
-        assert_eq!(ct.corporation_tax_chargeable, 36_000.0);
+        assert_eq!(ct.corporation_tax_chargeable, 35_992.28);
 
         // The serialised return shows the 24% rate in both boxes and the
         // non-zero per-year breakdown in the tax-calculation worksheet.
@@ -3160,20 +3198,20 @@ mod tests {
                 .unwrap_or(0.0)
         };
         assert_eq!(fact("ct-comp:FY1FirstRateOfTax"), 24.0);
-        assert_eq!(fact("ct-comp:FY2FirstRateOfTax"), 24.0);
+        assert_eq!(fact("ct-comp:FY2FirstRateOfTax"), 23.99);
         assert!(html.contains("FY1 tax at main rate"));
         assert!(html.contains("FY1 less marginal relief"));
         assert!(html.contains("FY2 tax at main rate"));
         assert!(html.contains("FY2 less marginal relief"));
         // The negative cells render across separate spans, so assert on the
         // unique formatted values rather than the parenthesised whole.
-        assert!(html.contains("9,246.50")); // FY1 tax at the main rate
-        assert!(html.contains("369.87")); // FY1 marginal relief
-        assert!(html.contains("8,876.63")); // FY1 tax after relief
-        assert!(html.contains("28,253.50")); // FY2 tax at the main rate
-        assert!(html.contains("1,130.13")); // FY2 marginal relief
-        assert!(html.contains("27,123.37")); // FY2 tax after relief
+        assert!(html.contains("9,323.75")); // FY1 tax at the main rate
+        assert!(html.contains("372.95")); // FY1 marginal relief
+        assert!(html.contains("8,950.80")); // FY1 tax after relief
+        assert!(html.contains("28,176.25")); // FY2 tax at the main rate
+        assert!(html.contains("1,134.77")); // FY2 marginal relief
+        assert!(html.contains("27,041.48")); // FY2 tax after relief
         assert!(html.contains("FY1 (24%)"));
-        assert!(html.contains("FY2 (24%)"));
+        assert!(html.contains("FY2 (23.99%)"));
     }
 }

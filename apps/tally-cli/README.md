@@ -120,11 +120,15 @@ derived from `accounts.fy1_year` / `fy2_year`, never configured:
   £250,000.
 
 The accounting period usually spans two financial years (the split is 31
-March of the second year).  In that case the profits *and* the limits are
-time-apportioned between the years by days: each year's share of the profit
-is taxed under its own regime against its own scaled limits, independently
-of the other year — the profit of one financial year does not reduce the
-other's thresholds.
+March of the second year).  In that case the years are handled separately:
+each year's share of the profit is apportioned by days in the accounting
+period (CTA 2010 s.8), while the marginal-relief limits are scaled by the
+part's share of *its own* financial year ([HMRC CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955)
+apportions the limits by reference to the days in the financial year — it
+runs 1 April to 31 March, so a leap-year February adds a day to the share).
+Each year's profit is then taxed under its own regime against its own
+scaled limits, independently of the other year — the profit of one
+financial year does not reduce the other's thresholds.
 
 Sources: the rates, limits and the 3/200 fraction are set out in
 [HMRC CTM03910](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03910);

@@ -9,12 +9,13 @@
 //! that tapers the effective rate between the two.
 //!
 //! A return's accounting period usually spans two financial years.  The
-//! profits *and* the limits are time-apportioned between the years (by
-//! days in each), so each year's calculation runs independently:
-//! [`CorpTaxCalc::tax`] takes the apportioned profit and a `limit_scale`
-//! (the fraction of the accounting period falling in that financial year)
-//! that scales the limits.  The profit of one financial year does **not**
-//! reduce the other's thresholds.
+//! profits and the limits are time-apportioned between the years, so each
+//! year's calculation runs independently: [`CorpTaxCalc::tax`] takes the
+//! apportioned profit and a `limit_scale` (the part's share of *its own*
+//! financial year — the financial year runs 1 April to 31 March, so a
+//! leap-year February adds a day to the share) that scales the limits.
+//! The profit of one financial year does **not** reduce the other's
+//! thresholds.
 //!
 //! Sources: the rates, limits and the 3/200 fraction are set out in
 //! [HMRC CTM03910](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03910);
@@ -51,8 +52,8 @@ pub trait CorpTaxCalc {
     /// scales the limits; the flat-rate regime ignores it.
     fn rate(&self, profit: f64, limit_scale: f64) -> f64;
     /// The full calculation for an apportioned profit, with the threshold
-    /// breakdown.  `limit_scale` scales the limits (the fraction of the
-    /// accounting period in this financial year); the flat-rate regime
+    /// breakdown.  `limit_scale` scales the limits (the part's share of its
+    /// own financial year, see the module docs); the flat-rate regime
     /// ignores it.
     fn tax(&self, profit: f64, limit_scale: f64) -> CorporationTaxCalculation;
 }
