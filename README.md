@@ -144,12 +144,19 @@ In short:
   the company's next accounting period to file, resolved from the Companies
   House profile;
 - the company's descriptive profile fields (`company.*`: directors,
-  contacts, accountant/auditor, SIC codes, ...) and the accounts' report
-  metadata (`accounts.*`: report title, dates, employee counts, ...) are
-  all optional: an absent field parses to `None`, serialises back as
-  omitted, and the reports render empty values for it — leave them out (as
-  in `minimal_config.json`) or copy them from the example config below; the
-  company logo (`company.logo_b64`) is one such optional asset.
+  contacts, accountant/auditor, SIC codes, ...) are optional: an absent
+  field parses to `None`, serialises back as omitted, and the reports
+  render empty values for it — leave them out (as in `minimal_config.json`)
+  or copy them from the example config below; the company logo
+  (`company.logo_b64`) is one such optional asset;
+- the accounts' report metadata that *cannot* be inferred — the publication
+  and authorisation dates, the signatory, the employee counts and the
+  signature (`accounts.report_date`, `accounts.authorised_date`,
+  `accounts.signed_by`, `accounts.average_employees`,
+  `accounts.signature_b64`) — is **required** in the config; the return
+  period and the incorporation date remain optional (resolved from the
+  period / Companies House profile), and the accounts taxonomy dimensions
+  default to the values fixed for the report.
 
 ### Example configs
 
@@ -166,7 +173,9 @@ export COMPANY_UNIQUE_TAXPAYER_REF=8596148860
 ```
 
 Most company fields can be left out (resolved from calling Companies House API).
-You only need to fill in the accounts metadata:
+You only need to fill in the required accounts metadata (the fields that
+cannot be inferred — the dates, signatory, employee counts and signature;
+the period can be left out and is resolved from Companies House):
 
 ```json
 {
@@ -174,7 +183,12 @@ You only need to fill in the accounts metadata:
     "period": {
       "start": "2020-01-01",
       "end": "2020-12-31"
-    },      "...": "remaining accounts.* report fields (optional) — copy them from libs/ixbrl/example_data/example2/input_config.json"
+    },
+    "report_date": "2021-03-01",
+    "authorised_date": "2021-02-01",
+    "signed_by": "B Smith",
+    "average_employees": { "2020": 2, "2019": 1 },
+    "signature_b64": "",      "...": "remaining accounts.* fields — copy them from libs/ixbrl/example_data/example2/input_config.json"
   }
 }
 ```
@@ -195,7 +209,11 @@ can be resolved at runtime:
       "start": "2020-01-01",
       "end": "2020-12-31"
     },
-    "...": "remaining accounts.* report fields (optional — as in the example above)"
+    "report_date": "2021-03-01",
+    "authorised_date": "2021-02-01",
+    "signed_by": "B Smith",
+    "average_employees": { "2020": 2, "2019": 1 },
+    "signature_b64": "",      "...": "remaining accounts.* fields — as in the example above"
   }
 }
 ```

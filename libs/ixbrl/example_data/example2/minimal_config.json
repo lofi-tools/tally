@@ -1,4 +1,10 @@
 {
   "company": {},
-  "accounts": {}
+  "accounts": {
+    "report_date": "2021-03-01",
+    "authorised_date": "2021-02-01",
+    "signed_by": "",
+    "average_employees": {},
+    "signature_b64": ""
+  }
 }

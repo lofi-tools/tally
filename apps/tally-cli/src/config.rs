@@ -5,11 +5,13 @@
 //! loaded by a [`ConfigBuilder`] in precedence order (CLI flags first, the
 //! environment overriding the config file) and resolved into a strict
 //! [`ResolvedInputs`], erroring on the first field the sources cannot
-//! provide.  The config file's optional fields — the identity, the
-//! descriptive profile ([`CompanyConfig`]) and the report metadata
-//! ([`AccountsConfig`]) — are enriched here, from the environment /
-//! Companies House or to blank defaults, into the required report types
-//! ([`CompanyProfile`], [`AccountsMeta`]) before the libraries consume them.
+//! provide.  The config file's optional fields — the identity and the
+//! descriptive profile ([`CompanyConfig`]) — are enriched here, from the
+//! environment / Companies House or to blank defaults, into the required
+//! report types ([`CompanyProfile`], [`AccountsMeta`]) before the
+//! libraries consume them.  [`AccountsConfig`] carries the accounts' return
+//! period (resolvable), financial-year parameters (defaulted) and the report
+//! metadata that cannot be inferred (required in the config file).
 //!
 //! Precedence, field by field:
 //!
@@ -24,7 +26,9 @@
 //! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default |
 //! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
 //! | `company.*` profile fields (directors, contacts, accountant/auditor, ...) | config file only (optional — blank when absent) |
-//! | `accounts.*` report metadata (dates, employees, ...) | config file only (optional — blank when absent) |
+//! | `accounts.*` unguessable report metadata (report_date, authorised_date, signed_by, average_employees, signature_b64) | config file only (required) |
+//! | `accounts.incorporation_date` | config file → Companies House profile when absent |
+//! | `accounts.*` taxonomy dimensions | defaulted to the values fixed for this report |
 //! | `--book`, `--out` | command line only |
 
 use std::collections::HashMap;
@@ -116,19 +120,20 @@ fn non_empty_env(name: &str) -> Option<String> {
 /// The JSON config file's contents (`--config-path`): the nested `company`
 /// block and the `accounts` sub-object.
 ///
-/// Everything here is optional; [`ConfigBuilder::build`] enriches the
-/// missing values — from the environment / Companies House (identity) or to
-/// blank defaults (profile and report metadata) — into the required report
-/// types before the libraries consume them.
+/// The `company` block is optional — the identity is enriched from the
+/// environment / Companies House and the descriptive profile to blank
+/// defaults; the `accounts` sub-object is required, because its report
+/// metadata cannot be inferred.  [`ConfigBuilder::build`] resolves what is
+/// still missing into the required report types before the libraries
+/// consume them.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
     /// The `company` block: the optional identity fields plus the optional
     /// descriptive profile (directors, contacts, accountant/auditor, ...).
     #[serde(default)]
     pub company: CompanyConfig,
-    /// The `accounts` sub-object ([`AccountsConfig`]): the optional return
-    /// period, financial-year parameters and report metadata.
-    #[serde(default)]
+    /// The `accounts` sub-object ([`AccountsConfig`]): the return period,
+    /// financial-year parameters and the required report metadata.
     pub accounts: AccountsConfig,
 }
 
@@ -251,15 +256,26 @@ impl CompanyConfig {
     }
 }
 
-/// The `accounts` sub-object of the config file (`accounts.*`): the optional
-/// return period, financial-year parameters and report metadata.  The fy
-/// parameters default to 2019 / 2020 at 19% (matching [`AccountsMeta`]);
-/// [`Self::into_meta`] fills the optional metadata into the required
-/// [`AccountsMeta`] the reports consume.
+/// The `accounts` sub-object of the config file (`accounts.*`): the return
+/// period, financial-year parameters and report metadata.
+///
+/// What can be guessed or inferred stays optional or defaulted: the return
+/// period comes from [`Self::period`] / [`Self::accounts_made_up_to`] or the
+/// company's next accounting period at Companies House, the fy parameters
+/// and the accounts taxonomy dimensions default to the values fixed for
+/// this report, and the incorporation date is filled from the Companies
+/// House profile when absent.  The fields that cannot be inferred — the
+/// publication and authorisation dates, the signatory, the employee counts
+/// and the signature — are required here.  [`Self::into_meta`] converts the
+/// whole thing into the required [`AccountsMeta`] the reports consume.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AccountsConfig {
+    /// The return period; resolved from [`Self::accounts_made_up_to`] or the
+    /// company's next accounting period at Companies House when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub period: Option<AccountingPeriod>,
+    /// A date at which the accounts are made; deduces the return period as
+    /// the 12 months ending on it (an alternative to [`Self::period`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounts_made_up_to: Option<NaiveDate>,
     #[serde(default = "default_fy1_year")]
@@ -270,56 +286,35 @@ pub struct AccountsConfig {
     pub fy1_rate: f64,
     #[serde(default = "default_fy2_rate")]
     pub fy2_rate: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub report_date: Option<NaiveDate>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub authorised_date: Option<NaiveDate>,
+    /// Date the report was published / issued (required: cannot be inferred).
+    pub report_date: NaiveDate,
+    /// Date the financial statements were authorised for issue (required).
+    pub authorised_date: NaiveDate,
+    /// Date of incorporation / formation; filled from the Companies House
+    /// profile when absent (so it may be left out).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incorporation_date: Option<NaiveDate>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signed_by: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub average_employees: Option<HashMap<String, u32>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub accounting_standards_dimension: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub accounts_type_dimension: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub accounts_status_dimension: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signature_b64: Option<String>,
-}
-
-impl Default for AccountsConfig {
-    /// The default set of accounts: no period, the default financial-year
-    /// tax parameters (fy1 2019, fy2 2020, both 19%) and no report
-    /// metadata.  Matches the serde defaults, so a config without the
-    /// `accounts` sub-object behaves like one with it.
-    fn default() -> Self {
-        Self {
-            period: None,
-            accounts_made_up_to: None,
-            fy1_year: DEFAULT_FY1_YEAR,
-            fy2_year: DEFAULT_FY2_YEAR,
-            fy1_rate: DEFAULT_FY1_RATE,
-            fy2_rate: DEFAULT_FY2_RATE,
-            report_date: None,
-            authorised_date: None,
-            incorporation_date: None,
-            signed_by: None,
-            average_employees: None,
-            accounting_standards_dimension: None,
-            accounts_type_dimension: None,
-            accounts_status_dimension: None,
-            signature_b64: None,
-        }
-    }
+    /// Name of the director who signed the report (required).
+    pub signed_by: String,
+    /// Average monthly number of employees, indexed by calendar year
+    /// (required; `{}` for none).
+    pub average_employees: HashMap<String, u32>,
+    /// Accounts taxonomy dimension values, fixed for this report.
+    #[serde(default = "default_accounting_standards_dimension")]
+    pub accounting_standards_dimension: String,
+    #[serde(default = "default_accounts_type_dimension")]
+    pub accounts_type_dimension: String,
+    #[serde(default = "default_accounts_status_dimension")]
+    pub accounts_status_dimension: String,
+    /// Base64-encoded director's signature (required; `""` for none).
+    pub signature_b64: String,
 }
 
 impl AccountsConfig {
-    /// Fill the optional accounts into the required report set of accounts:
-    /// absent report metadata becomes blank defaults.  The period is left
-    /// as given — the builder sets the resolved return period.
+    /// Convert into the required report set of accounts: the required
+    /// metadata and the defaulted fields carry through, and the optional
+    /// incorporation date falls back to a blank default.  The period is
+    /// left as given — the builder sets the resolved return period.
     pub(crate) fn into_meta(self) -> AccountsMeta {
         AccountsMeta {
             period: self.period,
@@ -328,25 +323,31 @@ impl AccountsConfig {
             fy2_year: self.fy2_year,
             fy1_rate: self.fy1_rate,
             fy2_rate: self.fy2_rate,
-            report_date: self.report_date.unwrap_or_default(),
-            authorised_date: self.authorised_date.unwrap_or_default(),
+            report_date: self.report_date,
+            authorised_date: self.authorised_date,
             incorporation_date: self.incorporation_date.unwrap_or_default(),
-            signed_by: self.signed_by.unwrap_or_default(),
-            average_employees: self.average_employees.unwrap_or_default(),
-            accounting_standards_dimension: self.accounting_standards_dimension.unwrap_or_default(),
-            accounts_type_dimension: self.accounts_type_dimension.unwrap_or_default(),
-            accounts_status_dimension: self.accounts_status_dimension.unwrap_or_default(),
-            signature_b64: self.signature_b64.unwrap_or_default(),
+            signed_by: self.signed_by,
+            average_employees: self.average_employees,
+            accounting_standards_dimension: self.accounting_standards_dimension,
+            accounts_type_dimension: self.accounts_type_dimension,
+            accounts_status_dimension: self.accounts_status_dimension,
+            signature_b64: self.signature_b64,
         }
     }
 }
 
 // The default financial-year tax parameters, mirroring `AccountsMeta`'s
-// defaults in libs/ixbrl (keep the two in sync).
+// defaults in libs/ixbrl (keep the two in sync), and the accounts taxonomy
+// dimension values fixed for the FRS 105 micro-entity accounts report
+// (defaulted here in the config layer; ixbrl's `AccountsMeta::default`
+// keeps them blank for its library-only paths).
 const DEFAULT_FY1_YEAR: i32 = 2019;
 const DEFAULT_FY2_YEAR: i32 = 2020;
 const DEFAULT_FY1_RATE: f64 = 19.0;
 const DEFAULT_FY2_RATE: f64 = 19.0;
+const DEFAULT_ACCOUNTING_STANDARDS_DIMENSION: &str = "uk-bus:Micro-entities";
+const DEFAULT_ACCOUNTS_TYPE_DIMENSION: &str = "uk-bus:AbridgedAccounts";
+const DEFAULT_ACCOUNTS_STATUS_DIMENSION: &str = "uk-bus:AuditExempt-NoAccountantsReport";
 
 fn default_fy1_year() -> i32 {
     DEFAULT_FY1_YEAR
@@ -359,6 +360,15 @@ fn default_fy1_rate() -> f64 {
 }
 fn default_fy2_rate() -> f64 {
     DEFAULT_FY2_RATE
+}
+fn default_accounting_standards_dimension() -> String {
+    DEFAULT_ACCOUNTING_STANDARDS_DIMENSION.into()
+}
+fn default_accounts_type_dimension() -> String {
+    DEFAULT_ACCOUNTS_TYPE_DIMENSION.into()
+}
+fn default_accounts_status_dimension() -> String {
+    DEFAULT_ACCOUNTS_STATUS_DIMENSION.into()
 }
 
 /// The `ct600` subcommand's command-line values.
@@ -434,9 +444,18 @@ impl ConfigBuilder {
 
         // The config's optional fields are enriched into the required
         // report types here: the profile fills blanks, and the accounts
-        // carry the resolved return period.
+        // carry the resolved return period.  The incorporation date is
+        // filled from the shared profile when the config omits it.
+        let incorporation_from_config = self.file.accounts.incorporation_date;
         let mut accounts = self.file.accounts.into_meta();
         accounts.period = Some(period);
+        if incorporation_from_config.is_none()
+            && let Some(profile) = ch_profile.as_ref()
+            && let Some(created) = profile.date_of_creation.as_deref()
+            && let Ok(date) = NaiveDate::parse_from_str(created, "%Y-%m-%d")
+        {
+            accounts.incorporation_date = date;
+        }
 
         let mut company = Company::new(name, tax_reference, company_number);
         if let Some(date) = registration_date {
@@ -702,7 +721,8 @@ mod tests {
     }
 
     /// An `accounts` sub-object with the 2020 calendar-year return period
-    /// (or none) and an optional made-up-to date.
+    /// (or none), an optional made-up-to date and fixed (required) report
+    /// metadata — the tests don't care about the metadata values.
     fn accounts_config(with_period: bool, made_up_to: Option<NaiveDate>) -> AccountsConfig {
         AccountsConfig {
             period: with_period.then(|| AccountingPeriod {
@@ -710,7 +730,20 @@ mod tests {
                 end: date(2020, 12, 31),
             }),
             accounts_made_up_to: made_up_to,
-            ..AccountsConfig::default()
+            fy1_year: DEFAULT_FY1_YEAR,
+            fy2_year: DEFAULT_FY2_YEAR,
+            fy1_rate: DEFAULT_FY1_RATE,
+            fy2_rate: DEFAULT_FY2_RATE,
+            report_date: date(2021, 3, 1),
+            authorised_date: date(2021, 2, 1),
+            signed_by: "B Smith".into(),
+            average_employees: HashMap::new(),
+            accounting_standards_dimension: DEFAULT_ACCOUNTING_STANDARDS_DIMENSION.into(),
+            accounts_type_dimension: DEFAULT_ACCOUNTS_TYPE_DIMENSION.into(),
+            accounts_status_dimension: DEFAULT_ACCOUNTS_STATUS_DIMENSION.into(),
+            signature_b64: String::new(),
+            // The incorporation date is optional.
+            incorporation_date: None,
         }
     }
 
@@ -891,6 +924,11 @@ mod tests {
             .expect("example config carries a period");
         assert_eq!(period.start, date(2020, 1, 1));
         assert_eq!(period.end, date(2020, 12, 31));
+        // An explicit dimension value from the JSON overrides the default.
+        assert_eq!(
+            file.accounts.accounting_standards_dimension,
+            "uk-bus:Micro-entities"
+        );
 
         // Without the CLI paths, resolution errors on the first missing one.
         let cli = CliArgs {
@@ -1129,10 +1167,11 @@ mod tests {
 
     /// The committed minimal config
     /// (`libs/ixbrl/example_data/example2/minimal_config.json`) parses to a
-    /// blank identity, no period and no report data — everything the live
-    /// test enriches from the environment and the Companies House API.
+    /// blank identity, no period, a blank profile and only the required
+    /// report metadata — the live test enriches the identity and period
+    /// from the environment and the Companies House API.
     #[test]
-    fn minimal_config_parses_blank() {
+    fn minimal_config_parses() {
         let path = Path::new("../../libs/ixbrl/example_data/example2/minimal_config.json");
         let file = ConfigFile::from_file(path).expect("parse the minimal config");
         assert_eq!(file.company.name, None);
@@ -1140,22 +1179,34 @@ mod tests {
         assert_eq!(file.company.company_number, None);
         assert_eq!(file.accounts.period, None);
         assert_eq!(file.accounts.accounts_made_up_to, None);
-        // The blank profile: no directors, no contacts, no accountant, and
-        // no report metadata.
+        // The blank profile: no directors, no contacts, no accountant.
         assert_eq!(file.company.directors, None);
         assert_eq!(file.company.contact_name, None);
         assert_eq!(file.company.accountant_name, None);
-        // The enrichment fills the blanks into the required report types.
+        // The required (unguessable) report metadata comes from the config.
+        assert_eq!(file.accounts.report_date, date(2021, 3, 1));
+        assert_eq!(file.accounts.authorised_date, date(2021, 2, 1));
+        assert_eq!(file.accounts.signed_by, "");
+        assert_eq!(file.accounts.average_employees, HashMap::new());
+        assert_eq!(file.accounts.signature_b64, "");
+        // The enrichment fills the profile blanks and passes the metadata
+        // through into the required report types.
         assert_eq!(
             file.company.clone().into_profile(),
             CompanyProfile::default()
         );
-        assert_eq!(file.accounts.into_meta(), AccountsMeta::default());
+        let meta = file.accounts.into_meta();
+        assert_eq!(meta.report_date, date(2021, 3, 1));
+        assert_eq!(meta.authorised_date, date(2021, 2, 1));
+        assert_eq!(meta.signed_by, "");
+        assert_eq!(meta.average_employees, HashMap::new());
+        assert_eq!(meta.signature_b64, "");
     }
 
     /// The config types serialise omitting absent options: a blank company
-    /// config is an empty object, and a blank accounts config carries only
-    /// the defaulted financial-year parameters (the non-optional fields).
+    /// config is an empty object, and an accounts config serialises the
+    /// required metadata and the defaulted fields while omitting the absent
+    /// optional fields (the period and the incorporation date).
     #[test]
     fn config_serialization_omits_absent_options() {
         assert_eq!(
@@ -1163,8 +1214,8 @@ mod tests {
             "{}"
         );
         assert_eq!(
-            serde_json::to_string(&AccountsConfig::default()).unwrap(),
-            "{\"fy1_year\":2019,\"fy2_year\":2020,\"fy1_rate\":19.0,\"fy2_rate\":19.0}"
+            serde_json::to_string(&accounts_config(false, None)).unwrap(),
+            "{\"fy1_year\":2019,\"fy2_year\":2020,\"fy1_rate\":19.0,\"fy2_rate\":19.0,\"report_date\":\"2021-03-01\",\"authorised_date\":\"2021-02-01\",\"signed_by\":\"B Smith\",\"average_employees\":{},\"accounting_standards_dimension\":\"uk-bus:Micro-entities\",\"accounts_type_dimension\":\"uk-bus:AbridgedAccounts\",\"accounts_status_dimension\":\"uk-bus:AuditExempt-NoAccountantsReport\",\"signature_b64\":\"\"}"
         );
     }
 
@@ -1236,9 +1287,10 @@ mod live_tests {
     /// `COMPANY_NUMBER` and `COMPANY_UNIQUE_TAXPAYER_REF` exported, the
     /// committed minimal config
     /// (`libs/ixbrl/example_data/example2/minimal_config.json` — no identity,
-    /// no period, blank profile and report metadata) is enriched entirely
-    /// from the live profile (name, registration date, next accounting
-    /// period), and the resolved inputs are printed.  The profile lands in
+    /// no period, blank profile; the required report metadata comes from the
+    /// config) is enriched from the live profile (name, registration date,
+    /// next accounting period), and the resolved inputs are printed.  The
+    /// profile lands in
     /// the ambient cache directory (idempotent: a warm cache simply skips
     /// the network); a second run with a placeholder key proves the cache
     /// serves the response.
@@ -1264,8 +1316,8 @@ mod live_tests {
         );
 
         // The committed minimal config: no identity, no period, blank
-        // profile and report metadata — nothing for resolution to use, so
-        // everything comes from the environment and the live API.
+        // profile — the identity and period come from the environment and
+        // the live API; the required report metadata comes from the config.
         let path = Path::new("../../libs/ixbrl/example_data/example2/minimal_config.json");
         let file = ConfigFile::from_file(path).expect("parse the minimal config");
         let cli = CliArgs {

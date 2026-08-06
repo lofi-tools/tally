@@ -52,10 +52,10 @@ A JSON file with the same shape as
 `libs/ixbrl/example_data/example2/input_config.json` (use it as a template): a nested
 `company` block (identity + descriptive profile) and an `accounts` sub-object
 (period + report metadata).  This is also the config the tests and the
-`tally-example2` script run against.  A blank template with no identity,
-period or report data — `libs/ixbrl/example_data/example2/minimal_config.json`
-— is what the live enrichment test resolves entirely from the environment
-and the Companies House API.
+`tally-example2` script run against.  `libs/ixbrl/example_data/example2/minimal_config.json`
+is a minimal template — no identity, no period and a blank profile, with
+only the required report metadata — which the live enrichment test resolves
+against the environment and the Companies House API.
 
 | Key | Type | Default |
 |-----|------|---------|
@@ -69,19 +69,27 @@ and the Companies House API.
 | `accounts.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
 | `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 |
 | `accounts.fy1_rate` / `fy2_rate` | number (optional) | 19 / 19 (percent) |
-| `accounts.report_date`, `accounts.signed_by`, `accounts.average_employees`, ... | optional | none — as for the `company.*` profile fields (the report title is auto-generated) |
-| `accounts.signature_b64` | string (optional) | none — base64 image of the director's signature, embedded on the statement of financial position (omitted or empty renders no image) |
+| `accounts.report_date` | date (required) | the publication date — cannot be inferred |
+| `accounts.authorised_date` | date (required) | the authorisation date — cannot be inferred |
+| `accounts.signed_by` | string (required) | the signing director — cannot be inferred |
+| `accounts.average_employees` | object (required) | average monthly employees by calendar year — cannot be inferred (`{}` for none) |
+| `accounts.signature_b64` | string (required) | base64 image of the director's signature, embedded on the statement of financial position (`""` for none) |
+| `accounts.incorporation_date` | date (optional) | filled from the Companies House profile when absent |
+| `accounts.accounting_standards_dimension`, `accounts.accounts_type_dimension`, `accounts.accounts_status_dimension` | string (optional) | `uk-bus:Micro-entities` / `uk-bus:AbridgedAccounts` / `uk-bus:AuditExempt-NoAccountantsReport` — the values fixed for this report |
 
 The company-identity fields, the return period and the financial-year
 parameters are all optional in the config file (see
 [Resolving the company identity](#resolving-the-company-identity) for how the
 missing ones are filled in and what must always be present).  The company
-profile fields (`company.*`) and the report metadata (`accounts.*`) are
-optional too: an omitted field parses to `None`, serialises back as omitted,
-and the reports render empty values for it — copy the example config (or
-start from the blank `minimal_config.json`) and fill in what the report
-should show.  The company logo (`company.logo_b64`) is one such optional
-asset.
+profile fields (`company.*`) are optional too: an omitted field parses to
+`None`, serialises back as omitted, and the reports render empty values for
+it — copy the example config (or start from `minimal_config.json`) and fill
+in what the report should show.  The company logo (`company.logo_b64`) is
+one such optional asset.  The accounts' report metadata that *cannot* be
+inferred — the publication and authorisation dates, the signatory, the
+employee counts and the signature — is required in the `accounts` sub-object;
+the rest (the period, the incorporation date) is optional, and the accounts
+taxonomy dimensions default to the values fixed for this report.
 
 ### Defaults baked into the message
 
@@ -149,12 +157,13 @@ used, otherwise the profile is fetched from the live API.
 ## Minimum configuration
 
 A config file with the optional `company.*` profile fields (directors,
-contacts, accountant/auditor, ...) and `accounts.*` report fields (report
-title, dates, employee counts, ...) — copy
+contacts, accountant/auditor, ...) and the required `accounts.*` report
+metadata (dates, signatory, employees, signature) — copy
 `libs/ixbrl/example_data/example2/input_config.json`, or start from
-`libs/ixbrl/example_data/example2/minimal_config.json` (empty blocks: with a
-Companies House API key, `COMPANY_NUMBER` and `COMPANY_UNIQUE_TAXPAYER_REF`,
-everything is resolved at runtime) — plus a Corporation Tax reference —
+`libs/ixbrl/example_data/example2/minimal_config.json` (no identity, no
+period, blank profile: with a Companies House API key, `COMPANY_NUMBER` and
+`COMPANY_UNIQUE_TAXPAYER_REF`, the identity and period are resolved at
+runtime) — plus a Corporation Tax reference —
 either a `COMPANY_UNIQUE_TAXPAYER_REF` environment variable or the config's
 `company.tax_reference` — and either a company number or a `COMPANY_NUMBER`
 environment variable.  The company name and return period
