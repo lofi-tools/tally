@@ -3,8 +3,10 @@
   "accounts": {
     "report_date": "2021-03-01",
     "authorised_date": "2021-02-01",
-    "signed_by": "",
-    "average_employees": {},
+    "average_employees": {
+      "2019": 1,
+      "2020":1
+    },
     "signature_b64": ""
   }
 }

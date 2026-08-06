@@ -26,7 +26,8 @@
 //! | `company.registration_date` | Companies House (only when the config carries no identity at all) → [`Company::new`] default |
 //! | Companies House layer | `COMPANIES_HOUSE_API_KEY` (live) / `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox); response cache in `CT600_CACHE_DIR` (env) |
 //! | `company.*` profile fields (directors, contacts, accountant/auditor, ...) | config file (wins) → Companies House when absent (registered-office address, SIC codes, jurisdiction, directors) → blank defaults |
-//! | `accounts.*` unguessable report metadata (report_date, authorised_date, signed_by, average_employees, signature_b64) | config file only (required) |
+//! | `accounts.*` unguessable report metadata (report_date, authorised_date, average_employees, signature_b64) | config file only (required) |
+//! | `accounts.signed_by` | config file (optional) → defaults to the first director |
 //! | `accounts.incorporation_date` | config file → Companies House profile when absent |
 //! | `accounts.*` taxonomy dimensions | defaulted to the values fixed for this report |
 //! | `--book`, `--out` | command line only |
@@ -319,11 +320,12 @@ impl CompanyConfig {
 /// period comes from [`Self::period`] / [`Self::accounts_made_up_to`] or the
 /// company's next accounting period at Companies House, the fy parameters
 /// and the accounts taxonomy dimensions default to the values fixed for
-/// this report, and the incorporation date is filled from the Companies
-/// House profile when absent.  The fields that cannot be inferred — the
-/// publication and authorisation dates, the signatory, the employee counts
-/// and the signature — are required here.  [`Self::into_meta`] converts the
-/// whole thing into the required [`AccountsMeta`] the reports consume.
+/// this report, the incorporation date is filled from the Companies House
+/// profile when absent, and the signatory defaults to the first director.
+/// The fields that cannot be inferred — the publication and authorisation
+/// dates, the employee counts and the signature — are required here.
+/// [`Self::into_meta`] converts the whole thing into the required
+/// [`AccountsMeta`] the reports consume.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AccountsConfig {
     /// The return period; resolved from [`Self::accounts_made_up_to`] or the
@@ -350,8 +352,10 @@ pub struct AccountsConfig {
     /// profile when absent (so it may be left out).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incorporation_date: Option<NaiveDate>,
-    /// Name of the director who signed the report (required).
-    pub signed_by: String,
+    /// Name of the director who signed the report; defaults to the first
+    /// director when absent (so it may be left out).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_by: Option<String>,
     /// Average monthly number of employees, indexed by calendar year
     /// (required; `{}` for none).
     pub average_employees: HashMap<String, u32>,
@@ -369,8 +373,10 @@ pub struct AccountsConfig {
 impl AccountsConfig {
     /// Convert into the required report set of accounts: the required
     /// metadata and the defaulted fields carry through, and the optional
-    /// incorporation date falls back to a blank default.  The period is
-    /// left as given — the builder sets the resolved return period.
+    /// incorporation date and signatory fall back to blank defaults (the
+    /// builder later fills the signatory from the first director when the
+    /// config omitted it).  The period is left as given — the builder sets
+    /// the resolved return period.
     pub(crate) fn into_meta(self) -> AccountsMeta {
         AccountsMeta {
             period: self.period,
@@ -382,7 +388,7 @@ impl AccountsConfig {
             report_date: self.report_date,
             authorised_date: self.authorised_date,
             incorporation_date: self.incorporation_date.unwrap_or_default(),
-            signed_by: self.signed_by,
+            signed_by: self.signed_by.unwrap_or_default(),
             average_employees: self.average_employees,
             accounting_standards_dimension: self.accounting_standards_dimension,
             accounts_type_dimension: self.accounts_type_dimension,
@@ -548,6 +554,18 @@ impl ConfigBuilder {
         self.file
             .company
             .enrich_from_ch(ch_profile.as_ref(), officers.as_ref());
+        // The signatory defaults to the first director once the directors are
+        // resolved (empty counts as absent).
+        if accounts.signed_by.is_empty() {
+            accounts.signed_by = self
+                .file
+                .company
+                .directors
+                .as_deref()
+                .and_then(|d| d.first())
+                .cloned()
+                .unwrap_or_default();
+        }
 
         Ok(ResolvedInputs {
             company,
@@ -823,7 +841,7 @@ mod tests {
             fy2_rate: DEFAULT_FY2_RATE,
             report_date: date(2021, 3, 1),
             authorised_date: date(2021, 2, 1),
-            signed_by: "B Smith".into(),
+            signed_by: Some("B Smith".into()),
             average_employees: HashMap::new(),
             accounting_standards_dimension: DEFAULT_ACCOUNTING_STANDARDS_DIMENSION.into(),
             accounts_type_dimension: DEFAULT_ACCOUNTS_TYPE_DIMENSION.into(),
@@ -1270,10 +1288,11 @@ mod tests {
         assert_eq!(file.company.directors, None);
         assert_eq!(file.company.contact_name, None);
         assert_eq!(file.company.accountant_name, None);
-        // The required (unguessable) report metadata comes from the config.
+        // The required (unguessable) report metadata comes from the config;
+        // the signatory is omitted (it defaults to the first director).
         assert_eq!(file.accounts.report_date, date(2021, 3, 1));
         assert_eq!(file.accounts.authorised_date, date(2021, 2, 1));
-        assert_eq!(file.accounts.signed_by, "");
+        assert_eq!(file.accounts.signed_by, None);
         assert_eq!(file.accounts.average_employees, HashMap::new());
         assert_eq!(file.accounts.signature_b64, "");
         // The enrichment fills the profile blanks and passes the metadata
@@ -1364,13 +1383,21 @@ mod tests {
             Some("8596148860"),
             Some("12345678"),
         );
-        let resolved = builder(env, raw, accounts_config(false, None))
+        // The signatory is left out of the config: it must default to the
+        // first enriched director.
+        let accounts_config = AccountsConfig {
+            signed_by: None,
+            ..accounts_config(false, None)
+        };
+        let resolved = builder(env, raw, accounts_config)
             .build()
             .await
             .expect("resolves from the cached profile");
         let accounts = resolved.accounts;
         assert_eq!(accounts.period().start, date(2025, 1, 1));
         assert_eq!(accounts.period().end, date(2025, 12, 31));
+        // The signatory defaults to the first director.
+        assert_eq!(accounts.signed_by, "A Bloggs");
         // The profile also supplies the registration date, anchoring the
         // registration-date schedule used as the fallback.
         assert_eq!(resolved.company.registration_date, date(2001, 1, 1));
@@ -1500,6 +1527,16 @@ mod live_tests {
         assert!(
             !profile.directors.is_empty(),
             "the current directors come from the officers list"
+        );
+        // The minimal config omits the signatory: it defaults to the first
+        // director.
+        assert_eq!(
+            resolved.accounts.signed_by,
+            profile
+                .directors
+                .first()
+                .map(String::as_str)
+                .unwrap_or_default()
         );
 
         // The profile and the officers are cached for the next run.
