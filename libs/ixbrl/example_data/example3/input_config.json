@@ -1,0 +1,28 @@
+{
+  "company": {
+    "name": "Example Biz Ltd.",
+    "tax_reference": "8596148860",
+    "company_number": "12345678"
+  },
+  "accounts": {
+    "period": {
+      "start": "2023-01-01",
+      "end": "2023-12-31"
+    },
+    "fy1_year": 2022,
+    "fy2_year": 2023,
+    "associated_companies": 2,
+    "report_date": "2024-03-01",
+    "authorised_date": "2024-02-01",
+    "incorporation_date": "2020-01-01",
+    "signed_by": "B Smith",
+    "average_employees": {
+      "2023": 2,
+      "2022": 1
+    },
+    "accounting_standards_dimension": "uk-bus:Micro-entities",
+    "accounts_type_dimension": "uk-bus:AbridgedAccounts",
+    "accounts_status_dimension": "uk-bus:AuditExempt-NoAccountantsReport",
+    "signature_b64": ""
+  }
+}

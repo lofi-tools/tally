@@ -1136,6 +1136,7 @@ name = "ixbrl"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "flate2",
  "quick-xml 0.37.5",
  "rucash",
  "serde",

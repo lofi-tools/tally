@@ -14,3 +14,6 @@ quick-xml = "0.37"
 
 [dev-dependencies]
 tokio = { workspace = true }
+# Gzip for the committed example books (example3/input.gnucash is a gzip of
+# GnucashBook::to_gnucash_xml()); already in the lock via rucash's xml feature.
+flate2 = "1"

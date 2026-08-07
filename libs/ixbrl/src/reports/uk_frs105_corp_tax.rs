@@ -3058,7 +3058,8 @@ mod tests {
     /// A minimal pre-parsed book: a single UK-sales transaction of `amount`
     /// on `date`, balanced against a bank account, and nothing else.  Used
     /// by the straddling-period tests, whose return periods the committed
-    /// example books (dated 2019/20) cannot cover.
+    /// example1/example2 books (dated 2019/20) cannot cover, and as the
+    /// source of the committed example3 book (see [`example3_book`]).
     fn sales_only_book(amount: i64, date: chrono::NaiveDate) -> crate::GnucashBook {
         let raw_accounts = vec![
             crate::RawAccount {
@@ -3240,8 +3241,9 @@ mod tests {
     /// The HMRC CTM03955 worked example for an accounting period
     /// straddling 1 April 2023 **with associated companies**: £175,000 of
     /// profits over calendar-year 2023 and two associated companies (three
-    /// in the group, so the limits are divided by three).  The exact
-    /// figures from the manual:
+    /// in the group, so the limits are divided by three).  Source:
+    /// [HMRC CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955).
+    /// The exact figures from the manual:
     ///
     /// - 90 FY1 days → £43,151 at the flat 19% = £8,198.69;
     /// - 275 FY2 days → £131,849, compared with the limits reduced to
@@ -3256,29 +3258,36 @@ mod tests {
     /// The associated-companies divisor is what forces the main rate:
     /// without it the apportioned profit would sit inside the marginal
     /// band and earn relief.
-    #[test]
-    fn test_straddling_2023_associated_companies_hmrc_example() {
-        let gnucash = sales_only_book(
+    ///
+    /// The book is loaded two ways: built ad-hoc from code
+    /// ([`sales_only_book`]) and read from the committed
+    /// `example_data/example3/input.gnucash` file, exactly as the CLI
+    /// would load it.  Both must carry the same ledger, and the HMRC
+    /// figures must hold from both sources.
+    #[tokio::test]
+    async fn test_straddling_2023_associated_companies_hmrc_example() {
+        let (company, accounts) = load_example3();
+        let book_from_code = sales_only_book(
             175_000,
             chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(),
         );
+        let book_from_file =
+            crate::GnucashBook::try_from_gnucash_file("example_data/example3/input.gnucash")
+                .await
+                .expect("open example3 book");
+        assert_same_ledger(&book_from_file, &book_from_code);
 
-        let company = crate::test_utils::TestData::default_company();
-        // Calendar-year 2023: FY1 = FY2022/23 (flat 19%), FY2 = FY2023/24
-        // (marginal relief).  Two associated companies ⇒ three in the
-        // group, so the limits are divided by three.
-        let accounts = AccountsMeta {
-            period: Some(AccountingPeriod {
-                start: chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
-                end: chrono::NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
-            }),
-            fy1_year: 2022,
-            fy2_year: 2023,
-            associated_companies: 2,
-            ..AccountsMeta::default()
-        };
-        let ct = Frs105CorpTax::builder(&gnucash, &company, &accounts).build();
+        // The HMRC figures hold from both sources.
+        for book in [&book_from_code, &book_from_file] {
+            let ct = Frs105CorpTax::builder(book, &company, &accounts).build();
+            assert_hmrc_example_figures(&ct, &accounts);
+        }
+    }
 
+    /// The HMRC CTM03955 figures, asserted for a [`Frs105CorpTax`] built
+    /// from the example3 book and accounts (the test above documents the
+    /// source values).
+    fn assert_hmrc_example_figures(ct: &Frs105CorpTax, accounts: &AccountsMeta) {
         let period = accounts.period();
         let (fy1_days, fy2_days) = fy_day_split(
             period,
@@ -3347,5 +3356,128 @@ mod tests {
         assert!(html.contains("FY2 (25%)"));
         assert!(!html.contains("FY1 tax at main rate"));
         assert!(!html.contains("FY2 less marginal relief"));
+    }
+
+    /// The top-level shape of `example_data/example3/input_config.json`:
+    /// the company identity and the `accounts` sub-object.  The corp-tax
+    /// report only reads the identity, so the descriptive profile fields
+    /// (which the accounts report consumes) are not deserialised here.
+    #[derive(serde::Deserialize)]
+    struct Example3Config {
+        company: Example3Company,
+        #[serde(default)]
+        accounts: AccountsMeta,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Example3Company {
+        name: String,
+        tax_reference: String,
+        company_number: String,
+    }
+
+    /// Load the example3 company and accounts from the committed config
+    /// file.  The registration date is not stored in the config (in the
+    /// CLI it is resolved from Companies House); it is taken from the
+    /// accounts' incorporation date so the iXBRL output carries a
+    /// meaningful value.
+    fn load_example3() -> (Company, AccountsMeta) {
+        let json = std::fs::read_to_string("example_data/example3/input_config.json")
+            .expect("read example3 config");
+        let config: Example3Config = serde_json::from_str(&json).expect("parse example3 config");
+        let mut company = Company::new(
+            config.company.name,
+            config.company.tax_reference,
+            config.company.company_number,
+        );
+        company.registration_date = config.accounts.incorporation_date;
+        (company, config.accounts)
+    }
+
+    /// The sales-only book behind example3: a single £175,000 UK-sales
+    /// transaction on 15 June 2023, balanced against a bank account.
+    fn example3_book() -> crate::GnucashBook {
+        sales_only_book(
+            175_000,
+            chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(),
+        )
+    }
+
+    /// Gzip `data` the way the committed books are stored (rucash's XML
+    /// reader decompresses them).
+    fn gzip(data: &[u8]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).expect("gzip the book xml");
+        encoder.finish().expect("finish the gzip stream")
+    }
+
+    /// The committed example3 book is exactly the serializer's output
+    /// (gzip'd): regenerating it must be a no-op.  If it ever drifts, run
+    /// `cargo test -p ixbrl -- --ignored regenerate_example3_book_fixture`.
+    #[test]
+    fn test_example3_book_matches_committed_fixture() {
+        let generated = gzip(example3_book().to_gnucash_xml().as_bytes());
+        let committed =
+            std::fs::read("example_data/example3/input.gnucash").expect("read the example3 book");
+        assert_eq!(
+            generated, committed,
+            "example_data/example3/input.gnucash is stale — run the ignored \
+             regenerate_example3_book_fixture test to rewrite it"
+        );
+    }
+
+    /// Regenerate `example_data/example3/input.gnucash` from the
+    /// serializer.  Ignored by default because it writes into the source
+    /// tree; run it (with `--ignored`) when the fixture is stale.
+    #[test]
+    #[ignore = "writes the committed fixture; run with --ignored to regenerate"]
+    fn regenerate_example3_book_fixture() {
+        let data = gzip(example3_book().to_gnucash_xml().as_bytes());
+        std::fs::write("example_data/example3/input.gnucash", data)
+            .expect("write the example3 book");
+    }
+
+    /// The serializer round-trips: gzip the generated XML, parse it back
+    /// through rucash, and confirm the raw parts come out identical.
+    #[tokio::test]
+    async fn test_example3_book_xml_round_trips() {
+        let book = example3_book();
+        let path = std::env::temp_dir().join(format!(
+            "ixbrl-example3-roundtrip-{}.gnucash",
+            std::process::id()
+        ));
+        std::fs::write(&path, gzip(book.to_gnucash_xml().as_bytes()))
+            .expect("write the round-trip book");
+        let parsed = crate::GnucashBook::try_from_gnucash_file(path.to_str().unwrap())
+            .await
+            .expect("parse the round-trip book");
+        std::fs::remove_file(&path).ok();
+        assert_same_ledger(&parsed, &book);
+    }
+
+    /// Two books carry the same ledger: the same accounts, transactions
+    /// and splits.  rucash does not preserve the order it was given, so
+    /// the parts are compared as multisets (sorted by guid).
+    fn assert_same_ledger(parsed: &crate::GnucashBook, book: &crate::GnucashBook) {
+        let mut parsed_accounts = parsed.raw_accounts().to_vec();
+        let mut book_accounts = book.raw_accounts().to_vec();
+        parsed_accounts.sort_by_key(|a| a.guid.clone());
+        book_accounts.sort_by_key(|a| a.guid.clone());
+        assert_eq!(parsed_accounts, book_accounts);
+
+        let mut parsed_txns = parsed.raw_transactions().to_vec();
+        let mut book_txns = book.raw_transactions().to_vec();
+        parsed_txns.sort_by_key(|t| t.guid.clone());
+        book_txns.sort_by_key(|t| t.guid.clone());
+        assert_eq!(parsed_txns, book_txns);
+
+        let mut parsed_splits = parsed.raw_splits().to_vec();
+        let mut book_splits = book.raw_splits().to_vec();
+        parsed_splits.sort_by_key(|s| (s.tx_guid.clone(), s.account_guid.clone(), s.value));
+        book_splits.sort_by_key(|s| (s.tx_guid.clone(), s.account_guid.clone(), s.value));
+        assert_eq!(parsed_splits, book_splits);
     }
 }

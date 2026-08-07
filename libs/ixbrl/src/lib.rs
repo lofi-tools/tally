@@ -69,7 +69,7 @@ pub struct AccountNode {
     children: Vec<AccountNode>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawAccount {
     pub guid: String,
     pub name: String,
@@ -77,13 +77,13 @@ pub struct RawAccount {
     pub parent_guid: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawTransaction {
     pub guid: String,
     pub post_datetime: chrono::NaiveDateTime,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawSplit {
     pub tx_guid: String,
     pub account_guid: String,
@@ -390,4 +390,160 @@ impl GnucashBook {
     pub fn raw_splits(&self) -> &[RawSplit] {
         &self.raw_splits
     }
+
+    /// Serialise the book back into a minimal GnuCash v2 XML document that
+    /// [`Self::try_from_gnucash_file`] (via rucash) parses back into the
+    /// same raw parts.  The output is deterministic, so it doubles as the
+    /// generator for the committed example books under `example_data/`
+    /// (e.g. `example_data/example3/input.gnucash`, a gzip of this
+    /// document).
+    ///
+    /// Only the parts the parser round-trips are written: the accounts
+    /// (guid, name, type, parent, currency), the transactions (guid,
+    /// post/enter dates, currency) and their splits (value/quantity in
+    /// `numerator/denominator` form).  Everything else — prices, slots,
+    /// book metadata — is omitted.
+    pub fn to_gnucash_xml(&self) -> String {
+        use std::fmt::Write;
+
+        let mut out = String::new();
+        writeln!(out, r#"<?xml version="1.0" encoding="utf-8" ?>"#).unwrap();
+        writeln!(out, "<gnc-v2").unwrap();
+        for (prefix, ns) in [
+            ("gnc", "http://www.gnucash.org/XML/gnc"),
+            ("act", "http://www.gnucash.org/XML/act"),
+            ("cmdty", "http://www.gnucash.org/XML/cmdty"),
+            ("split", "http://www.gnucash.org/XML/split"),
+            ("trn", "http://www.gnucash.org/XML/trn"),
+            ("ts", "http://www.gnucash.org/XML/ts"),
+        ] {
+            writeln!(out, "     xmlns:{prefix}=\"{ns}\"").unwrap();
+        }
+        writeln!(out, ">").unwrap();
+        writeln!(out, "  <gnc:book>").unwrap();
+
+        // The only commodity the books carry: pound sterling.
+        writeln!(out, "    <gnc:commodity version=\"2.0.0\">").unwrap();
+        writeln!(out, "      <cmdty:space>CURRENCY</cmdty:space>").unwrap();
+        writeln!(out, "      <cmdty:id>GBP</cmdty:id>").unwrap();
+        writeln!(out, "    </gnc:commodity>").unwrap();
+
+        for account in &self.raw_accounts {
+            writeln!(out, "    <gnc:account version=\"2.0.0\">").unwrap();
+            writeln!(
+                out,
+                "      <act:name>{}</act:name>",
+                xml_escape(&account.name)
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "      <act:id type=\"guid\">{}</act:id>",
+                xml_escape(&account.guid)
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "      <act:type>{}</act:type>",
+                xml_escape(&account.r#type)
+            )
+            .unwrap();
+            writeln!(out, "      <act:commodity>").unwrap();
+            writeln!(out, "        <cmdty:space>CURRENCY</cmdty:space>").unwrap();
+            writeln!(out, "        <cmdty:id>GBP</cmdty:id>").unwrap();
+            writeln!(out, "      </act:commodity>").unwrap();
+            writeln!(out, "      <act:commodity-scu>100</act:commodity-scu>").unwrap();
+            if !account.parent_guid.is_empty() {
+                writeln!(
+                    out,
+                    "      <act:parent type=\"guid\">{}</act:parent>",
+                    xml_escape(&account.parent_guid)
+                )
+                .unwrap();
+            }
+            writeln!(out, "    </gnc:account>").unwrap();
+        }
+
+        for txn in &self.raw_txns {
+            let posted = txn.post_datetime.format("%Y-%m-%d %H:%M:%S +0000");
+            writeln!(out, "    <gnc:transaction version=\"2.0.0\">").unwrap();
+            writeln!(
+                out,
+                "      <trn:id type=\"guid\">{}</trn:id>",
+                xml_escape(&txn.guid)
+            )
+            .unwrap();
+            writeln!(out, "      <trn:currency>").unwrap();
+            writeln!(out, "        <cmdty:space>CURRENCY</cmdty:space>").unwrap();
+            writeln!(out, "        <cmdty:id>GBP</cmdty:id>").unwrap();
+            writeln!(out, "      </trn:currency>").unwrap();
+            writeln!(out, "      <trn:date-posted>").unwrap();
+            writeln!(out, "        <ts:date>{posted}</ts:date>").unwrap();
+            writeln!(out, "      </trn:date-posted>").unwrap();
+            writeln!(out, "      <trn:date-entered>").unwrap();
+            writeln!(out, "        <ts:date>{posted}</ts:date>").unwrap();
+            writeln!(out, "      </trn:date-entered>").unwrap();
+            writeln!(out, "      <trn:splits>").unwrap();
+            for (i, split) in self
+                .raw_splits
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.tx_guid == txn.guid)
+            {
+                let value = num_ratio(split.value);
+                writeln!(out, "        <trn:split>").unwrap();
+                writeln!(
+                    out,
+                    "          <split:id type=\"guid\">{}-{i}</split:id>",
+                    xml_escape(&txn.guid)
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "          <split:reconciled-state>n</split:reconciled-state>"
+                )
+                .unwrap();
+                writeln!(out, "          <split:value>{value}</split:value>").unwrap();
+                writeln!(out, "          <split:quantity>{value}</split:quantity>").unwrap();
+                writeln!(
+                    out,
+                    "          <split:account type=\"guid\">{}</split:account>",
+                    xml_escape(&split.account_guid)
+                )
+                .unwrap();
+                writeln!(out, "        </trn:split>").unwrap();
+            }
+            writeln!(out, "      </trn:splits>").unwrap();
+            writeln!(out, "    </gnc:transaction>").unwrap();
+        }
+
+        writeln!(out, "  </gnc:book>").unwrap();
+        writeln!(out, "</gnc-v2>").unwrap();
+        out
+    }
+}
+
+/// Escape `&`, `<`, `>` and `"` for XML text/attribute content.
+fn xml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// A `rucash::Num` (a `rust_decimal::Decimal` under the `decimal` feature)
+/// as the `numerator/denominator` pair the GnuCash XML split elements use.
+///
+/// The denominator is `10^scale`, which assumes a scale of at most 18 —
+/// true for money amounts, and the largest denominator rucash (which
+/// parses the pair as `i64`) can represent anyway.
+fn num_ratio(n: rucash::Num) -> String {
+    format!("{}/{}", n.mantissa(), 10u64.pow(n.scale() as u32))
 }
