@@ -678,7 +678,9 @@ impl Frs105Accounts {
                 ),
             ]),
             elt("body", &[]).children(vec![
-                elt("div", &[("class", "hidden")]).child(header),
+                // Inline `display:none`: Arelle's `headerDisplayNone` rule only
+                // inspects inline style attributes, never stylesheet classes.
+                elt("div", &[("style", "display:none")]).child(header),
                 elt("div", &[("id", "report"), ("class", "report")]).children(report_pages),
             ]),
         ]);
@@ -1884,9 +1886,11 @@ mod tests {
     async fn test_accounts_output_matches_reference_fixture() {
         // Regenerate the fixture with:
         //   nix run .#racc-gnucash   # -> .cache/py-ixbrl-reporter/accts-micro-gnucash.html
-        // then strip the reference's random `id="elt-*"` attributes and
-        // copy to example_data/example2/output-accounts.html.  The Rust
-        // output below must match it byte for byte.
+        // then strip the reference's random `id="elt-*"` attributes, change the
+        // header wrapper to `<div style="display:none">` (Arelle's
+        // `headerDisplayNone` rule ignores stylesheet classes), and copy to
+        // example_data/example2/output-accounts.html.  The Rust output below
+        // must match it byte for byte.
         let (company, gnucash) = load_example().await;
         let accounts = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta());
         let out = accounts.to_ixbrl();
@@ -1914,7 +1918,7 @@ mod tests {
         let out = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta()).to_ixbrl();
 
         // Header structure
-        assert!(out.contains("<div class=\"hidden\"><ix:header><ix:hidden>"));
+        assert!(out.contains("<div style=\"display:none\"><ix:header><ix:hidden>"));
         assert!(out.contains("<ix:references>"));
         assert!(out.contains("<ix:resources>"));
         assert!(out.contains(
