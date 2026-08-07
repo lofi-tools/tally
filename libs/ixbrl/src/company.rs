@@ -204,6 +204,13 @@ pub struct AccountsMeta {
     pub fy1_year: i32,
     #[serde(default = "default_fy2_year")]
     pub fy2_year: i32,
+    /// Number of associated companies (excluding the company itself).  The
+    /// marginal-relief lower/upper limits are divided by this count plus
+    /// one (the company itself) when it is part of a group ([HMRC
+    /// CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955));
+    /// `0` means a standalone company with the full limits.
+    #[serde(default)]
+    pub associated_companies: u32,
     /// Date the report was published / issued.
     pub report_date: NaiveDate,
     /// Date the financial statements were authorised for issue.
@@ -237,6 +244,7 @@ impl Default for AccountsMeta {
             accounts_made_up_to: None,
             fy1_year: DEFAULT_FY1_YEAR,
             fy2_year: DEFAULT_FY2_YEAR,
+            associated_companies: 0,
             report_date: NaiveDate::default(),
             authorised_date: NaiveDate::default(),
             incorporation_date: NaiveDate::default(),

@@ -357,14 +357,17 @@ impl Frs105CorpTax {
         // FY2022/23 and earlier, marginal relief from FY2023/24).  The
         // profits are split by days across the accounting period (CTA 2010
         // s.8) and the limits by each part's share of its financial year
-        // (see [`days_in_fy`] / [`fy_day_split`]).
+        // (see [`days_in_fy`] / [`fy_day_split`]), further divided by the
+        // size of the company group — the limits are shared between the
+        // company and its associated companies (HMRC CTM03955).
+        let group_size = (accounts.associated_companies + 1) as f64;
         let fy1_calc_result = for_fy(accounts.fy1_year).tax(
             fy1_profit,
-            fy1_days as f64 / days_in_fy(accounts.fy1_year) as f64,
+            fy1_days as f64 / days_in_fy(accounts.fy1_year) as f64 / group_size,
         );
         let fy2_calc_result = for_fy(accounts.fy2_year).tax(
             fy2_profit,
-            fy2_days as f64 / days_in_fy(accounts.fy2_year) as f64,
+            fy2_days as f64 / days_in_fy(accounts.fy2_year) as f64 / group_size,
         );
         let fy1_tax = fy1_calc_result.corporation_tax;
         let fy2_tax = fy2_calc_result.corporation_tax;
@@ -446,11 +449,11 @@ impl Frs105CorpTax {
             (prev_profit_chargeable * prev_fy2_days as f64 / prev_total_days as f64).round();
         let prev_fy1_calc_result = for_fy(accounts.fy1_year - 1).tax(
             prev_fy1_profit,
-            prev_fy1_days as f64 / days_in_fy(accounts.fy1_year - 1) as f64,
+            prev_fy1_days as f64 / days_in_fy(accounts.fy1_year - 1) as f64 / group_size,
         );
         let prev_fy2_calc_result = for_fy(accounts.fy2_year - 1).tax(
             prev_fy2_profit,
-            prev_fy2_days as f64 / days_in_fy(accounts.fy2_year - 1) as f64,
+            prev_fy2_days as f64 / days_in_fy(accounts.fy2_year - 1) as f64 / group_size,
         );
         let prev_fy1_tax = prev_fy1_calc_result.corporation_tax;
         let prev_fy2_tax = prev_fy2_calc_result.corporation_tax;
@@ -902,8 +905,11 @@ impl Frs105CorpTax {
             accounts_made_up_to: None,
             fy1_year,
             fy2_year,
+            // Not serialised to iXBRL: carried over from the caller.
+            associated_companies: accounts.associated_companies,
             ..AccountsMeta::default()
         };
+        let group_size = (accounts.associated_companies + 1) as f64;
 
         // The reported period comes from the facts; use it for the FY day
         // split below too, so the calc results always match the reported
@@ -988,10 +994,14 @@ impl Frs105CorpTax {
             period,
             chrono::NaiveDate::from_ymd_opt(fy2_year, 3, 31).unwrap(),
         );
-        let fy1_calc_result =
-            for_fy(fy1_year).tax(fy1_profit, fy1_days as f64 / days_in_fy(fy1_year) as f64);
-        let fy2_calc_result =
-            for_fy(fy2_year).tax(fy2_profit, fy2_days as f64 / days_in_fy(fy2_year) as f64);
+        let fy1_calc_result = for_fy(fy1_year).tax(
+            fy1_profit,
+            fy1_days as f64 / days_in_fy(fy1_year) as f64 / group_size,
+        );
+        let fy2_calc_result = for_fy(fy2_year).tax(
+            fy2_profit,
+            fy2_days as f64 / days_in_fy(fy2_year) as f64 / group_size,
+        );
         let prev_period = period.previous();
         let (prev_fy1_days, prev_fy2_days) = fy_day_split(
             prev_period,
@@ -999,11 +1009,11 @@ impl Frs105CorpTax {
         );
         let prev_fy1_calc_result = for_fy(fy1_year - 1).tax(
             prev_fy1_profit,
-            prev_fy1_days as f64 / days_in_fy(fy1_year - 1) as f64,
+            prev_fy1_days as f64 / days_in_fy(fy1_year - 1) as f64 / group_size,
         );
         let prev_fy2_calc_result = for_fy(fy2_year - 1).tax(
             prev_fy2_profit,
-            prev_fy2_days as f64 / days_in_fy(fy2_year - 1) as f64,
+            prev_fy2_days as f64 / days_in_fy(fy2_year - 1) as f64 / group_size,
         );
 
         let marginal_relief = num(
@@ -3218,5 +3228,117 @@ mod tests {
         assert!(html.contains("27,041.48")); // FY2 tax after relief
         assert!(html.contains("FY1 (24%)"));
         assert!(html.contains("FY2 (23.99%)"));
+    }
+
+    /// The HMRC CTM03955 worked example for an accounting period
+    /// straddling 1 April 2023 **with associated companies**: £175,000 of
+    /// profits over calendar-year 2023 and two associated companies (three
+    /// in the group, so the limits are divided by three).  The exact
+    /// figures from the manual:
+    ///
+    /// - 90 FY1 days → £43,151 at the flat 19% = £8,198.69;
+    /// - 275 FY2 days → £131,849, compared with the limits reduced to
+    ///   £50,000 × 275/366 ÷ 3 = £12,522.77 (lower) and £250,000 × 275/366
+    ///   ÷ 3 = £62,613.84 (upper) — HMRC rounds the apportioned limits
+    ///   first (£12,522 / £62,614); the code doesn't round intermediates,
+    ///   but the conclusion is the same;
+    /// - £131,849 exceeds the reduced upper limit, so it is charged at the
+    ///   main rate: £131,849 × 25% = £32,962.25;
+    /// - total liability £8,198.69 + £32,962.25 = £41,160.94.
+    ///
+    /// The associated-companies divisor is what forces the main rate:
+    /// without it the apportioned profit would sit inside the marginal
+    /// band and earn relief.
+    #[test]
+    fn test_straddling_2023_associated_companies_hmrc_example() {
+        let gnucash = sales_only_book(
+            175_000,
+            chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(),
+        );
+
+        let company = crate::test_utils::TestData::default_company();
+        // Calendar-year 2023: FY1 = FY2022/23 (flat 19%), FY2 = FY2023/24
+        // (marginal relief).  Two associated companies ⇒ three in the
+        // group, so the limits are divided by three.
+        let accounts = AccountsMeta {
+            period: Some(AccountingPeriod {
+                start: chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
+                end: chrono::NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+            }),
+            fy1_year: 2022,
+            fy2_year: 2023,
+            associated_companies: 2,
+            ..AccountsMeta::default()
+        };
+        let ct = Frs105CorpTax::builder(&gnucash, &company, &accounts).build();
+
+        let period = accounts.period();
+        let (fy1_days, fy2_days) = fy_day_split(
+            period,
+            chrono::NaiveDate::from_ymd_opt(2023, 3, 31).unwrap(),
+        );
+        assert_eq!((fy1_days, fy2_days), (90, 275));
+
+        // Profits apportioned on a strict time basis (CTA 2010 s.1172):
+        // (90/365) and (275/365) of £175,000.
+        assert_eq!(ct.profits_chargeable_to_corporation_tax, 175_000.0);
+        assert_eq!(ct.fy1_profit, 43_151.0);
+        assert_eq!(ct.fy2_profit, 131_849.0);
+
+        // First notional period: flat 19% → £43,151 × 19% = £8,198.69.
+        assert_eq!(ct.fy1_calc_result.effective_rate, 19.0);
+        assert_eq!(ct.fy1_calc_result.marginal_relief, 0.0);
+        assert_eq!(ct.fy1_tax, 8_198.69);
+
+        // Second notional period: limits reduced to a third of their
+        // FY-share (FY2023/24 is a leap year: 275/366), then ÷ 3 for the
+        // group.
+        let group_size = (accounts.associated_companies + 1) as f64;
+        let limit_scale = fy2_days as f64 / days_in_fy(accounts.fy2_year) as f64 / group_size;
+        let reduced_lower = 50_000.0 * limit_scale;
+        let reduced_upper = 250_000.0 * limit_scale;
+        assert_eq!(round2(reduced_lower), 12_522.77);
+        assert_eq!(round2(reduced_upper), 62_613.84);
+        // £131,849 exceeds both reduced limits → main rate, no relief.
+        assert!(ct.fy2_profit > reduced_upper);
+        assert_eq!(ct.fy2_calc_result.tax_at_main_rate, 32_962.25);
+        assert_eq!(ct.fy2_calc_result.marginal_relief, 0.0);
+        assert_eq!(ct.fy2_calc_result.corporation_tax, 32_962.25);
+        assert_eq!(ct.fy2_calc_result.effective_rate, 25.0);
+
+        // The divisor is what pushes FY2 out of the marginal band: against
+        // the un-divided FY-share limit (£187,841.53) the profit would sit
+        // inside the band and earn relief.
+        let undivided_upper = 250_000.0 * fy2_days as f64 / days_in_fy(accounts.fy2_year) as f64;
+        assert!(ct.fy2_profit < undivided_upper);
+        let relief_without_group = round2((undivided_upper - ct.fy2_profit) * 3.0 / 200.0);
+        assert!(relief_without_group > 0.0);
+        assert_ne!(ct.fy2_calc_result.marginal_relief, relief_without_group);
+
+        // Total CT liability: £32,962.25 + £8,198.69 = £41,160.94.
+        assert_eq!(ct.corporation_tax_chargeable, 41_160.94);
+
+        // The serialised return: box 420 shows the flat 19%, box 425 the
+        // main 25%; the worksheet carries the per-year taxes (both reliefs
+        // are zero, so the marginal-relief breakdown rows are absent).
+        let html = ct.to_ixbrl();
+        let node = XmlNode::from_xml_string(&html).expect("parse output");
+        let facts = ParsedIxBrlFacts::from_node(&node);
+        let fact = |name: &str| -> f64 {
+            facts
+                .numeric_by_ctx
+                .get(&(name.to_string(), "ctxt-1".to_string()))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        assert_eq!(fact("ct-comp:FY1FirstRateOfTax"), 19.0);
+        assert_eq!(fact("ct-comp:FY2FirstRateOfTax"), 25.0);
+        assert!(html.contains("8,198.69")); // FY1 tax at the flat rate
+        assert!(html.contains("32,962.25")); // FY2 tax at the main rate
+        assert!(html.contains("41,160.94")); // total liability
+        assert!(html.contains("FY1 (19%)"));
+        assert!(html.contains("FY2 (25%)"));
+        assert!(!html.contains("FY1 tax at main rate"));
+        assert!(!html.contains("FY2 less marginal relief"));
     }
 }

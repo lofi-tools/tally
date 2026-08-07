@@ -15,7 +15,10 @@
 //! financial year — the financial year runs 1 April to 31 March, so a
 //! leap-year February adds a day to the share) that scales the limits.
 //! The profit of one financial year does **not** reduce the other's
-//! thresholds.
+//! thresholds.  When the company is part of a group, the limits are also
+//! divided by the size of the group (the company plus its associated
+//! companies) — the report folds that divisor into `limit_scale` ([HMRC
+//! CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955)).
 //!
 //! Sources: the rates, limits and the 3/200 fraction are set out in
 //! [HMRC CTM03910](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03910);

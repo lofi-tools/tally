@@ -347,6 +347,11 @@ pub struct AccountsConfig {
     pub fy1_year: i32,
     #[serde(default = "default_fy2_year")]
     pub fy2_year: i32,
+    /// Number of associated companies (excluding the company itself);
+    /// divides the marginal-relief limits by this count plus one (optional;
+    /// `0` — a standalone company — when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub associated_companies: Option<u32>,
     /// Date the report was published / issued (required: cannot be inferred).
     pub report_date: NaiveDate,
     /// Date the financial statements were authorised for issue (required).
@@ -389,6 +394,7 @@ impl AccountsConfig {
             accounts_made_up_to: self.accounts_made_up_to,
             fy1_year: self.fy1_year,
             fy2_year: self.fy2_year,
+            associated_companies: self.associated_companies.unwrap_or(0),
             report_date: self.report_date,
             authorised_date: self.authorised_date,
             incorporation_date: self.incorporation_date.unwrap_or_default(),
@@ -869,6 +875,7 @@ mod tests {
             accounts_made_up_to: made_up_to,
             fy1_year: DEFAULT_FY1_YEAR,
             fy2_year: DEFAULT_FY2_YEAR,
+            associated_companies: None,
             report_date: date(2021, 3, 1),
             authorised_date: date(2021, 2, 1),
             signed_by: Some("B Smith".into()),
