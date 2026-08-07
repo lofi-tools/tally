@@ -68,7 +68,7 @@ against the environment and the Companies House API.
 | `accounts.period.end` | date (optional) | none — see `accounts.period.start` |
 | `accounts.accounts_made_up_to` | date (optional) | the `--accounts-made-up-to` flag wins; the return period is the 12 months ending on it |
 | `accounts.fy1_year` / `fy2_year` | int (optional) | 2019 / 2020 — the tax regime derives from the year (flat 19% up to FY2022/23, marginal relief from FY2023/24); profits and limits are time-apportioned between the years (see [Corporation-tax calculation](#corporation-tax-calculation)) |
-| `accounts.associated_companies` | int (optional) | 0 — the number of associated companies (excluding the company itself); the marginal-relief limits are divided by this count plus one (HMRC CTM03955) |
+| `accounts.associated_companies` | int (optional) | 0 — the number of associated companies (excluding the company itself); the marginal-relief limits are divided by this count plus one (HMRC CTM03955), and the count is reported in CT600 boxes 326–328 (box 326 for the period; boxes 327/328 per financial year when the period straddles 1 April) |
 | `accounts.report_date` | date (required) | the publication date — cannot be inferred |
 | `accounts.authorised_date` | date (required) | the authorisation date — cannot be inferred |
 | `accounts.signed_by` | string (optional) | defaults to the first director |

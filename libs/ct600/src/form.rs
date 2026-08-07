@@ -439,11 +439,23 @@ pub struct Ct600FormValues {
     pub sme_rnd_expenditure: Option<f64>,
     /// Box 690 — Annual investment allowance.
     pub annual_investment_allowance: f64,
+    /// Box 326 — Number of associated companies in this period.
+    pub associated_companies: u32,
+    /// Box 327 — Number of associated companies in the 1st FY (completed
+    /// when the accounting period straddles the 1 April financial-year
+    /// boundary).
+    pub associated_companies_fy1: Option<u32>,
+    /// Box 328 — Number of associated companies in the 2nd FY (completed
+    /// when the accounting period straddles the 1 April financial-year
+    /// boundary).
+    pub associated_companies_fy2: Option<u32>,
 }
 
 impl Ct600FormValues {
     /// Derive the form values from a computed [`Frs105CorpTax`].
     pub fn from_tax(tax: &Frs105CorpTax) -> Self {
+        let associated_companies = tax.associated_companies();
+        let per_fy = straddles(tax).then_some(associated_companies);
         Self {
             company: CompanyFormValues::from_tax(tax),
             repayments_this_period: false,
@@ -473,6 +485,14 @@ impl Ct600FormValues {
             sme_rnd_claim: true,
             sme_rnd_expenditure: tax.sme_rnd_expenditure_deduction(),
             annual_investment_allowance: tax.investment_allowance(),
+            // Box 326 always carries the period-wide count.  Boxes 327/328
+            // (per financial year) are completed only when the accounting
+            // period straddles the 1 April financial-year boundary (HMRC
+            // CT600 guide); the count is the same for both years — the
+            // model carries a single period-wide number.
+            associated_companies,
+            associated_companies_fy1: per_fy,
+            associated_companies_fy2: per_fy,
         }
     }
 
@@ -544,9 +564,27 @@ impl Ct600FormValues {
             660 => self.sme_rnd_expenditure.map(FieldValue::Number),
             670 => self.sme_rnd_expenditure.map(FieldValue::Number),
             690 => Some(FieldValue::Number(self.annual_investment_allowance)),
+            326 => Some(FieldValue::Number(self.associated_companies as f64)),
+            327 => self
+                .associated_companies_fy1
+                .map(|n| FieldValue::Number(n as f64)),
+            328 => self
+                .associated_companies_fy2
+                .map(|n| FieldValue::Number(n as f64)),
             _ => None,
         }
     }
+}
+
+/// Whether the return period straddles the 1 April financial-year
+/// boundary — the case where boxes 327/328 (per-financial-year associated
+/// companies) are completed.  The boundary is the start of the second
+/// financial year covered by the return: FY2 runs from 1 April of
+/// `fy2` (the same split [`Frs105CorpTax`] uses to apportion the profits
+/// and limits).
+fn straddles(tax: &Frs105CorpTax) -> bool {
+    let fy2_start = NaiveDate::from_ymd_opt(tax.fy2(), 4, 1).unwrap();
+    tax.start() < fy2_start && tax.end() >= fy2_start
 }
 
 /// Format a date as `1 January 2020` (day without leading zero), matching the
@@ -617,6 +655,50 @@ mod tests {
         assert_eq!(by_number(&map, 40).value, Some(FieldValue::Bool(false)));
         assert_eq!(by_number(&map, 80).value, Some(FieldValue::Bool(true)));
         assert_eq!(by_number(&map, 650).value, Some(FieldValue::Bool(true)));
+    }
+
+    /// Boxes 326/327/328 carry the associated-companies count: box 326 for
+    /// the whole period, boxes 327/328 per financial year — completed
+    /// because the sample return period (calendar 2026) straddles the
+    /// 1 April 2026 financial-year boundary.  The sample company is
+    /// standalone, so the count is zero.
+    #[test]
+    fn test_to_map_associated_companies_boxes() {
+        let map = sample_values().to_map();
+
+        assert_eq!(by_number(&map, 326).value, Some(FieldValue::Number(0.0)));
+        assert_eq!(by_number(&map, 327).value, Some(FieldValue::Number(0.0)));
+        assert_eq!(by_number(&map, 328).value, Some(FieldValue::Number(0.0)));
+    }
+
+    /// A group of companies flows the count into all three boxes: box 326
+    /// for the period, boxes 327/328 for each straddling financial year.
+    #[test]
+    fn test_to_map_associated_companies_group_count() {
+        let mut tax = crate::companies_house::test_utils::TestData::sample_tax();
+        tax.accounts.associated_companies = 2;
+        let map = Ct600FormValues::from_tax(&tax).to_map();
+
+        assert_eq!(by_number(&map, 326).value, Some(FieldValue::Number(2.0)));
+        assert_eq!(by_number(&map, 327).value, Some(FieldValue::Number(2.0)));
+        assert_eq!(by_number(&map, 328).value, Some(FieldValue::Number(2.0)));
+    }
+
+    /// A return period wholly inside one financial year completes box 326
+    /// only: boxes 327/328 (per financial year) stay unset.
+    #[test]
+    fn test_to_map_associated_companies_without_straddle() {
+        let mut tax = crate::companies_house::test_utils::TestData::sample_tax();
+        tax.accounts.period = Some(ixbrl::company::AccountingPeriod {
+            start: NaiveDate::from_ymd_opt(2026, 4, 1).unwrap(),
+            end: NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+        });
+        tax.accounts.associated_companies = 2;
+        let map = Ct600FormValues::from_tax(&tax).to_map();
+
+        assert_eq!(by_number(&map, 326).value, Some(FieldValue::Number(2.0)));
+        assert_eq!(by_number(&map, 327).value, None);
+        assert_eq!(by_number(&map, 328).value, None);
     }
 
     #[test]

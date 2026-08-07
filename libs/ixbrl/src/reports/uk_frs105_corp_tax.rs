@@ -2181,6 +2181,13 @@ impl Frs105CorpTax {
         self.accounts.fy2_year
     }
 
+    /// Boxes 326–328 — Number of associated companies (excluding the
+    /// company itself): the period-wide count that scales the
+    /// marginal-relief limits (HMRC CTM03955).
+    pub fn associated_companies(&self) -> u32 {
+        self.accounts.associated_companies
+    }
+
     /// Box 335 — FY1 profit chargeable at the first rate.
     pub fn fy1_profit(&self) -> f64 {
         self.fy1_profit
