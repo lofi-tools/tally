@@ -216,9 +216,7 @@ impl Frs105CorpTax {
             let path = Self::account_path(accounts_raw, acc);
             let val = split.value.to_string().parse::<f64>().unwrap_or(0.0);
 
-            if tx_date >= period.start
-                && tx_date <= period.end
-            {
+            if tx_date >= period.start && tx_date <= period.end {
                 period_splits.push((val, path.clone()));
             }
             if tx_date >= prev_start && tx_date <= prev_end {
@@ -435,7 +433,10 @@ impl Frs105CorpTax {
         let prev_period_end = period.previous().end;
         let prev_fy1_end = chrono::NaiveDate::from_ymd_opt(accounts.fy2_year - 1, 3, 31).unwrap();
         let (prev_fy1_days, prev_fy2_days) = fy_day_split(
-            AccountingPeriod { start: prev_period_start, end: prev_period_end },
+            AccountingPeriod {
+                start: prev_period_start,
+                end: prev_period_end,
+            },
             prev_fy1_end,
         );
         let prev_total_days = prev_fy1_days + prev_fy2_days;
@@ -875,8 +876,7 @@ impl Frs105CorpTax {
         let parse_date = |name: &str| -> chrono::NaiveDate {
             let raw = text(name);
             let cleaned = raw.replace('\u{00A0}', " ");
-            chrono::NaiveDate::parse_from_str(&cleaned, "%d %B %Y")
-                .unwrap_or(period.start)
+            chrono::NaiveDate::parse_from_str(&cleaned, "%d %B %Y").unwrap_or(period.start)
         };
 
         // -- company ----------------------------------------------------------
@@ -984,21 +984,27 @@ impl Frs105CorpTax {
         // The tax regimes derive from the financial years; the limits are
         // scaled by each part's share of its financial year, as in
         // `from_splits`.
-        let (fy1_days, fy2_days) =
-            fy_day_split(period, chrono::NaiveDate::from_ymd_opt(fy2_year, 3, 31).unwrap());
-        let fy1_calc_result = for_fy(fy1_year)
-            .tax(fy1_profit, fy1_days as f64 / days_in_fy(fy1_year) as f64);
-        let fy2_calc_result = for_fy(fy2_year)
-            .tax(fy2_profit, fy2_days as f64 / days_in_fy(fy2_year) as f64);
+        let (fy1_days, fy2_days) = fy_day_split(
+            period,
+            chrono::NaiveDate::from_ymd_opt(fy2_year, 3, 31).unwrap(),
+        );
+        let fy1_calc_result =
+            for_fy(fy1_year).tax(fy1_profit, fy1_days as f64 / days_in_fy(fy1_year) as f64);
+        let fy2_calc_result =
+            for_fy(fy2_year).tax(fy2_profit, fy2_days as f64 / days_in_fy(fy2_year) as f64);
         let prev_period = period.previous();
         let (prev_fy1_days, prev_fy2_days) = fy_day_split(
             prev_period,
             chrono::NaiveDate::from_ymd_opt(fy2_year - 1, 3, 31).unwrap(),
         );
-        let prev_fy1_calc_result = for_fy(fy1_year - 1)
-            .tax(prev_fy1_profit, prev_fy1_days as f64 / days_in_fy(fy1_year - 1) as f64);
-        let prev_fy2_calc_result = for_fy(fy2_year - 1)
-            .tax(prev_fy2_profit, prev_fy2_days as f64 / days_in_fy(fy2_year - 1) as f64);
+        let prev_fy1_calc_result = for_fy(fy1_year - 1).tax(
+            prev_fy1_profit,
+            prev_fy1_days as f64 / days_in_fy(fy1_year - 1) as f64,
+        );
+        let prev_fy2_calc_result = for_fy(fy2_year - 1).tax(
+            prev_fy2_profit,
+            prev_fy2_days as f64 / days_in_fy(fy2_year - 1) as f64,
+        );
 
         let marginal_relief = num(
             "ct-comp:MarginalRateReliefForRingFenceTradesPayable",
@@ -1139,7 +1145,11 @@ impl Frs105CorpTax {
     /// `Frs105CorpTax`).
     ///
     /// See [`Self::from_parsed_facts`] for which fields are recoverable.
-    pub fn from_ixbrl_node(node: &XmlNode, company: &Company, accounts: &AccountsMeta) -> Frs105CorpTax {
+    pub fn from_ixbrl_node(
+        node: &XmlNode,
+        company: &Company,
+        accounts: &AccountsMeta,
+    ) -> Frs105CorpTax {
         let facts = ParsedIxBrlFacts::from_node(node);
         Self::from_parsed_facts(&facts, company, accounts)
     }
@@ -2640,18 +2650,15 @@ mod tests {
         assert_eq!(back.accounts.fy2_year, ct.accounts.fy2_year);
         assert_eq!(back.fy1_calc_result, ct.fy1_calc_result);
         assert_eq!(back.fy2_calc_result, ct.fy2_calc_result);
-        assert_eq!(
-            back.accounts.period().start,
-            ct.accounts.period().start
-        );
-        assert_eq!(
-            back.accounts.period().end,
-            ct.accounts.period().end
-        );
+        assert_eq!(back.accounts.period().start, ct.accounts.period().start);
+        assert_eq!(back.accounts.period().end, ct.accounts.period().end);
 
         // -- profits & gains page -------------------------------------------
 
-        assert_eq!(back.annual_investment_allowance, ct.annual_investment_allowance);
+        assert_eq!(
+            back.annual_investment_allowance,
+            ct.annual_investment_allowance
+        );
         assert_eq!(back.adjusted_trading_profit, ct.adjusted_trading_profit);
         assert_eq!(
             back.trading_losses_brought_forward,
@@ -2700,17 +2707,17 @@ mod tests {
             back.total_reliefs_deductions_tax,
             ct.total_reliefs_deductions_tax
         );
-        assert_eq!(back.net_corporation_tax_payable, ct.net_corporation_tax_payable);
+        assert_eq!(
+            back.net_corporation_tax_payable,
+            ct.net_corporation_tax_payable
+        );
         assert_eq!(back.tax_chargeable, ct.tax_chargeable);
         assert_eq!(back.tax_payable, ct.tax_payable);
 
         // -- losses & R&D ---------------------------------------------------
 
         assert_eq!(back.losses_of_trades_uk, ct.losses_of_trades_uk);
-        assert_eq!(
-            back.losses_from_miscellaneous,
-            ct.losses_from_miscellaneous
-        );
+        assert_eq!(back.losses_from_miscellaneous, ct.losses_from_miscellaneous);
         assert_eq!(
             back.rnd_qualifying_expenditure,
             ct.rnd_qualifying_expenditure
@@ -2733,11 +2740,13 @@ mod tests {
         // compare each value in its rendered form.
         let map_eq = |a: &HashMap<i32, f64>, b: &HashMap<i32, f64>| -> bool {
             a.len() == b.len()
-                && a.iter().all(|(fy, v)| {
-                    format_f64(*v) == format_f64(b.get(fy).copied().unwrap_or(0.0))
-                })
+                && a.iter()
+                    .all(|(fy, v)| format_f64(*v) == format_f64(b.get(fy).copied().unwrap_or(0.0)))
         };
-        assert!(map_eq(&back.profit_per_accounts_by_fy, &ct.profit_per_accounts_by_fy));
+        assert!(map_eq(
+            &back.profit_per_accounts_by_fy,
+            &ct.profit_per_accounts_by_fy
+        ));
         assert!(map_eq(&back.aia_by_fy, &ct.aia_by_fy));
         assert!(map_eq(&back.rnd_by_fy, &ct.rnd_by_fy));
     }
@@ -2842,14 +2851,8 @@ mod tests {
         assert_eq!(ct.accounts.fy2_year, accounts.fy2_year);
         assert_eq!(ct.fy1_calc_result.effective_rate, 19.0);
         assert_eq!(ct.fy2_calc_result.effective_rate, 19.0);
-        assert_eq!(
-            ct.accounts.period().start,
-            accounts.period().start
-        );
-        assert_eq!(
-            ct.accounts.period().end,
-            accounts.period().end
-        );
+        assert_eq!(ct.accounts.period().start, accounts.period().start);
+        assert_eq!(ct.accounts.period().end, accounts.period().end);
 
         // -- profits & gains page -----------------------------------------
 
@@ -2913,14 +2916,8 @@ mod tests {
                 .unwrap_or(&0.0),
             4837.88
         );
-        assert_eq!(
-            *ct.aia_by_fy.get(&accounts.fy2_year).unwrap_or(&0.0),
-            591.0
-        );
-        assert_eq!(
-            *ct.rnd_by_fy.get(&accounts.fy2_year).unwrap_or(&0.0),
-            465.0
-        );
+        assert_eq!(*ct.aia_by_fy.get(&accounts.fy2_year).unwrap_or(&0.0), 591.0);
+        assert_eq!(*ct.rnd_by_fy.get(&accounts.fy2_year).unwrap_or(&0.0), 465.0);
 
         // -- invariants ---------------------------------------------------
 
@@ -2947,8 +2944,10 @@ mod tests {
         // A pre-parsed book: £120,000 of UK sales in mid-2023, no expenses
         // (the committed example books are dated 2019/20, so they cannot
         // drive a 2023 return period).
-        let gnucash =
-            sales_only_book(120_000, chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap());
+        let gnucash = sales_only_book(
+            120_000,
+            chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(),
+        );
 
         let company = crate::test_utils::TestData::default_company();
         // Calendar-year 2023: FY1 = FY2022/23 (flat 19%), FY2 = FY2023/24
@@ -2966,8 +2965,10 @@ mod tests {
         let ct = Frs105CorpTax::builder(&gnucash, &company, &accounts).build();
 
         let period = accounts.period();
-        let (fy1_days, fy2_days) =
-            fy_day_split(period, chrono::NaiveDate::from_ymd_opt(2023, 3, 31).unwrap());
+        let (fy1_days, fy2_days) = fy_day_split(
+            period,
+            chrono::NaiveDate::from_ymd_opt(2023, 3, 31).unwrap(),
+        );
         assert_eq!((fy1_days, fy2_days), (90, 275));
         // The limits are scaled by the FY2 part's share of its financial
         // year — FY2023/24 is a leap year, so 275/366 (HMRC CTM03955).
@@ -3102,8 +3103,10 @@ mod tests {
     /// effective rate (24.0 and 23.99 — the difference is rounding).
     #[test]
     fn test_straddling_fy2023_24_to_fy2024_25_apportions_both_years_limits() {
-        let gnucash =
-            sales_only_book(150_000, chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        let gnucash = sales_only_book(
+            150_000,
+            chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(),
+        );
 
         let company = crate::test_utils::TestData::default_company();
         // Calendar-year 2024: FY1 = FY2023/24 and FY2 = FY2024/25 both use
@@ -3121,8 +3124,10 @@ mod tests {
         let ct = Frs105CorpTax::builder(&gnucash, &company, &accounts).build();
 
         let period = accounts.period();
-        let (fy1_days, fy2_days) =
-            fy_day_split(period, chrono::NaiveDate::from_ymd_opt(2024, 3, 31).unwrap());
+        let (fy1_days, fy2_days) = fy_day_split(
+            period,
+            chrono::NaiveDate::from_ymd_opt(2024, 3, 31).unwrap(),
+        );
         // 2024 is a leap year: 91 days in FY1 (1 Jan – 31 Mar inclusive)
         // and 275 in FY2.  Each part's limits are scaled by its share of
         // its own financial year — FY2023/24 has 366 days, FY2024/25 has
