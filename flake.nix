@@ -353,13 +353,14 @@
             mkdir -p "$HERE/.cache/py-ixbrl-reporter"
             ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$HERE/.cache/py-ixbrl-reporter/corp-tax.html"
           '';
-          validate = ''arelleCmdLine -f "${wd}/.cache/ixbrl-rs-tests/ct_return_example2.html" -v --validationExitCode'';
+          validate = ''arelleCmdLine -f "${wd}/.cache/ixbrl-rs-tests/ct_return_example2.html" -v --validationExitCode --captureWarnings'';
 
           # E2E: regenerate every report the Rust test suite produces, then
           # validate each one with Arelle.  Prints the path before
           # validating it and stops at the first failing report (arelle
-          # exits 3 on validation errors via --validationExitCode).  Runs
-          # in the devShell (needs cargo + arelle): `nix develop -c validate-all`.
+          # exits 3 on validation errors or warnings via
+          # --validationExitCode --captureWarnings).  Runs in the devShell
+          # (needs cargo + arelle): `nix develop -c validate-all`.
           validate-all = ''
             set -e
             cargo test -p ixbrl --lib
@@ -372,7 +373,8 @@
               path="${wd}/.cache/ixbrl-rs-tests/$f"
               [ -f "$path" ] || { echo "validate-all: missing report: $path" >&2; exit 1; }
               echo "==> validating $path"
-              arelleCmdLine -f "$path" -v --validationExitCode
+              # --captureWarnings: warnings fail the run too (exit 3).
+              arelleCmdLine -f "$path" -v --validationExitCode --captureWarnings
             done
             echo "all reports validate OK"
           '';
