@@ -397,9 +397,15 @@ pub struct Ct600FormValues {
     pub attached_accounts: bool,
     /// Box 145 — Total turnover from trade.
     pub turnover: f64,
-    /// Box 155 — Trading profits.
+    /// Box 155 — Trading profits (the adjusted trading profit, before
+    /// brought-forward trading losses are set off).
     pub trading_profits: f64,
-    /// Box 165 — Net trading profits.
+    /// Box 160 — Trading losses brought forward against profits (the
+    /// positive amount set against box 155; absent when no losses are set
+    /// off — box 160 is only completed when there are brought-forward
+    /// losses).
+    pub trading_losses_brought_forward: Option<f64>,
+    /// Box 165 — Net trading profits (box 155 minus box 160).
     pub net_trading_profits: f64,
     /// Box 235 — Profits before other deductions and reliefs.
     pub profits_before_other_deductions_and_reliefs: f64,
@@ -461,7 +467,14 @@ impl Ct600FormValues {
             repayments_this_period: false,
             attached_accounts: true,
             turnover: tax.turnover_revenue(),
-            trading_profits: tax.net_trading_profits(),
+            trading_profits: tax.adjusted_trading_profit(),
+            // Box 160 is the positive set-off amount (the computation
+            // stores it negative, the ledger convention), and is only
+            // completed when losses are actually set off.
+            trading_losses_brought_forward: {
+                let losses = tax.trading_losses_brought_forward();
+                (losses != 0.0).then_some(-losses)
+            },
             net_trading_profits: tax.net_trading_profits(),
             profits_before_other_deductions_and_reliefs: tax
                 .profits_before_other_deductions_and_reliefs(),
@@ -536,6 +549,7 @@ impl Ct600FormValues {
             80 => Some(FieldValue::Bool(self.attached_accounts)),
             145 => Some(FieldValue::Number(self.turnover)),
             155 => Some(FieldValue::Number(self.trading_profits)),
+            160 => self.trading_losses_brought_forward.map(FieldValue::Number),
             165 => Some(FieldValue::Number(self.net_trading_profits)),
             235 => Some(FieldValue::Number(
                 self.profits_before_other_deductions_and_reliefs,
@@ -706,6 +720,8 @@ mod tests {
         let map = sample_values().to_map();
 
         assert_eq!(by_number(&map, 155).value, Some(FieldValue::Number(12345.0)));
+        // The sample carries no brought-forward losses, so box 160 is unset.
+        assert_eq!(by_number(&map, 160).value, None);
         assert_eq!(by_number(&map, 165).value, Some(FieldValue::Number(12345.0)));
         assert_eq!(
             by_number(&map, 330).value,
@@ -730,6 +746,23 @@ mod tests {
         assert_eq!(by_number(&map, 660).value, Some(FieldValue::Number(5000.0)));
         assert_eq!(by_number(&map, 670).value, Some(FieldValue::Number(5000.0)));
         assert_eq!(by_number(&map, 690).value, Some(FieldValue::Number(1000.0)));
+    }
+
+    /// Brought-forward trading losses split the trading-profit boxes: box
+    /// 155 carries the adjusted trading profit, box 160 the positive amount
+    /// set against it (the computation stores it negative), and box 165 the
+    /// net (155 minus 160).
+    #[test]
+    fn test_to_map_losses_brought_forward_boxes() {
+        let mut tax = crate::companies_house::test_utils::TestData::sample_tax();
+        tax.adjusted_trading_profit = 5000.0;
+        tax.trading_losses_brought_forward = -2000.0;
+        tax.net_trading_profits = 3000.0;
+        let map = Ct600FormValues::from_tax(&tax).to_map();
+
+        assert_eq!(by_number(&map, 155).value, Some(FieldValue::Number(5000.0)));
+        assert_eq!(by_number(&map, 160).value, Some(FieldValue::Number(2000.0)));
+        assert_eq!(by_number(&map, 165).value, Some(FieldValue::Number(3000.0)));
     }
 
     #[test]

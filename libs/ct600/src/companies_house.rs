@@ -1379,6 +1379,11 @@ pub mod test_utils {
                 "31 December 2026".to_string(),
             );
             for (name, ctx, v) in [
+                (
+                    "ct-comp:AdjustedTradingProfitOfThisPeriod",
+                    "ctxt-3",
+                    12345.0,
+                ),
                 ("ct-comp:NetTradingProfits", "ctxt-3", 12345.0),
                 (
                     "ct-comp:FY1AmountOfProfitChargeableAtFirstRate",

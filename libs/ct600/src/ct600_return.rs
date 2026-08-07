@@ -179,10 +179,15 @@ pub struct Ct600Return {
     pub return_info: ReturnInfoSummary,
     /// Box 145 — total turnover from trade.
     pub turnover: f64,
-    /// Box 155 — trading profits (mirrors [`Ct600FormValues::trading_profits`], which
-    /// derives from the net trading profits).
+    /// Box 155 — trading profits (the adjusted trading profit, before
+    /// brought-forward losses; mirrors [`Ct600FormValues::trading_profits`]).
     pub trading_profits: f64,
-    /// Box 165 — net trading profits.
+    /// Box 160 — trading losses brought forward against profits (the
+    /// positive amount set against box 155; absent when no losses are set
+    /// off — box 160 is only completed when there are brought-forward
+    /// losses).
+    pub trading_losses_brought_forward: Option<f64>,
+    /// Box 165 — net trading profits (box 155 minus box 160).
     pub net_trading_profits: f64,
     /// Box 235 — profits before other deductions and reliefs.
     pub profits_before_other_deductions: f64,
@@ -265,6 +270,7 @@ impl Ct600Return {
             },
             turnover: values.turnover,
             trading_profits: values.trading_profits,
+            trading_losses_brought_forward: values.trading_losses_brought_forward,
             net_trading_profits: values.net_trading_profits,
             profits_before_other_deductions: values.profits_before_other_deductions_and_reliefs,
             profits_before_charges_and_group_relief: values
@@ -498,6 +504,11 @@ impl Ct600Return {
                 "ct:Turnover/ct:Total",
             )?,
             trading_profits: parse_f64(&text_at(trading, &["ct:Profits"])?, "ct:Profits")?,
+            // Box 160 is optional in the CT schema (minOccurs="0"), so a
+            // message with no brought-forward losses omits it entirely.
+            trading_losses_brought_forward: child(trading, "ct:LossesBroughtForward")
+                .map(|n| parse_f64(&node_text(n), "ct:LossesBroughtForward"))
+                .transpose()?,
             net_trading_profits: parse_f64(
                 &text_at(trading, &["ct:NetProfits"])?,
                 "ct:NetProfits",
@@ -666,11 +677,21 @@ impl Ct600Return {
         let turnover =
             elt("ct:Turnover", &[]).child(elt_text("ct:Total", &[], &pounds(self.turnover)));
 
+        // Box 160 is optional in the CT schema (minOccurs="0"), so it is
+        // only emitted when set — matching the reference tool, which omits
+        // unset boxes (and keeping example2 byte-identical).
+        let mut trading_children = vec![elt_text("ct:Profits", &[], &pounds(self.trading_profits))];
+        if let Some(losses) = self.trading_losses_brought_forward {
+            trading_children.push(elt_text("ct:LossesBroughtForward", &[], &pounds(losses)));
+        }
+        trading_children.push(elt_text(
+            "ct:NetProfits",
+            &[],
+            &pounds(self.net_trading_profits),
+        ));
+
         let tax_calculation = elt("ct:CompanyTaxCalculation", &[]).children(vec![
-            elt("ct:Income", &[]).child(elt("ct:Trading", &[]).children(vec![
-                elt_text("ct:Profits", &[], &pounds(self.trading_profits)),
-                elt_text("ct:NetProfits", &[], &pounds(self.net_trading_profits)),
-            ])),
+            elt("ct:Income", &[]).child(elt("ct:Trading", &[]).children(trading_children)),
             elt_text(
                 "ct:ProfitsBeforeOtherDeductions",
                 &[],
@@ -1152,6 +1173,10 @@ mod tests {
         // Whole-pound boxes are truncated on serialisation, so the round
         // trip recovers the truncated value.
         assert_eq!(back.turnover, 11218.0);
+        assert_eq!(back.trading_profits, 748.0);
+        // example2 carries no brought-forward losses, so box 160 is omitted
+        // from the message and round-trips as unset.
+        assert_eq!(back.trading_losses_brought_forward, None);
         assert_eq!(back.net_trading_profits, 748.0);
         assert_eq!(back.profits_before_other_deductions, 748.0);
         assert_eq!(back.chargeable_profits, 748.0);
@@ -1188,6 +1213,48 @@ mod tests {
 
         // -- the recovered struct re-serialises to the identical message ----
         assert_eq!(back.to_xml(), xml);
+    }
+
+    /// Brought-forward trading losses split the trading boxes in the
+    /// message: box 155 carries the adjusted trading profit, box 160 the
+    /// positive loss set-off, and box 165 the net.  The loss set-off element
+    /// is emitted only when non-zero (the CT schema marks it optional).
+    #[tokio::test]
+    async fn losses_brought_forward_split_the_trading_boxes() {
+        let mut corp_tax = example2_corp_tax().await;
+        // A £2,000 set-off against £5,000 of adjusted trading profit: box
+        // 155 = 5000, box 160 = 2000, box 165 = 3000.
+        corp_tax.adjusted_trading_profit = 5000.0;
+        corp_tax.trading_losses_brought_forward = -2000.0;
+        corp_tax.net_trading_profits = 3000.0;
+        let accounts = example2_accounts().await;
+        let filing = Ct600Return::from_inputs(&accounts, &corp_tax);
+
+        let xml = filing.to_xml();
+        assert!(xml.contains("<ct:Profits>5000.00</ct:Profits>"));
+        assert!(xml.contains("<ct:LossesBroughtForward>2000.00</ct:LossesBroughtForward>"));
+        assert!(xml.contains("<ct:NetProfits>3000.00</ct:NetProfits>"));
+
+        // The message round-trips the set-off amount.
+        let back = Ct600Return::from_xml(&xml).expect("deserialise own message");
+        assert_eq!(back.trading_profits, 5000.0);
+        assert_eq!(back.trading_losses_brought_forward, Some(2000.0));
+        assert_eq!(back.net_trading_profits, 3000.0);
+        assert_eq!(back.to_xml(), xml);
+    }
+
+    /// Without brought-forward losses, box 160 is omitted entirely — the
+    /// element does not appear in the message and round-trips as zero.
+    #[tokio::test]
+    async fn no_losses_brought_forward_omits_box_160() {
+        let corp_tax = example2_corp_tax().await;
+        let accounts = example2_accounts().await;
+        let filing = Ct600Return::from_inputs(&accounts, &corp_tax);
+
+        let xml = filing.to_xml();
+        assert!(!xml.contains("LossesBroughtForward"));
+        let back = Ct600Return::from_xml(&xml).expect("deserialise own message");
+        assert_eq!(back.trading_losses_brought_forward, None);
     }
 
     #[tokio::test]

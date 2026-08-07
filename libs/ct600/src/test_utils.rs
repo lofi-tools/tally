@@ -50,6 +50,7 @@ impl TestData {
             },
             turnover: 11218.0,
             trading_profits: 748.0,
+            trading_losses_brought_forward: None,
             net_trading_profits: 748.0,
             profits_before_other_deductions: 748.0,
             profits_before_charges_and_group_relief: 748.0,

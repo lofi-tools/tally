@@ -2212,6 +2212,15 @@ impl Frs105CorpTax {
         self.trading_loss
     }
 
+    /// Box 160 — Trading losses brought forward set against trading profits
+    /// (0 or negative; the amount actually set is capped at the trading
+    /// profit, the excess carrying forward).  On the CT600 form this is a
+    /// positive amount; see
+    /// https://www.gov.uk/guidance/the-company-tax-return-guide.
+    pub fn trading_losses_brought_forward(&self) -> f64 {
+        self.trading_losses_brought_forward
+    }
+
     /// Box 165 — Net trading profits.
     pub fn net_trading_profits(&self) -> f64 {
         self.net_trading_profits
