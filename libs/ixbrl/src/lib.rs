@@ -372,7 +372,7 @@ impl GnucashBook {
         let mut balances = vec![rucash::Num::from(0); raw_accounts.len()];
         for split in &raw_splits {
             if let Some(&idx) = guid_to_idx.get(&split.account_guid) {
-                balances[idx] = balances[idx] + split.value;
+                balances[idx] += split.value;
             }
         }
 
@@ -545,5 +545,5 @@ fn xml_escape(s: &str) -> String {
 /// true for money amounts, and the largest denominator rucash (which
 /// parses the pair as `i64`) can represent anyway.
 fn num_ratio(n: rucash::Num) -> String {
-    format!("{}/{}", n.mantissa(), 10u64.pow(n.scale() as u32))
+    format!("{}/{}", n.mantissa(), 10u64.pow(n.scale()))
 }

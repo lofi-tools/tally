@@ -34,6 +34,17 @@ pub struct Frs105CorpTax {
     pub annual_investment_allowance: f64,
 
     pub adjusted_trading_profit: f64,
+    /// Trading loss of this period, before loss relief (0 or negative — the
+    /// ledger convention, so losses subtract).  A loss-making period's loss
+    /// can be carried forward and set against profits of the same trade in a
+    /// later period (CTA 2010 s.45; see
+    /// https://www.gov.uk/guidance/corporation-tax-calculating-and-claiming-a-loss);
+    /// [`Frs105CorpTaxBuilder::trading_losses_brought_forward`] carries it
+    /// into the next period's computation.
+    pub trading_loss: f64,
+    /// Trading losses brought forward from earlier periods, set against this
+    /// period's trading profits (0 or negative; CT600 box 160 — see
+    /// https://www.gov.uk/guidance/the-company-tax-return-guide).
     pub trading_losses_brought_forward: f64,
     pub net_trading_profits: f64,
     pub net_chargeable_gains: f64,
@@ -110,6 +121,9 @@ pub struct Frs105CorpTaxBuilder<'a> {
     period_splits: Vec<(f64, String)>,
     prev_splits: Vec<(f64, String)>,
     rd_project_defs: Vec<(&'a str, Vec<(&'a str, &'a str)>, &'a str)>,
+    /// Trading losses brought forward into this period (0 or negative);
+    /// the default of 0 means no loss relief is claimed.
+    trading_losses_brought_forward: f64,
 }
 
 #[allow(clippy::type_complexity)]
@@ -125,6 +139,27 @@ impl<'a> Frs105CorpTaxBuilder<'a> {
         self
     }
 
+    /// Carry the previous period's trading losses forward into this
+    /// computation — the maximum acceptable, i.e. the previous period's
+    /// full trading loss (zero when that period was profitable).
+    ///
+    /// `prev` is the previous period's computed [`Frs105CorpTax`] (the Rust
+    /// struct, not its rendered iXBRL), so this models a single prior period
+    /// — the loss arising in it — not an accumulated multi-year loss
+    /// history.  A trading loss can be carried forward and set against
+    /// profits of the same trade without time limit (CTA 2010 s.45; see
+    /// https://www.gov.uk/guidance/corporation-tax-calculating-and-claiming-a-loss);
+    /// the post-2017 "£5m allowance + 50%" restriction applies to losses set
+    /// against total profits, not to this same-trade route.  The amount
+    /// actually set against this period's profits is capped at the trading
+    /// profit itself — CT600 box 160 cannot exceed box 155, the excess
+    /// carries forward (HMRC, Completing your Company Tax Return;
+    /// https://www.gov.uk/guidance/the-company-tax-return-guide).
+    pub fn trading_losses_brought_forward(mut self, prev: &Frs105CorpTax) -> Self {
+        self.trading_losses_brought_forward = prev.trading_loss();
+        self
+    }
+
     pub fn build(self) -> Frs105CorpTax {
         Frs105CorpTax::from_splits(
             self.company,
@@ -132,6 +167,7 @@ impl<'a> Frs105CorpTaxBuilder<'a> {
             &self.period_splits,
             &self.prev_splits,
             &self.rd_project_defs,
+            self.trading_losses_brought_forward,
         )
     }
 }
@@ -230,6 +266,7 @@ impl Frs105CorpTax {
             period_splits,
             prev_splits,
             rd_project_defs: Vec::new(),
+            trading_losses_brought_forward: 0.0,
         }
     }
 
@@ -239,6 +276,7 @@ impl Frs105CorpTax {
         period_splits: &[(f64, String)],
         prev_splits: &[(f64, String)],
         rd_project_defs: &[(&str, Vec<(&str, &str)>, &str)],
+        trading_losses_brought_forward: f64,
     ) -> Self {
         let period = accounts.period();
         let sum = |splits: &[(f64, String)], account: &str| -> f64 {
@@ -341,8 +379,23 @@ impl Frs105CorpTax {
             0.0
         };
 
-        let trading_losses_brought_forward = 0.0;
-        let net_trading_profits = ct_trading_profits + trading_losses_brought_forward;
+        // A negative adjusted trading profit is a trading loss for the
+        // period.  It can be carried forward and set against profits of the
+        // same trade in a later period (CTA 2010 s.45; see
+        // https://www.gov.uk/guidance/corporation-tax-calculating-and-claiming-a-loss),
+        // so it is stored (negative) for the builder to carry forward.
+        let trading_loss = if ct_trading_profits_raw < 0.0 {
+            -round_down(-ct_trading_profits_raw)
+        } else {
+            0.0
+        };
+
+        // Only sufficient brought-forward losses are set against the trading
+        // profit to reduce it to nil: CT600 box 160 cannot exceed box 155
+        // and the excess carries forward (HMRC, Completing your Company Tax
+        // Return; https://www.gov.uk/guidance/the-company-tax-return-guide).
+        let losses_brought_forward_set = trading_losses_brought_forward.max(-ct_trading_profits);
+        let net_trading_profits = (ct_trading_profits + losses_brought_forward_set).max(0.0);
         let profits_before_deductions = net_trading_profits;
         let profits_before_charges = profits_before_deductions;
         let profits_chargeable = profits_before_charges;
@@ -495,7 +548,8 @@ impl Frs105CorpTax {
             annual_investment_allowance: aia_current,
 
             adjusted_trading_profit: ct_trading_profits,
-            trading_losses_brought_forward,
+            trading_loss,
+            trading_losses_brought_forward: losses_brought_forward_set,
             net_trading_profits,
             net_chargeable_gains: 0.0,
             profits_before_deductions,
@@ -527,7 +581,11 @@ impl Frs105CorpTax {
             tax_chargeable,
             tax_payable,
 
-            losses_of_trades_uk: 0.0,
+            // CT600 box 780: a loss-making period shows the full trading
+            // loss here (positive) — the amount available to carry forward
+            // (HMRC, Completing your Company Tax Return; box 780:
+            // https://www.gov.uk/guidance/the-company-tax-return-guide).
+            losses_of_trades_uk: -trading_loss,
             losses_of_trades_overseas: 0.0,
             uk_property_business_losses: 0.0,
             overseas_property_business_losses: 0.0,
@@ -1078,11 +1136,11 @@ impl Frs105CorpTax {
             gross_profit: 0.0,
             profit_before_tax,
             tax_expense: 0.0,
-            profit_after_tax: 0.0,
-
-            annual_investment_allowance,
-
+            profit_after_tax: 0.0,            annual_investment_allowance,
             adjusted_trading_profit,
+            // Not carried in the iXBRL (the taxonomy has the brought-forward
+            // amount, not the period's own loss), so it cannot round-trip.
+            trading_loss: 0.0,
             trading_losses_brought_forward,
             net_trading_profits,
             net_chargeable_gains,
@@ -2146,6 +2204,14 @@ impl Frs105CorpTax {
         self.adjusted_trading_profit
     }
 
+    /// The trading loss of this period (0 or negative) — the amount
+    /// available to carry forward and set against profits of the same trade
+    /// under CTA 2010 s.45 (see
+    /// https://www.gov.uk/guidance/corporation-tax-calculating-and-claiming-a-loss).
+    pub fn trading_loss(&self) -> f64 {
+        self.trading_loss
+    }
+
     /// Box 165 — Net trading profits.
     pub fn net_trading_profits(&self) -> f64 {
         self.net_trading_profits
@@ -3104,6 +3170,160 @@ mod tests {
             },
         ];
         crate::GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
+    }
+
+    /// Like [`sales_only_book`], but spends `loss` on sundries with no
+    /// income — a loss-making book, used to build the previous period's
+    /// computation with a trading loss to carry forward.
+    fn loss_only_book(loss: i64, date: chrono::NaiveDate) -> crate::GnucashBook {
+        let raw_accounts = vec![
+            crate::RawAccount {
+                guid: "root".into(),
+                name: "Root Account".into(),
+                r#type: "ROOT".into(),
+                parent_guid: String::new(),
+            },
+            crate::RawAccount {
+                guid: "expenses".into(),
+                name: "Expenses".into(),
+                r#type: "EXPENSE".into(),
+                parent_guid: "root".into(),
+            },
+            crate::RawAccount {
+                guid: "vat-purchases".into(),
+                name: "VAT Purchases".into(),
+                r#type: "EXPENSE".into(),
+                parent_guid: "expenses".into(),
+            },
+            crate::RawAccount {
+                guid: "sundries".into(),
+                name: "Sundries".into(),
+                r#type: "EXPENSE".into(),
+                parent_guid: "vat-purchases".into(),
+            },
+            crate::RawAccount {
+                guid: "bank".into(),
+                name: "Bank".into(),
+                r#type: "BANK".into(),
+                parent_guid: "root".into(),
+            },
+        ];
+        let raw_txns = vec![crate::RawTransaction {
+            guid: "txn-loss".into(),
+            post_datetime: date.and_hms_opt(12, 0, 0).unwrap(),
+        }];
+        let raw_splits = vec![
+            crate::RawSplit {
+                tx_guid: "txn-loss".into(),
+                account_guid: "sundries".into(),
+                value: rucash::Num::from(-loss),
+            },
+            crate::RawSplit {
+                tx_guid: "txn-loss".into(),
+                account_guid: "bank".into(),
+                value: rucash::Num::from(loss),
+            },
+        ];
+        crate::GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
+    }
+
+    /// The builder carries the previous period's full trading loss — the
+    /// maximum acceptable — into the current period's computation: it is set
+    /// against the trading profit (CTA 2010 s.45; see
+    /// https://www.gov.uk/guidance/corporation-tax-calculating-and-claiming-a-loss),
+    /// reducing net trading profits and the profits chargeable to
+    /// Corporation Tax.  The input is the previous period's `Frs105CorpTax`
+    /// struct, not its rendered iXBRL.
+    #[test]
+    fn test_builder_brings_forward_previous_year_trading_loss() {
+        let company = crate::test_utils::TestData::default_company();
+        let accounts = crate::test_utils::TestData::default_accounts_meta();
+        // 2020 is the current period (`accounts.period()`), so the loss
+        // splits fall in it and the previous period's computation carries
+        // the loss.
+        let prev = Frs105CorpTax::builder(
+            &loss_only_book(2_000, chrono::NaiveDate::from_ymd_opt(2020, 6, 15).unwrap()),
+            &company,
+            &accounts,
+        )
+        .build();
+        assert_eq!(prev.trading_loss(), -2_000.0);
+        // The loss year's own report shows the loss on the Losses page
+        // (CT600 box 780) — the documentary evidence for the carry forward.
+        assert_eq!(prev.losses_of_trades_uk, 2_000.0);
+        // Nothing was brought into the loss year itself.
+        assert_eq!(prev.trading_losses_brought_forward, 0.0);
+
+        // The current period makes £5,000 of profit; the full £2,000 loss is
+        // brought forward and set against it.
+        let ct = Frs105CorpTax::builder(
+            &sales_only_book(
+                5_000,
+                chrono::NaiveDate::from_ymd_opt(2020, 12, 15).unwrap(),
+            ),
+            &company,
+            &accounts,
+        )
+        .trading_losses_brought_forward(&prev)
+        .build();
+        assert_eq!(ct.trading_losses_brought_forward, -2_000.0);
+        assert_eq!(ct.net_trading_profits, 3_000.0);
+        assert_eq!(ct.profits_chargeable_to_corporation_tax, 3_000.0);
+
+        // The loss is shown on the profits-and-gains worksheet.
+        let ixbrl = ct.to_ixbrl();
+        assert!(ixbrl.contains("ct-comp:TradingLossesBroughtForward"));
+        assert!(ixbrl.contains("-2,000.00"));
+    }
+
+    /// The amount set against the trading profit is capped at the profit
+    /// itself: CT600 box 160 cannot exceed box 155 and the excess carries
+    /// forward (HMRC, Completing your Company Tax Return;
+    /// https://www.gov.uk/guidance/the-company-tax-return-guide).
+    #[test]
+    fn test_brought_forward_loss_capped_at_trading_profit() {
+        let company = crate::test_utils::TestData::default_company();
+        let accounts = crate::test_utils::TestData::default_accounts_meta();
+        let prev = Frs105CorpTax::builder(
+            &loss_only_book(2_000, chrono::NaiveDate::from_ymd_opt(2020, 6, 15).unwrap()),
+            &company,
+            &accounts,
+        )
+        .build();
+        assert_eq!(prev.trading_loss(), -2_000.0);
+
+        // Only £1,000 of trading profit is available to set the loss against.
+        let ct = Frs105CorpTax::builder(
+            &sales_only_book(
+                1_000,
+                chrono::NaiveDate::from_ymd_opt(2020, 12, 15).unwrap(),
+            ),
+            &company,
+            &accounts,
+        )
+        .trading_losses_brought_forward(&prev)
+        .build();
+        assert_eq!(ct.trading_losses_brought_forward, -1_000.0);
+        assert_eq!(ct.net_trading_profits, 0.0);
+        assert_eq!(ct.profits_chargeable_to_corporation_tax, 0.0);
+    }
+
+    /// Without the builder method the brought-forward losses default to 0.
+    #[test]
+    fn test_brought_forward_losses_default_to_zero() {
+        let company = crate::test_utils::TestData::default_company();
+        let accounts = crate::test_utils::TestData::default_accounts_meta();
+        let ct = Frs105CorpTax::builder(
+            &sales_only_book(
+                5_000,
+                chrono::NaiveDate::from_ymd_opt(2020, 12, 15).unwrap(),
+            ),
+            &company,
+            &accounts,
+        )
+        .build();
+        assert_eq!(ct.trading_losses_brought_forward, 0.0);
+        assert_eq!(ct.net_trading_profits, 5_000.0);
     }
 
     /// Companion to the FY2022/23–FY2023/24 straddle test: a period in
