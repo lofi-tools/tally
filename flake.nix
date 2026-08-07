@@ -353,7 +353,29 @@
             mkdir -p "$HERE/.cache/py-ixbrl-reporter"
             ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$HERE/.cache/py-ixbrl-reporter/corp-tax.html"
           '';
-          validate = ''arelleCmdLine -f "${wd}/.cache/ixbrl-rs-tests/ct_return_example2.html" -v'';
+          validate = ''arelleCmdLine -f "${wd}/.cache/ixbrl-rs-tests/ct_return_example2.html" -v --validationExitCode'';
+
+          # E2E: regenerate every report the Rust test suite produces, then
+          # validate each one with Arelle.  Prints the path before
+          # validating it and stops at the first failing report (arelle
+          # exits 3 on validation errors via --validationExitCode).  Runs
+          # in the devShell (needs cargo + arelle): `nix develop -c validate-all`.
+          validate-all = ''
+            set -e
+            cargo test -p ixbrl --lib
+            for f in \
+              accts-micro-example2.html \
+              accts-micro-roundtrip-example2.html \
+              ct_return_example2.html \
+              ct_roundtrip_example2.html
+            do
+              path="${wd}/.cache/ixbrl-rs-tests/$f"
+              [ -f "$path" ] || { echo "validate-all: missing report: $path" >&2; exit 1; }
+              echo "==> validating $path"
+              arelleCmdLine -f "$path" -v --validationExitCode
+            done
+            echo "all reports validate OK"
+          '';
           rct600 = ''${bin.ref-ct600} "$@" '';
 
           # Run the reference ct600 tool over the example2 pair: step 1
