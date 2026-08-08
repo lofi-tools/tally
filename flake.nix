@@ -424,20 +424,28 @@
             echo "     note re-running this script regenerates that file from the computations."
           '';
 
-          # Regenerate the Rust-generated CT600 message (from the ct600
-          # crate's generator) into .cache/ct600-rs-tests/ct600-basic-1.xml, by
-          # running the generator test that writes it.  Runs in the devShell
-          # (needs cargo).
+          # Regenerate the Rust-generated CT600 messages (from the ct600
+          # crate's generator tests) into .cache/ct600-rs-tests/: the basic-1
+          # message and the ctm03955-marginal-relief loss-company message.
+          # Runs in the devShell (needs cargo).
           rct600-2 = ''
             set -eo pipefail
 
-            rm -f .cache/ct600-rs-tests/ct600-basic-1.xml
+            rm -f \
+              .cache/ct600-rs-tests/ct600-basic-1.xml \
+              .cache/ct600-rs-tests/ct600-ctm03955-losses.xml
             cargo test -p ct600 --lib ct600_return_from_basic_1_matches_reference
-            [ -f .cache/ct600-rs-tests/ct600-basic-1.xml ] || {
-              echo "rct600-rust: failed to generate .cache/ct600-rs-tests/ct600-basic-1.xml" >&2
-              exit 1
-            }
-            echo "==> wrote .cache/ct600-rs-tests/ct600-basic-1.xml (our Rust ct600 generator)"
+            cargo test -p ct600 --lib ct600_ctm03955_loss_company_message_generates
+            for f in \
+              .cache/ct600-rs-tests/ct600-basic-1.xml \
+              .cache/ct600-rs-tests/ct600-ctm03955-losses.xml
+            do
+              [ -f "$f" ] || {
+                echo "rct600-2: failed to generate $f" >&2
+                exit 1
+              }
+            done
+            echo "==> wrote the Rust ct600 generator messages in .cache/ct600-rs-tests/"
           '';
 
           # Start the HMRC Local Test Service (with bundled CT artefacts):
@@ -460,50 +468,65 @@
             LTS_HOME="$PWD" sh RunLTSStandalone.sh
           '';
 
-          # Submit the Rust ct600 generator's message
-          # (.cache/ct600-rs-tests/ct600-basic-1.xml) to a running LTS:
-          # wait for it to come up on :8081, POST the file to
-          # /LTS/LTSPostServlet and print the GovTalk validation response.
-          hmrc-lts-submit = ''
+          # Wait for a running Local Test Service to accept connections on
+          # :8081 (shared by the submit flows).
+          hmrc-lts-wait = ''
             set -e
             PORT=8081
-            FILE="${wd}/.cache/ct600-rs-tests/ct600-basic-1.xml"
-            [ -f "$FILE" ] || {
-              echo "hmrc-lts-submit: missing input: $FILE" >&2
-              echo "  hint: run \`nix develop -c rct600-rust\` to regenerate it from the Rust ct600 generator" >&2
-              exit 1
-            }
             echo "waiting for LTS on :$PORT ..."
             UP=0
             for i in $(seq 1 90); do
               if curl -s -o /dev/null "http://localhost:$PORT/LTS"; then UP=1; break; fi
               sleep 1
             done
-            [ "$UP" = 1 ] || { echo "LTS not up after 90s" >&2; exit 1; }
-            echo "==> submitting $FILE to http://localhost:$PORT/LTS/LTSPostServlet"
-            curl -s -w '\n(http_code=%{http_code})\n' -H 'Content-Type: application/x-binary' \
-              --data-binary @"$FILE" "http://localhost:$PORT/LTS/LTSPostServlet" | tr -d '\r'
-            echo
+            [ "$UP" = 1 ] || { echo "hmrc-lts-wait: LTS not up after 90s" >&2; exit 1; }
           '';
 
-          # Start LTS + submit together, in a zellij session (via l.mkZmux):
-          # the "lts" tab runs `nix run .#hmrc-lts-run` in the foreground
-          # (its logs stay visible; its cleanup kills any stale instance
-          # first), the "submit" tab runs `nix run .#hmrc-lts-submit` once
-          # the server is up.
-          test-lts = '' ${l.mkZmux [
-            {
-              name = "lts";
-              command = "${bin.hmrc-lts-run}";
-              cleanup = "${bin.hmrc-lts-stop}";
+          # Submit every Rust ct600 test message
+          # (.cache/ct600-rs-tests/ct600-*.xml) to a running LTS.  For each
+          # file: print its path, POST it to /LTS/LTSPostServlet, print the
+          # GovTalk response, and stop at the first validation failure (the
+          # response carries an ErrorResponse envelope), so the failing file
+          # and its errors stay on screen.
+          hmrc-lts-submit = ''
+            set -e
+            ${bin.hmrc-lts-wait}
+            shopt -s nullglob
+            FILES=("${wd}"/.cache/ct600-rs-tests/ct600-*.xml)
+            [ ''${#FILES[@]} -gt 0 ] || {
+              echo "hmrc-lts-submit: no ct600-*.xml messages in ${wd}/.cache/ct600-rs-tests" >&2
+              echo "  hint: run \`nix develop -c rct600-2\` to generate them from the Rust ct600 generator" >&2
+              exit 1
             }
-            {
-              name = "submit";
-              command = "${bin.hmrc-lts-submit}";
-            }
-          ]}
-          echo "zellij session closed (tabs: lts, submit); the LTS has been stopped."
-          echo "Re-run \`nix run .#test-lts\` for the full session, or \`nix run .#hmrc-lts-stop\` to kill the server directly."
+            for FILE in "''${FILES[@]}"; do
+              echo "==> submitting $FILE"
+              RESP="$(curl -s -w '\n(http_code=%{http_code})\n' -H 'Content-Type: application/x-binary' \
+                --data-binary @"$FILE" "http://localhost:8081/LTS/LTSPostServlet" | tr -d '\r')"
+              printf '%s\n' "$RESP"
+              if printf '%s' "$RESP" | grep -qi 'ErrorResponse'; then
+                echo "hmrc-lts-submit: LTS validation FAILED for $FILE" >&2
+                exit 1
+              fi
+            done
+            echo "==> all messages accepted by the LTS"
+          '';
+
+          # Full LTS round-trip: regenerate the Rust ct600 test messages
+          # first (so the submits always exercise the latest generators),
+          # then start LTS + submit them together, in a zellij session (via
+          # l.mkZmux): the "lts" tab runs `nix run .#hmrc-lts-run` in the
+          # foreground (its logs stay visible; its cleanup kills any stale
+          # instance first), the "submit" tab runs `nix run .#hmrc-lts-submit`
+          # once the server is up.  Needs the devShell (runs `cargo test`
+          # via rct600-2): `nix develop -c nix run .#test-lts`.
+          test-lts = ''
+            set -e
+            echo "==> regenerating the Rust ct600 test messages"
+            ${bin.rct600-2}
+            ${l.mkZmux [
+              { name = "lts"; command = "${bin.hmrc-lts-run}"; cleanup = "${bin.hmrc-lts-stop}"; }
+              { name = "submit"; command = "${bin.hmrc-lts-submit}"; }
+            ]}
           '';
 
           # Kill the Local Test Service (also the lts tab's cleanup hook).
