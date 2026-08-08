@@ -395,7 +395,7 @@ impl GnucashBook {
     /// [`Self::try_from_gnucash_file`] (via rucash) parses back into the
     /// same raw parts.  The output is deterministic, so it doubles as the
     /// generator for the committed example books under `example_data/`
-    /// (e.g. `example_data/example3/input.gnucash`, a gzip of this
+    /// (e.g. `example_data/ctm03955-marginal-relief/input.gnucash`, a gzip of this
     /// document).
     ///
     /// Only the parts the parser round-trips are written: the accounts

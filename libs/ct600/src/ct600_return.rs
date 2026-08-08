@@ -1105,21 +1105,22 @@ mod tests {
         ixbrl::GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
     }
 
-    fn example3_company() -> ixbrl::company::Company {
+    fn ctm03955_company() -> ixbrl::company::Company {
         let mut company =
             ixbrl::company::Company::new("Example Biz Ltd.", "8596148860", "12345678");
         // The registration date is not in the config (resolved from
         // Companies House in the CLI); use the accounts' incorporation date,
-        // as the ixbrl example3 loader does.
+        // as the ixbrl crate's `load_ctm03955()` does.
         company.registration_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
         company
     }
 
-    /// The example3 accounts: the 2023 calendar-year return period, two
+    /// The ctm03955-marginal-relief example's accounts: the 2023
+    /// calendar-year return period, two
     /// associated companies (the HMRC CTM03955 group), and the report
     /// metadata (the ct600 message only uses these for the attached accounts
     /// iXBRL rendering).
-    fn example3_accounts_meta() -> ixbrl::company::AccountsMeta {
+    fn ctm03955_accounts_meta() -> ixbrl::company::AccountsMeta {
         ixbrl::company::AccountsMeta {
             period: Some(ixbrl::company::AccountingPeriod {
                 start: NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
@@ -1140,8 +1141,8 @@ mod tests {
     /// The previous period's computation: calendar-2022 made a £50,000
     /// trading loss (a sundries spend with no income — [`loss_only_book`]),
     /// which the example carries forward into 2023.
-    fn example3_prev_loss() -> Frs105CorpTax {
-        let company = example3_company();
+    fn ctm03955_prev_loss() -> Frs105CorpTax {
+        let company = ctm03955_company();
         let prev_accounts = ixbrl::company::AccountsMeta {
             period: Some(ixbrl::company::AccountingPeriod {
                 start: NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(),
@@ -1161,10 +1162,10 @@ mod tests {
         prev
     }
 
-    /// The example3 company profile: minimal (the committed config carries
+    /// The ctm03955 company profile: minimal (the committed config carries
     /// no descriptive fields); only used for the attached accounts iXBRL
     /// rendering.
-    fn example3_profile() -> CompanyProfile {
+    fn ctm03955_profile() -> CompanyProfile {
         CompanyProfile {
             directors: Vec::new(),
             contact_name: String::new(),
@@ -1197,18 +1198,18 @@ mod tests {
         }
     }
 
-    async fn example3_accounts() -> Frs105Accounts {
-        let company = example3_company();
+    async fn ctm03955_accounts() -> Frs105Accounts {
+        let company = ctm03955_company();
         let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
-            "../ixbrl/example_data/example3/input.gnucash",
+            "../ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
         )
         .await
-        .expect("open example3 gnucash");
+        .expect("open ctm03955 gnucash");
         Frs105Accounts::new(
             &gnucash,
             &company,
-            &example3_profile(),
-            &example3_accounts_meta(),
+            &ctm03955_profile(),
+            &ctm03955_accounts_meta(),
         )
     }
 
@@ -1419,32 +1420,33 @@ mod tests {
         assert_eq!(back.trading_losses_brought_forward, None);
     }
 
-    /// A loss-company example message: example3's £175,000 sales year with
+    /// A loss-company example message: the ctm03955-marginal-relief
+    /// example's £175,000 sales year with
     /// a £50,000 trading loss carried forward from the previous period
     /// (through the real builder path — the previous period's computation
     /// from a loss-making ledger).  The message emits
     /// `ct:LossesBroughtForward` (box 160) between `ct:Profits` and
     /// `ct:NetProfits` — the element the example2 message omits — and is
-    /// written to `.cache/ct600-rs-tests/ct600-example3-losses.xml`.  To
+    /// written to `.cache/ct600-rs-tests/ct600-ctm03955-losses.xml`.  To
     /// validate it against the CT schema, extract the `ct:IRenvelope`
     /// (adding the `xmlns:ct="http://www.govtalk.gov.uk/taxation/CT/5"`
     /// declaration) and run
     /// `xmllint --noout --schema <CT-2014-v1-96.xsd> <extracted.xml>` — the
     /// `ct:LossesBroughtForward` element must be accepted (minOccurs="0").
     #[tokio::test]
-    async fn ct600_example3_loss_company_message_generates() {
-        let company = example3_company();
-        let accounts = example3_accounts_meta();
+    async fn ct600_ctm03955_loss_company_message_generates() {
+        let company = ctm03955_company();
+        let accounts = ctm03955_accounts_meta();
         let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
-            "../ixbrl/example_data/example3/input.gnucash",
+            "../ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
         )
         .await
-        .expect("open example3 gnucash");
+        .expect("open ctm03955 gnucash");
 
         // The £50,000 loss is carried through the real builder path into
         // the 2023 computation.
         let corp_tax = Frs105CorpTax::builder(&gnucash, &company, &accounts)
-            .trading_losses_brought_forward(&example3_prev_loss())
+            .trading_losses_brought_forward(&ctm03955_prev_loss())
             .build();
         // Box 155 = adjusted profit, box 160 = the loss set off, box 165 =
         // the net.
@@ -1452,13 +1454,13 @@ mod tests {
         assert_eq!(corp_tax.trading_losses_brought_forward, -50_000.0);
         assert_eq!(corp_tax.net_trading_profits, 125_000.0);
 
-        let filing = Ct600Return::from_inputs(&example3_accounts().await, &corp_tax);
+        let filing = Ct600Return::from_inputs(&ctm03955_accounts().await, &corp_tax);
         let xml = filing.to_xml();
 
         // Write the generated message for the CT-schema validation.
         std::fs::create_dir_all("../../.cache/ct600-rs-tests").unwrap();
         std::fs::write(
-            "../../.cache/ct600-rs-tests/ct600-example3-losses.xml",
+            "../../.cache/ct600-rs-tests/ct600-ctm03955-losses.xml",
             &xml,
         )
         .unwrap();

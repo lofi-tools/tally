@@ -3134,7 +3134,7 @@ mod tests {
     /// on `date`, balanced against a bank account, and nothing else.  Used
     /// by the straddling-period tests, whose return periods the committed
     /// example1/example2 books (dated 2019/20) cannot cover, and as the
-    /// source of the committed example3 book (see [`example3_book`]).
+    /// source of the committed ctm03955 book (see [`ctm03955_book`]).
     fn sales_only_book(amount: i64, date: chrono::NaiveDate) -> crate::GnucashBook {
         let raw_accounts = vec![
             crate::RawAccount {
@@ -3490,20 +3490,21 @@ mod tests {
     ///
     /// The book is loaded two ways: built ad-hoc from code
     /// ([`sales_only_book`]) and read from the committed
-    /// `example_data/example3/input.gnucash` file, exactly as the CLI
+    /// `example_data/ctm03955-marginal-relief/input.gnucash` file, exactly as the CLI
     /// would load it.  Both must carry the same ledger, and the HMRC
     /// figures must hold from both sources.
     #[tokio::test]
     async fn test_straddling_2023_associated_companies_hmrc_example() {
-        let (company, accounts) = load_example3();
+        let (company, accounts) = load_ctm03955();
         let book_from_code = sales_only_book(
             175_000,
             chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(),
         );
-        let book_from_file =
-            crate::GnucashBook::try_from_gnucash_file("example_data/example3/input.gnucash")
-                .await
-                .expect("open example3 book");
+        let book_from_file = crate::GnucashBook::try_from_gnucash_file(
+            "example_data/ctm03955-marginal-relief/input.gnucash",
+        )
+        .await
+        .expect("open ctm03955 book");
         assert_same_ledger(&book_from_file, &book_from_code);
 
         // The HMRC figures hold from both sources.
@@ -3514,7 +3515,7 @@ mod tests {
     }
 
     /// The HMRC CTM03955 figures, asserted for a [`Frs105CorpTax`] built
-    /// from the example3 book and accounts (the test above documents the
+    /// from the ctm03955 book and accounts (the test above documents the
     /// source values).
     fn assert_hmrc_example_figures(ct: &Frs105CorpTax, accounts: &AccountsMeta) {
         let period = accounts.period();
@@ -3587,33 +3588,34 @@ mod tests {
         assert!(!html.contains("FY2 less marginal relief"));
     }
 
-    /// The top-level shape of `example_data/example3/input_config.json`:
+    /// The top-level shape of `example_data/ctm03955-marginal-relief/input_config.json`:
     /// the company identity and the `accounts` sub-object.  The corp-tax
     /// report only reads the identity, so the descriptive profile fields
     /// (which the accounts report consumes) are not deserialised here.
     #[derive(serde::Deserialize)]
-    struct Example3Config {
-        company: Example3Company,
+    struct Ctm03955Config {
+        company: Ctm03955Company,
         #[serde(default)]
         accounts: AccountsMeta,
     }
 
     #[derive(serde::Deserialize)]
-    struct Example3Company {
+    struct Ctm03955Company {
         name: String,
         tax_reference: String,
         company_number: String,
     }
 
-    /// Load the example3 company and accounts from the committed config
+    /// Load the ctm03955 company and accounts from the committed config
     /// file.  The registration date is not stored in the config (in the
     /// CLI it is resolved from Companies House); it is taken from the
     /// accounts' incorporation date so the iXBRL output carries a
     /// meaningful value.
-    fn load_example3() -> (Company, AccountsMeta) {
-        let json = std::fs::read_to_string("example_data/example3/input_config.json")
-            .expect("read example3 config");
-        let config: Example3Config = serde_json::from_str(&json).expect("parse example3 config");
+    fn load_ctm03955() -> (Company, AccountsMeta) {
+        let json =
+            std::fs::read_to_string("example_data/ctm03955-marginal-relief/input_config.json")
+                .expect("read ctm03955 config");
+        let config: Ctm03955Config = serde_json::from_str(&json).expect("parse ctm03955 config");
         let mut company = Company::new(
             config.company.name,
             config.company.tax_reference,
@@ -3623,9 +3625,10 @@ mod tests {
         (company, config.accounts)
     }
 
-    /// The sales-only book behind example3: a single £175,000 UK-sales
+    /// The sales-only book behind the ctm03955-marginal-relief example: a
+    /// single £175,000 UK-sales
     /// transaction on 15 June 2023, balanced against a bank account.
-    fn example3_book() -> crate::GnucashBook {
+    fn ctm03955_book() -> crate::GnucashBook {
         sales_only_book(
             175_000,
             chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(),
@@ -3643,39 +3646,39 @@ mod tests {
         encoder.finish().expect("finish the gzip stream")
     }
 
-    /// The committed example3 book is exactly the serializer's output
+    /// The committed ctm03955 book is exactly the serializer's output
     /// (gzip'd): regenerating it must be a no-op.  If it ever drifts, run
-    /// `cargo test -p ixbrl -- --ignored regenerate_example3_book_fixture`.
+    /// `cargo test -p ixbrl -- --ignored regenerate_ctm03955_book_fixture`.
     #[test]
-    fn test_example3_book_matches_committed_fixture() {
-        let generated = gzip(example3_book().to_gnucash_xml().as_bytes());
-        let committed =
-            std::fs::read("example_data/example3/input.gnucash").expect("read the example3 book");
+    fn test_ctm03955_book_matches_committed_fixture() {
+        let generated = gzip(ctm03955_book().to_gnucash_xml().as_bytes());
+        let committed = std::fs::read("example_data/ctm03955-marginal-relief/input.gnucash")
+            .expect("read the ctm03955 book");
         assert_eq!(
             generated, committed,
-            "example_data/example3/input.gnucash is stale — run the ignored \
-             regenerate_example3_book_fixture test to rewrite it"
+            "example_data/ctm03955-marginal-relief/input.gnucash is stale — run the ignored \
+             regenerate_ctm03955_book_fixture test to rewrite it"
         );
     }
 
-    /// Regenerate `example_data/example3/input.gnucash` from the
+    /// Regenerate `example_data/ctm03955-marginal-relief/input.gnucash` from the
     /// serializer.  Ignored by default because it writes into the source
     /// tree; run it (with `--ignored`) when the fixture is stale.
     #[test]
     #[ignore = "writes the committed fixture; run with --ignored to regenerate"]
-    fn regenerate_example3_book_fixture() {
-        let data = gzip(example3_book().to_gnucash_xml().as_bytes());
-        std::fs::write("example_data/example3/input.gnucash", data)
-            .expect("write the example3 book");
+    fn regenerate_ctm03955_book_fixture() {
+        let data = gzip(ctm03955_book().to_gnucash_xml().as_bytes());
+        std::fs::write("example_data/ctm03955-marginal-relief/input.gnucash", data)
+            .expect("write the ctm03955 book");
     }
 
     /// The serializer round-trips: gzip the generated XML, parse it back
     /// through rucash, and confirm the raw parts come out identical.
     #[tokio::test]
-    async fn test_example3_book_xml_round_trips() {
-        let book = example3_book();
+    async fn test_ctm03955_book_xml_round_trips() {
+        let book = ctm03955_book();
         let path = std::env::temp_dir().join(format!(
-            "ixbrl-example3-roundtrip-{}.gnucash",
+            "ixbrl-ctm03955-roundtrip-{}.gnucash",
             std::process::id()
         ));
         std::fs::write(&path, gzip(book.to_gnucash_xml().as_bytes()))
