@@ -307,12 +307,12 @@
         scripts = with bash; mapAttrs pkgs.writeShellScriptBin {
           run = ''cargo run -- "$@" '';
 
-          # Run our Rust tally CLI over the example2 data (config + GnuCash
+          # Run our Rust tally CLI over the basic-1 data (config + GnuCash
           # book), writing the CT600 GovTalk message to .cache/tally-cli/ct600-<number>.xml.
           ex2 = ''
             cargo run -p tally-cli -- ct600 \
-              --config-path "${wd}/libs/ixbrl/example_data/example2/input_config.json" \
-              --book "${wd}/libs/ixbrl/example_data/example2/input.gnucash"
+              --config-path "${wd}/libs/ixbrl/example_data/basic-1/input_config.json" \
+              --book "${wd}/libs/ixbrl/example_data/basic-1/input.gnucash"
           '';
           # packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';
           # utest = ''set -x; cargo nextest run $(packages) -E "''${TEST_FILTER:-all()}" --nocapture "$@" -- $SINGLE_TEST '';
@@ -329,7 +329,7 @@
           racc-gnucash = ''
             HERE="${bash.wd}"; cd ${ref-ixbrl.src}
             mkdir -p "$HERE/.cache/py-ixbrl-reporter"
-            ${pkgs.gawk}/bin/awk -v file="$HERE/libs/ixbrl/example_data/example2/input.gnucash" '
+            ${pkgs.gawk}/bin/awk -v file="$HERE/libs/ixbrl/example_data/basic-1/input.gnucash" '
               /^accounts:/ { print "accounts:"; print "  kind: piecash"; print "  file: " file; f=1; next }
               /^report:/ { f=0 }
               !f
@@ -353,7 +353,7 @@
             mkdir -p "$HERE/.cache/py-ixbrl-reporter"
             ${bin.ref-ixbrl} ${ref-ixbrl.src}/config-corptax.yaml report ixbrl > "$HERE/.cache/py-ixbrl-reporter/corp-tax.html"
           '';
-          validate = ''arelleCmdLine -f "${wd}/.cache/ixbrl-rs-tests/ct_return_example2.html" -v --validationExitCode --captureWarnings'';
+          validate = ''arelleCmdLine -f "${wd}/.cache/ixbrl-rs-tests/ct_return_basic-1.html" -v --validationExitCode --captureWarnings'';
 
           # E2E: regenerate every report the Rust test suite produces, then
           # validate each one with Arelle.  Prints the path before
@@ -365,10 +365,10 @@
             set -e
             cargo test -p ixbrl --lib
             for f in \
-              accts-micro-example2.html \
-              accts-micro-roundtrip-example2.html \
-              ct_return_example2.html \
-              ct_roundtrip_example2.html
+              accts-micro-basic-1.html \
+              accts-micro-roundtrip-basic-1.html \
+              ct_return_basic-1.html \
+              ct_roundtrip_basic-1.html
             do
               path="${wd}/.cache/ixbrl-rs-tests/$f"
               [ -f "$path" ] || { echo "validate-all: missing report: $path" >&2; exit 1; }
@@ -380,10 +380,10 @@
           '';
           rct600 = ''${bin.ref-ct600} "$@" '';
 
-          # Run the reference ct600 tool over the example2 pair: step 1
+          # Run the reference ct600 tool over the basic-1 pair: step 1
           # generates the CT600 form-values YAML from the computations iXBRL,
           # step 2 renders the CT message (--output-ct, no submission) into
-          # .cache.  Inputs default to the example2 pair but can be
+          # .cache.  Inputs default to the basic-1 pair but can be
           # overridden:
           #   rct600-run [--config F] [--accounts F] [--computations F] [--form-values F]
           rct600-run = ''
@@ -392,7 +392,7 @@
             mkdir -p "$HERE/.cache/py-ixbrl-reporter" "$HERE/.cache/ixbrl-rs-tests" "$HERE/.cache/py-ct600"
             CONFIG="${ref-ct600.src}/config.json"
             ACCOUNTS="$HERE/.cache/py-ixbrl-reporter/accts-micro-gnucash.html"
-            COMPUTATIONS="$HERE/.cache/ixbrl-rs-tests/ct_return_example2.html"
+            COMPUTATIONS="$HERE/.cache/ixbrl-rs-tests/ct_return_basic-1.html"
             FORM_VALUES="$HERE/.cache/py-ct600/form-values.yaml"
             OUT="$HERE/.cache/py-ct600/ct600.xml"
             while [ $# -gt 0 ]; do
@@ -425,19 +425,19 @@
           '';
 
           # Regenerate the Rust-generated CT600 message (from the ct600
-          # crate's generator) into .cache/ct600-rs-tests/ct600-example2.xml, by
+          # crate's generator) into .cache/ct600-rs-tests/ct600-basic-1.xml, by
           # running the generator test that writes it.  Runs in the devShell
           # (needs cargo).
           rct600-2 = ''
             set -eo pipefail
 
-            rm -f .cache/ct600-rs-tests/ct600-example2.xml
-            cargo test -p ct600 --lib ct600_return_from_example2_matches_reference
-            [ -f .cache/ct600-rs-tests/ct600-example2.xml ] || {
-              echo "rct600-rust: failed to generate .cache/ct600-rs-tests/ct600-example2.xml" >&2
+            rm -f .cache/ct600-rs-tests/ct600-basic-1.xml
+            cargo test -p ct600 --lib ct600_return_from_basic_1_matches_reference
+            [ -f .cache/ct600-rs-tests/ct600-basic-1.xml ] || {
+              echo "rct600-rust: failed to generate .cache/ct600-rs-tests/ct600-basic-1.xml" >&2
               exit 1
             }
-            echo "==> wrote .cache/ct600-rs-tests/ct600-example2.xml (our Rust ct600 generator)"
+            echo "==> wrote .cache/ct600-rs-tests/ct600-basic-1.xml (our Rust ct600 generator)"
           '';
 
           # Start the HMRC Local Test Service (with bundled CT artefacts):
@@ -461,13 +461,13 @@
           '';
 
           # Submit the Rust ct600 generator's message
-          # (.cache/ct600-rs-tests/ct600-example2.xml) to a running LTS:
+          # (.cache/ct600-rs-tests/ct600-basic-1.xml) to a running LTS:
           # wait for it to come up on :8081, POST the file to
           # /LTS/LTSPostServlet and print the GovTalk validation response.
           hmrc-lts-submit = ''
             set -e
             PORT=8081
-            FILE="${wd}/.cache/ct600-rs-tests/ct600-example2.xml"
+            FILE="${wd}/.cache/ct600-rs-tests/ct600-basic-1.xml"
             [ -f "$FILE" ] || {
               echo "hmrc-lts-submit: missing input: $FILE" >&2
               echo "  hint: run \`nix develop -c rct600-rust\` to regenerate it from the Rust ct600 generator" >&2

@@ -1072,7 +1072,7 @@ mod tests {
     /// succeeding once the book is present.
     #[tokio::test]
     async fn ct600_config_resolves_and_requires_paths() {
-        let path = Path::new("../../libs/ixbrl/example_data/example2/input_config.json");
+        let path = Path::new("../../libs/ixbrl/example_data/basic-1/input_config.json");
         let empty_env = EnvVars::default();
 
         let file = ConfigFile::from_file(path).expect("parse example config");
@@ -1330,13 +1330,13 @@ mod tests {
     }
 
     /// The committed minimal config
-    /// (`libs/ixbrl/example_data/example2/minimal_config.json`) parses to a
+    /// (`libs/ixbrl/example_data/basic-1/minimal_config.json`) parses to a
     /// blank identity, no period, a blank profile and only the required
     /// report metadata — the live test enriches the identity and period
     /// from the environment and the Companies House API.
     #[test]
     fn minimal_config_parses() {
-        let path = Path::new("../../libs/ixbrl/example_data/example2/minimal_config.json");
+        let path = Path::new("../../libs/ixbrl/example_data/basic-1/minimal_config.json");
         let file = ConfigFile::from_file(path).expect("parse the minimal config");
         assert_eq!(file.company.name, None);
         assert_eq!(file.company.tax_reference, None);
@@ -1533,7 +1533,7 @@ mod live_tests {
     /// With `COMPANIES_HOUSE_API_KEY` (or `COMPANIES_HOUSE_SANDBOX_API_KEY`),
     /// `COMPANY_NUMBER` and `COMPANY_UNIQUE_TAXPAYER_REF` exported, the
     /// committed minimal config
-    /// (`libs/ixbrl/example_data/example2/minimal_config.json` — no identity,
+    /// (`libs/ixbrl/example_data/basic-1/minimal_config.json` — no identity,
     /// no period, blank profile; the required report metadata comes from the
     /// config) is enriched from the live profile and officers (name,
     /// registration date, next accounting period, and the descriptive
@@ -1566,7 +1566,7 @@ mod live_tests {
         // The committed minimal config: no identity, no period, blank
         // profile — the identity and period come from the environment and
         // the live API; the required report metadata comes from the config.
-        let path = Path::new("../../libs/ixbrl/example_data/example2/minimal_config.json");
+        let path = Path::new("../../libs/ixbrl/example_data/basic-1/minimal_config.json");
         let file = ConfigFile::from_file(path).expect("parse the minimal config");
         let cli = CliArgs {
             config_path: path.to_path_buf(),

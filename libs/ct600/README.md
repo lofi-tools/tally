@@ -82,7 +82,7 @@ ignored):
   `Acme Ltd`, created `2020-01-01` (the company paired with
   `TestData::sample_tax()`, period 2025). A cache entry shadows the fixture;
   the live API is only hit when an API key is set.
-- The return is built from the ixbrl example2 gnucash fixture: `Example Biz
+- The return is built from the ixbrl basic-1 gnucash fixture: `Example Biz
   Ltd.`, UTR `8596148860`, period `2020-01-01 → 2020-12-31`; envelope/contact
   values as above.
 - The element-structure check compares against `.cache/py-ct600/ct600.xml`

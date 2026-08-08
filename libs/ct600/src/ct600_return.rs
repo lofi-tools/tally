@@ -679,7 +679,7 @@ impl Ct600Return {
 
         // Box 160 is optional in the CT schema (minOccurs="0"), so it is
         // only emitted when set — matching the reference tool, which omits
-        // unset boxes (and keeping example2 byte-identical).
+        // unset boxes (and keeping basic-1 byte-identical).
         let mut trading_children = vec![elt_text("ct:Profits", &[], &pounds(self.trading_profits))];
         if let Some(losses) = self.trading_losses_brought_forward {
             trading_children.push(elt_text("ct:LossesBroughtForward", &[], &pounds(losses)));
@@ -942,7 +942,7 @@ mod tests {
     use ixbrl::company::CompanyProfile;
     use std::collections::HashMap;
 
-    fn example2_company() -> ixbrl::company::Company {
+    fn basic_1_company() -> ixbrl::company::Company {
         let mut company =
             ixbrl::company::Company::new("Example Biz Ltd.", "8596148860", "12345678");
         // Anchored on the return-period start, matching the historical
@@ -955,7 +955,7 @@ mod tests {
     /// period, the default financial-year tax parameters and the report
     /// metadata (title, dates, employee counts; the ct600 message only uses
     /// these for the attached accounts iXBRL rendering).
-    fn example2_accounts_meta() -> ixbrl::company::AccountsMeta {
+    fn basic_1_accounts_meta() -> ixbrl::company::AccountsMeta {
         ixbrl::company::AccountsMeta {
             period: Some(ixbrl::company::AccountingPeriod {
                 start: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
@@ -970,14 +970,14 @@ mod tests {
         }
     }
 
-    async fn example2_corp_tax() -> Frs105CorpTax {
-        let company = example2_company();
+    async fn basic_1_corp_tax() -> Frs105CorpTax {
+        let company = basic_1_company();
         let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
-            "../ixbrl/example_data/example2/input.gnucash",
+            "../ixbrl/example_data/basic-1/input.gnucash",
         )
         .await
-        .expect("open example2 gnucash");
-        Frs105CorpTax::builder(&gnucash, &company, &example2_accounts_meta())
+        .expect("open basic-1 gnucash");
+        Frs105CorpTax::builder(&gnucash, &company, &basic_1_accounts_meta())
             .add_rd_project(
                 "Project Iguana",
                 &[
@@ -999,25 +999,25 @@ mod tests {
             .build()
     }
 
-    async fn example2_accounts() -> Frs105Accounts {
-        let company = example2_company();
+    async fn basic_1_accounts() -> Frs105Accounts {
+        let company = basic_1_company();
         let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
-            "../ixbrl/example_data/example2/input.gnucash",
+            "../ixbrl/example_data/basic-1/input.gnucash",
         )
         .await
-        .expect("open example2 gnucash");
+        .expect("open basic-1 gnucash");
         Frs105Accounts::new(
             &gnucash,
             &company,
-            &example2_profile(),
-            &example2_accounts_meta(),
+            &basic_1_profile(),
+            &basic_1_accounts_meta(),
         )
     }
 
-    /// The example2 company profile (directors, SIC codes, contacts); the
+    /// The basic-1 company profile (directors, SIC codes, contacts); the
     /// ct600 message itself only uses this for the attached accounts iXBRL
     /// rendering.
-    fn example2_profile() -> CompanyProfile {
+    fn basic_1_profile() -> CompanyProfile {
         CompanyProfile {
             directors: vec!["A Bloggs".into(), "B Smith".into(), "C Jones".into()],
             contact_name: String::new(),
@@ -1236,8 +1236,8 @@ mod tests {
 
     #[tokio::test]
     async fn declaration_boxes_always_serialise_with_defaults() {
-        let corp_tax = example2_corp_tax().await;
-        let accounts = example2_accounts().await;
+        let corp_tax = basic_1_corp_tax().await;
+        let accounts = basic_1_accounts().await;
         let plain = Ct600Return::from_inputs(&accounts, &corp_tax);
 
         // The CT schema requires Name and Status in the Declaration; by
@@ -1302,8 +1302,8 @@ mod tests {
 
     #[tokio::test]
     async fn ct600_return_round_trips_through_xml() {
-        let corp_tax = example2_corp_tax().await;
-        let accounts = example2_accounts().await;
+        let corp_tax = basic_1_corp_tax().await;
+        let accounts = basic_1_accounts().await;
         let filing = Ct600Return::from_inputs(&accounts, &corp_tax)
             .with_declaration("Jane Doe", "Secretary");
 
@@ -1337,7 +1337,7 @@ mod tests {
         // trip recovers the truncated value.
         assert_eq!(back.turnover, 11218.0);
         assert_eq!(back.trading_profits, 748.0);
-        // example2 carries no brought-forward losses, so box 160 is omitted
+        // basic-1 carries no brought-forward losses, so box 160 is omitted
         // from the message and round-trips as unset.
         assert_eq!(back.trading_losses_brought_forward, None);
         assert_eq!(back.net_trading_profits, 748.0);
@@ -1384,13 +1384,13 @@ mod tests {
     /// is emitted only when non-zero (the CT schema marks it optional).
     #[tokio::test]
     async fn losses_brought_forward_split_the_trading_boxes() {
-        let mut corp_tax = example2_corp_tax().await;
+        let mut corp_tax = basic_1_corp_tax().await;
         // A £2,000 set-off against £5,000 of adjusted trading profit: box
         // 155 = 5000, box 160 = 2000, box 165 = 3000.
         corp_tax.adjusted_trading_profit = 5000.0;
         corp_tax.trading_losses_brought_forward = -2000.0;
         corp_tax.net_trading_profits = 3000.0;
-        let accounts = example2_accounts().await;
+        let accounts = basic_1_accounts().await;
         let filing = Ct600Return::from_inputs(&accounts, &corp_tax);
 
         let xml = filing.to_xml();
@@ -1410,8 +1410,8 @@ mod tests {
     /// element does not appear in the message and round-trips as zero.
     #[tokio::test]
     async fn no_losses_brought_forward_omits_box_160() {
-        let corp_tax = example2_corp_tax().await;
-        let accounts = example2_accounts().await;
+        let corp_tax = basic_1_corp_tax().await;
+        let accounts = basic_1_accounts().await;
         let filing = Ct600Return::from_inputs(&accounts, &corp_tax);
 
         let xml = filing.to_xml();
@@ -1426,7 +1426,7 @@ mod tests {
     /// (through the real builder path — the previous period's computation
     /// from a loss-making ledger).  The message emits
     /// `ct:LossesBroughtForward` (box 160) between `ct:Profits` and
-    /// `ct:NetProfits` — the element the example2 message omits — and is
+    /// `ct:NetProfits` — the element the basic-1 message omits — and is
     /// written to `.cache/ct600-rs-tests/ct600-ctm03955-losses.xml`.  To
     /// validate it against the CT schema, extract the `ct:IRenvelope`
     /// (adding the `xmlns:ct="http://www.govtalk.gov.uk/taxation/CT/5"`
@@ -1478,9 +1478,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ct600_return_from_example2_matches_reference() {
-        let corp_tax = example2_corp_tax().await;
-        let accounts = example2_accounts().await;
+    async fn ct600_return_from_basic_1_matches_reference() {
+        let corp_tax = basic_1_corp_tax().await;
+        let accounts = basic_1_accounts().await;
         let filing = Ct600Return::from_inputs(&accounts, &corp_tax);
 
         let xml = filing.to_xml();
@@ -1488,7 +1488,7 @@ mod tests {
         // Write the generated message to .cache/ct600-rs-tests for
         // inspection / the LTS.
         std::fs::create_dir_all("../../.cache/ct600-rs-tests").unwrap();
-        std::fs::write("../../.cache/ct600-rs-tests/ct600-example2.xml", &xml).unwrap();
+        std::fs::write("../../.cache/ct600-rs-tests/ct600-basic-1.xml", &xml).unwrap();
 
         // -- envelope --------------------------------------------------------
         assert!(xml.contains("<Class>HMRC-CT-CT600</Class>"));

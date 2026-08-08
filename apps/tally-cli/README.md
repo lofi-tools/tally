@@ -49,10 +49,10 @@ is optional.  There is no environment-variable fallback.
 ### Config file
 
 A JSON file with the same shape as
-`libs/ixbrl/example_data/example2/input_config.json` (use it as a template): a nested
+`libs/ixbrl/example_data/basic-1/input_config.json` (use it as a template): a nested
 `company` block (identity + descriptive profile) and an `accounts` sub-object
 (period + report metadata).  This is also the config the tests and the
-`tally-example2` script run against.  `libs/ixbrl/example_data/example2/minimal_config.json`
+`ex2` script run against.  `libs/ixbrl/example_data/basic-1/minimal_config.json`
 is a minimal template — no identity, no period and a blank profile, with
 only the required report metadata — which the live enrichment test resolves
 against the environment and the Companies House API.
@@ -195,8 +195,8 @@ A config file with the optional `company.*` profile fields (directors,
 contacts, accountant/auditor, ...) and the required `accounts.*` report
 metadata (dates, signature; the signatory defaults to the first director and
 the employee counts to 1 per financial year) — copy
-`libs/ixbrl/example_data/example2/input_config.json`, or start from
-`libs/ixbrl/example_data/example2/minimal_config.json` (no identity, no
+`libs/ixbrl/example_data/basic-1/input_config.json`, or start from
+`libs/ixbrl/example_data/basic-1/minimal_config.json` (no identity, no
 period, blank profile: with a Companies House API key, `COMPANY_NUMBER` and
 `COMPANY_UNIQUE_TAXPAYER_REF`, the identity and period are resolved at
 runtime) — plus a Corporation Tax reference —
@@ -218,8 +218,8 @@ cargo build -p tally-cli
 
 # Produce the example CT600 message
 cargo run -p tally-cli -- ct600 \
-  --config-path libs/ixbrl/example_data/example2/input_config.json \
-  --book libs/ixbrl/example_data/example2/input.gnucash \
+  --config-path libs/ixbrl/example_data/basic-1/input_config.json \
+  --book libs/ixbrl/example_data/basic-1/input.gnucash \
   --out .cache/tally-cli
 ```
 

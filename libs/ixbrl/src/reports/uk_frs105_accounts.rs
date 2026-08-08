@@ -16,9 +16,9 @@
 //! * `sum` / `group` computations add their inputs;
 //! * values are rounded to whole pounds (decimals = 0) at render time.
 //!
-//! For the example company (`example_data/example2/input.gnucash`) the
+//! For the example company (`example_data/basic-1/input.gnucash`) the
 //! rendered output matches the reference fixture
-//! `example_data/example2/output-accounts.html` byte for byte (after
+//! `example_data/basic-1/output-accounts.html` byte for byte (after
 //! stripping the reference's random element ids).
 
 use std::collections::HashMap;
@@ -1784,7 +1784,7 @@ mod tests {
     /// the company identity + profile, the report metadata and the
     /// logo/signature assets.
     fn load_example_data() -> ExampleCompanyData {
-        let json = std::fs::read_to_string("example_data/example2/input_config.json")
+        let json = std::fs::read_to_string("example_data/basic-1/input_config.json")
             .expect("read example company data file");
         serde_json::from_str(&json).expect("parse example company data file")
     }
@@ -1857,7 +1857,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_accounts_from_example2() {
+    async fn test_accounts_from_basic_1() {
         let (company, gnucash) = load_example().await;
         let accounts = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta());
 
@@ -1889,7 +1889,7 @@ mod tests {
         // then strip the reference's random `id="elt-*"` attributes, change the
         // header wrapper to `<div style="display:none">` (Arelle's
         // `headerDisplayNone` rule ignores stylesheet classes), and copy to
-        // example_data/example2/output-accounts.html.  The Rust output below
+        // example_data/basic-1/output-accounts.html.  The Rust output below
         // must match it byte for byte.
         let (company, gnucash) = load_example().await;
         let accounts = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta());
@@ -1898,13 +1898,13 @@ mod tests {
         // Write the Rust output for external validation (arelle).
         std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
         std::fs::write(
-            "../../.cache/ixbrl-rs-tests/accts-micro-example2.html",
+            "../../.cache/ixbrl-rs-tests/accts-micro-basic-1.html",
             &out,
         )
         .unwrap();
 
         let expected =
-            std::fs::read_to_string("example_data/example2/output-accounts.html")
+            std::fs::read_to_string("example_data/basic-1/output-accounts.html")
                 .expect("read reference fixture");
         assert_eq!(
             out, expected,
@@ -2004,7 +2004,7 @@ mod tests {
 
         std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
         std::fs::write(
-            "../../.cache/ixbrl-rs-tests/accts-micro-roundtrip-example2.html",
+            "../../.cache/ixbrl-rs-tests/accts-micro-roundtrip-basic-1.html",
             &html,
         )
         .unwrap();

@@ -2359,7 +2359,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_ct_return_from_example2() {
+    async fn test_ct_return_from_basic_1() {
         let company = crate::test_utils::TestData::default_company();
         let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
@@ -2414,11 +2414,7 @@ mod tests {
         assert!(ixbrl.contains(&company.tax_reference));
 
         std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
-        std::fs::write(
-            "../../.cache/ixbrl-rs-tests/ct_return_example2.html",
-            &ixbrl,
-        )
-        .unwrap();
+        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_basic-1.html", &ixbrl).unwrap();
     }
 
     #[tokio::test]
@@ -2436,7 +2432,7 @@ mod tests {
     #[tokio::test]
     async fn test_try_from_gnucash_file_xml() {
         let gnucash =
-            crate::GnucashBook::try_from_gnucash_file("example_data/example1/example.gnucash")
+            crate::GnucashBook::try_from_gnucash_file("example_data/basic-2/input.gnucash")
                 .await
                 .expect("open xml gnucash");
         println!("{gnucash}");
@@ -2588,7 +2584,7 @@ mod tests {
         assert!(ixbrl.contains("breakdown total cell"));
     }
 
-    async fn build_example2_ct() -> Frs105CorpTax {
+    async fn build_basic_1_ct() -> Frs105CorpTax {
         let company = crate::test_utils::TestData::default_company();
         let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
@@ -2621,14 +2617,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_invariant_gross_profit() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         assert_eq!(ct.gross_profit, (ct.turnover).floor());
         assert_eq!(ct.profit_before_tax, ct.gross_profit - ct.total_costs);
     }
 
     #[tokio::test]
     async fn test_invariant_net_trading_profits() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         assert_eq!(
             ct.net_trading_profits,
             ct.adjusted_trading_profit + ct.trading_losses_brought_forward
@@ -2639,7 +2635,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invariant_profit_chargeable() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let expected = ct.profits_before_charges
             - ct.qualifying_donations
             - ct.group_relief
@@ -2649,7 +2645,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invariant_tax_chargeable() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let expected_tax =
             (ct.fy1_tax * 100.0).round() / 100.0 + (ct.fy2_tax * 100.0).round() / 100.0;
         assert_eq!(ct.corporation_tax_chargeable, expected_tax);
@@ -2661,7 +2657,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invariant_net_payable() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         assert_eq!(
             ct.net_corporation_tax_payable,
             ct.corporation_tax_chargeable_payable - ct.total_reliefs_deductions_tax
@@ -2672,14 +2668,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_invariant_profit_split() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let total = ct.fy1_profit + ct.fy2_profit;
         assert_eq!(total, ct.profits_chargeable_to_corporation_tax);
     }
 
     #[tokio::test]
     async fn test_invariant_rnd_totals() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         assert_eq!(
             ct.rnd_creative_enhanced_total,
             ct.rnd_enhanced_expenditure + ct.creative_enhanced_expenditure
@@ -2688,7 +2684,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invariant_prev_tax_chargeable() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let expected_prev_tax =
             (ct.prev_fy1_tax * 100.0).round() / 100.0 + (ct.prev_fy2_tax * 100.0).round() / 100.0;
         assert_eq!(ct.prev_corporation_tax_chargeable, expected_prev_tax);
@@ -2696,7 +2692,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invariant_profit_after_tax() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         assert_eq!(
             ct.profit_after_tax,
             round2(ct.profit_before_tax - ct.tax_expense)
@@ -2705,7 +2701,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invariant_by_fy_consistency() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let fy2 = ct.accounts.fy2_year;
         assert_eq!(*ct.turnover_by_fy.get(&fy2).unwrap_or(&0.0), ct.turnover);
         assert_eq!(*ct.costs_by_fy.get(&fy2).unwrap_or(&0.0), ct.total_costs);
@@ -2721,11 +2717,11 @@ mod tests {
         // deserialise in two steps (XML -> XmlNode -> Frs105CorpTax) and
         // compare against the original for every field that is serialised to
         // iXBRL.
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let html = ct.to_ixbrl();
         std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
         std::fs::write(
-            "../../.cache/ixbrl-rs-tests/ct_roundtrip_example2.html",
+            "../../.cache/ixbrl-rs-tests/ct_roundtrip_basic-1.html",
             &html,
         )
         .unwrap();
@@ -2846,10 +2842,10 @@ mod tests {
     #[tokio::test]
     async fn test_from_ixbrl_round_trip() {
         // Ensure the cache file exists (test may run in parallel)
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let html = ct.to_ixbrl();
         std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
-        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_example2.html", &html).unwrap();
+        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_basic-1.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         assert_eq!(
@@ -2903,10 +2899,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_from_ixbrl_worksheet_fy_split() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let html = ct.to_ixbrl();
         std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
-        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_example2.html", &html).unwrap();
+        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_basic-1.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let fy1_cur = facts.numeric_by_ctx.get(&(
@@ -2923,10 +2919,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_from_parsed_facts() {
-        let ct = build_example2_ct().await;
+        let ct = build_basic_1_ct().await;
         let html = ct.to_ixbrl();
         std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
-        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_example2.html", &html).unwrap();
+        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_basic-1.html", &html).unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let company = crate::test_utils::TestData::default_company();
@@ -3133,7 +3129,7 @@ mod tests {
     /// A minimal pre-parsed book: a single UK-sales transaction of `amount`
     /// on `date`, balanced against a bank account, and nothing else.  Used
     /// by the straddling-period tests, whose return periods the committed
-    /// example1/example2 books (dated 2019/20) cannot cover, and as the
+    /// basic-1/basic-2 books (dated 2019/20) cannot cover, and as the
     /// source of the committed ctm03955 book (see [`ctm03955_book`]).
     fn sales_only_book(amount: i64, date: chrono::NaiveDate) -> crate::GnucashBook {
         let raw_accounts = vec![
