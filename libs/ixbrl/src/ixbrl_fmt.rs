@@ -177,20 +177,42 @@ impl XmlNode {
                 .map(|a| {
                     (
                         String::from_utf8_lossy(a.key.as_ref()).to_string(),
-                        a.unescape_value().unwrap_or_default().to_string(),
+                        // quick-xml 0.41: `unescape_value` was deprecated in
+                        // favour of `normalized_value` (XML attribute-value
+                        // normalisation incl. the predefined entities).
+                        a.normalized_value(quick_xml::XmlVersion::Explicit1_0)
+                            .map(|v| v.into_owned())
+                            .unwrap_or_else(|_| String::new()),
                     )
                 })
                 .collect()
         }
 
+        // Pending text of the current frame.  quick-xml 0.41 emits entity
+        // references (`&amp;`) as separate `GeneralRef` events between the
+        // surrounding `Text` events, so character data is accumulated here
+        // and flushed (trimmed, as one node) at tag boundaries — reproducing
+        // the single text node the pre-0.41 reader produced per text run.
+        let mut pending_text = String::new();
+
+        fn flush_text(stack: &mut [ElementFrame], pending: &mut String) {
+            let text = pending.trim();
+            if !text.is_empty() {
+                push_node(stack, XmlNode::Text(text.to_string()));
+            }
+            pending.clear();
+        }
+
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(e)) => {
+                    flush_text(&mut stack, &mut pending_text);
                     let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                     let attributes = read_attrs(&e);
                     stack.push((name, attributes, Vec::new()));
                 }
                 Ok(Event::Empty(e)) => {
+                    flush_text(&mut stack, &mut pending_text);
                     let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                     let attributes = read_attrs(&e);
                     push_node(
@@ -203,6 +225,7 @@ impl XmlNode {
                     );
                 }
                 Ok(Event::End(_)) => {
+                    flush_text(&mut stack, &mut pending_text);
                     let (name, attributes, children) =
                         stack.pop().ok_or("unexpected closing tag")?;
                     let node = XmlNode::Elem {
@@ -217,19 +240,34 @@ impl XmlNode {
                     }
                 }
                 Ok(Event::Text(t)) => {
-                    let text = t.unescape().map_err(|e| e.to_string())?;
-                    let text = text.trim();
-                    if !text.is_empty() {
-                        push_node(&mut stack, XmlNode::Text(text.to_string()));
-                    }
+                    // quick-xml 0.41 removed `BytesText::unescape`; decode the
+                    // bytes and resolve the XML entities with the free
+                    // `escape::unescape` function (same two steps as before).
+                    let decoded = t.decode().map_err(|e| e.to_string())?;
+                    let text = quick_xml::escape::unescape(&decoded).map_err(|e| e.to_string())?;
+                    pending_text.push_str(&text);
+                }
+                Ok(Event::GeneralRef(r)) => {
+                    // A named or numeric entity reference (`&amp;`, `&#160;`)
+                    // arrives as its content without `&` / `;`.  Rebuild
+                    // `&name;` and resolve it through the same unescaper.
+                    let entity = String::from_utf8_lossy(&r).into_owned();
+                    let resolved = quick_xml::escape::unescape(&format!("&{entity};"))
+                        .map_err(|e| e.to_string())?
+                        .into_owned();
+                    pending_text.push_str(&resolved);
                 }
                 Ok(Event::CData(c)) => {
+                    flush_text(&mut stack, &mut pending_text);
                     let text = String::from_utf8_lossy(&c).to_string();
                     if !text.trim().is_empty() {
                         push_node(&mut stack, XmlNode::Text(text));
                     }
                 }
-                Ok(Event::Eof) => break,
+                Ok(Event::Eof) => {
+                    flush_text(&mut stack, &mut pending_text);
+                    break;
+                }
                 // Decl, PI, Comment, DocType: not part of the node tree.
                 Ok(_) => {}
                 Err(e) => return Err(e.to_string()),
@@ -1131,5 +1169,27 @@ mod tests {
         assert_eq!(format!("{:?}", node), format!("{:?}", elt("html", &[]).child(
             elt("body", &[]).child(el("br"))
         )));
+    }
+
+    /// quick-xml 0.41 emits named entity references (`&amp;`) as separate
+    /// `GeneralRef` events between the surrounding `Text` events; the parser
+    /// must merge them back into a single text node.  Exercise a reference
+    /// at the start, middle and end of a text run, plus a numeric reference
+    /// (`&#160;`), which arrives inside the text event itself.
+    #[test]
+    fn from_xml_string_merges_entity_references_into_text() {
+        let cases: &[(&str, &str)] = &[
+            ("<p>&amp; hi</p>", "& hi"),
+            ("<p>hi&amp;</p>", "hi&"),
+            ("<p>a &amp; b &#160; c</p>", "a & b \u{00A0} c"),
+            ("<p>x&#160;y</p>", "x\u{00A0}y"),
+        ];
+        for (xml, text) in cases {
+            let node = XmlNode::from_xml_string(xml).expect("parse");
+            assert_eq!(
+                format!("{node:?}"),
+                format!("{:?}", elt_text("p", &[], text))
+            );
+        }
     }
 }

@@ -228,7 +228,7 @@
         # lists CT v3.9 -> CT/CT600/2014-2015 v2/3.99 and CT v1.994 ->
         # CT/CT600/2015-2016 v3/1.994, both under the CT/5 service uri, so
         # the newest is registered).
-        ownPkgs.hmrc-lts = pkgs.stdenv.mkDerivation rec {
+        ownPkgs.hmrc-lts = pkgs.stdenv.mkDerivation {
           pname = "hmrc-lts";
           version = "8.3";
           dontUnpack = true;
