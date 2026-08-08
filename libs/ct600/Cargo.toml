@@ -41,3 +41,7 @@ ixbrl = { path = "../ixbrl" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# Building ad-hoc ledgers (e.g. the loss-only book behind the example3
+# loss-company message) needs the `Num` value type; already in the lock via
+# the ixbrl crate's rucash dependency.
+rucash.workspace = true

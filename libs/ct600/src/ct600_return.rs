@@ -1050,6 +1050,168 @@ mod tests {
         }
     }
 
+    /// A loss-making book: spends `loss` on sundries with no income — the
+    /// mirror of `sales_only_book` in the ixbrl tests — used to build the
+    /// previous period's computation with a trading loss to carry forward.
+    fn loss_only_book(loss: i64, date: chrono::NaiveDate) -> ixbrl::GnucashBook {
+        let raw_accounts = vec![
+            ixbrl::RawAccount {
+                guid: "root".into(),
+                name: "Root Account".into(),
+                r#type: "ROOT".into(),
+                parent_guid: String::new(),
+            },
+            ixbrl::RawAccount {
+                guid: "expenses".into(),
+                name: "Expenses".into(),
+                r#type: "EXPENSE".into(),
+                parent_guid: "root".into(),
+            },
+            ixbrl::RawAccount {
+                guid: "vat-purchases".into(),
+                name: "VAT Purchases".into(),
+                r#type: "EXPENSE".into(),
+                parent_guid: "expenses".into(),
+            },
+            ixbrl::RawAccount {
+                guid: "sundries".into(),
+                name: "Sundries".into(),
+                r#type: "EXPENSE".into(),
+                parent_guid: "vat-purchases".into(),
+            },
+            ixbrl::RawAccount {
+                guid: "bank".into(),
+                name: "Bank".into(),
+                r#type: "BANK".into(),
+                parent_guid: "root".into(),
+            },
+        ];
+        let raw_txns = vec![ixbrl::RawTransaction {
+            guid: "txn-loss".into(),
+            post_datetime: date.and_hms_opt(12, 0, 0).unwrap(),
+        }];
+        let raw_splits = vec![
+            ixbrl::RawSplit {
+                tx_guid: "txn-loss".into(),
+                account_guid: "sundries".into(),
+                value: rucash::Num::from(-loss),
+            },
+            ixbrl::RawSplit {
+                tx_guid: "txn-loss".into(),
+                account_guid: "bank".into(),
+                value: rucash::Num::from(loss),
+            },
+        ];
+        ixbrl::GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
+    }
+
+    fn example3_company() -> ixbrl::company::Company {
+        let mut company =
+            ixbrl::company::Company::new("Example Biz Ltd.", "8596148860", "12345678");
+        // The registration date is not in the config (resolved from
+        // Companies House in the CLI); use the accounts' incorporation date,
+        // as the ixbrl example3 loader does.
+        company.registration_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        company
+    }
+
+    /// The example3 accounts: the 2023 calendar-year return period, two
+    /// associated companies (the HMRC CTM03955 group), and the report
+    /// metadata (the ct600 message only uses these for the attached accounts
+    /// iXBRL rendering).
+    fn example3_accounts_meta() -> ixbrl::company::AccountsMeta {
+        ixbrl::company::AccountsMeta {
+            period: Some(ixbrl::company::AccountingPeriod {
+                start: NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
+                end: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+            }),
+            fy1_year: 2022,
+            fy2_year: 2023,
+            associated_companies: 2,
+            report_date: NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+            authorised_date: NaiveDate::from_ymd_opt(2024, 2, 1).unwrap(),
+            incorporation_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            signed_by: "B Smith".into(),
+            average_employees: HashMap::from([("2023".to_string(), 2), ("2022".to_string(), 1)]),
+            ..ixbrl::company::AccountsMeta::default()
+        }
+    }
+
+    /// The previous period's computation: calendar-2022 made a £50,000
+    /// trading loss (a sundries spend with no income — [`loss_only_book`]),
+    /// which the example carries forward into 2023.
+    fn example3_prev_loss() -> Frs105CorpTax {
+        let company = example3_company();
+        let prev_accounts = ixbrl::company::AccountsMeta {
+            period: Some(ixbrl::company::AccountingPeriod {
+                start: NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(),
+                end: NaiveDate::from_ymd_opt(2022, 12, 31).unwrap(),
+            }),
+            fy1_year: 2021,
+            fy2_year: 2022,
+            ..ixbrl::company::AccountsMeta::default()
+        };
+        let prev = Frs105CorpTax::builder(
+            &loss_only_book(50_000, NaiveDate::from_ymd_opt(2022, 6, 15).unwrap()),
+            &company,
+            &prev_accounts,
+        )
+        .build();
+        assert_eq!(prev.trading_loss(), -50_000.0);
+        prev
+    }
+
+    /// The example3 company profile: minimal (the committed config carries
+    /// no descriptive fields); only used for the attached accounts iXBRL
+    /// rendering.
+    fn example3_profile() -> CompanyProfile {
+        CompanyProfile {
+            directors: Vec::new(),
+            contact_name: String::new(),
+            address_lines: vec!["123 Leadbarton Street".into()],
+            county: None,
+            location: String::new(),
+            postcode: String::new(),
+            email: None,
+            phone_country: None,
+            phone_area: None,
+            phone_number: None,
+            website_url: None,
+            website_description: None,
+            vat_registration: None,
+            sic_codes: Vec::new(),
+            activities: None,
+            jurisdiction: String::new(),
+            accountant_name: String::new(),
+            accountant_business: String::new(),
+            accountant_address: String::new(),
+            auditor_name: String::new(),
+            auditor_business: String::new(),
+            auditor_address: String::new(),
+            industry_sector_dimension: String::new(),
+            legal_form_dimension: String::new(),
+            country_dimension: String::new(),
+            contact_country_dimension: String::new(),
+            phone_type_dimension: String::new(),
+            logo_b64: None,
+        }
+    }
+
+    async fn example3_accounts() -> Frs105Accounts {
+        let company = example3_company();
+        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
+            "../ixbrl/example_data/example3/input.gnucash",
+        )
+        .await
+        .expect("open example3 gnucash");
+        Frs105Accounts::new(
+            &gnucash,
+            &company,
+            &example3_profile(),
+            &example3_accounts_meta(),
+        )
+    }
+
     /// The element skeleton of a node tree: names + attributes, text ignored.
     /// Used to compare our message's structure with the reference output.
     fn skeleton(node: &XmlNode) -> String {
@@ -1255,6 +1417,62 @@ mod tests {
         assert!(!xml.contains("LossesBroughtForward"));
         let back = Ct600Return::from_xml(&xml).expect("deserialise own message");
         assert_eq!(back.trading_losses_brought_forward, None);
+    }
+
+    /// A loss-company example message: example3's £175,000 sales year with
+    /// a £50,000 trading loss carried forward from the previous period
+    /// (through the real builder path — the previous period's computation
+    /// from a loss-making ledger).  The message emits
+    /// `ct:LossesBroughtForward` (box 160) between `ct:Profits` and
+    /// `ct:NetProfits` — the element the example2 message omits — and is
+    /// written to `.cache/ct600-rs-tests/ct600-example3-losses.xml`.  To
+    /// validate it against the CT schema, extract the `ct:IRenvelope`
+    /// (adding the `xmlns:ct="http://www.govtalk.gov.uk/taxation/CT/5"`
+    /// declaration) and run
+    /// `xmllint --noout --schema <CT-2014-v1-96.xsd> <extracted.xml>` — the
+    /// `ct:LossesBroughtForward` element must be accepted (minOccurs="0").
+    #[tokio::test]
+    async fn ct600_example3_loss_company_message_generates() {
+        let company = example3_company();
+        let accounts = example3_accounts_meta();
+        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
+            "../ixbrl/example_data/example3/input.gnucash",
+        )
+        .await
+        .expect("open example3 gnucash");
+
+        // The £50,000 loss is carried through the real builder path into
+        // the 2023 computation.
+        let corp_tax = Frs105CorpTax::builder(&gnucash, &company, &accounts)
+            .trading_losses_brought_forward(&example3_prev_loss())
+            .build();
+        // Box 155 = adjusted profit, box 160 = the loss set off, box 165 =
+        // the net.
+        assert_eq!(corp_tax.adjusted_trading_profit, 175_000.0);
+        assert_eq!(corp_tax.trading_losses_brought_forward, -50_000.0);
+        assert_eq!(corp_tax.net_trading_profits, 125_000.0);
+
+        let filing = Ct600Return::from_inputs(&example3_accounts().await, &corp_tax);
+        let xml = filing.to_xml();
+
+        // Write the generated message for the CT-schema validation.
+        std::fs::create_dir_all("../../.cache/ct600-rs-tests").unwrap();
+        std::fs::write(
+            "../../.cache/ct600-rs-tests/ct600-example3-losses.xml",
+            &xml,
+        )
+        .unwrap();
+
+        assert!(xml.contains("<ct:Profits>175000.00</ct:Profits>"));
+        assert!(xml.contains("<ct:LossesBroughtForward>50000.00</ct:LossesBroughtForward>"));
+        assert!(xml.contains("<ct:NetProfits>125000.00</ct:NetProfits>"));
+
+        // The message round-trips the set-off amount.
+        let back = Ct600Return::from_xml(&xml).expect("deserialise own message");
+        assert_eq!(back.trading_profits, 175_000.0);
+        assert_eq!(back.trading_losses_brought_forward, Some(50_000.0));
+        assert_eq!(back.net_trading_profits, 125_000.0);
+        assert_eq!(back.to_xml(), xml);
     }
 
     #[tokio::test]

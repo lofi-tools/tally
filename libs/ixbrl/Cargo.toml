@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rucash = { version = "0.7", features = ["xml", "sqlite", "decimal"] }
+rucash = { workspace = true, features = ["xml", "sqlite", "decimal"] }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
