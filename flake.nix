@@ -311,7 +311,7 @@
           # book), writing the CT600 GovTalk message to .cache/tally-cli/ct600-<number>.xml.
           ex2 = ''
             cargo run -p tally-cli -- ct600 \
-              --config-path "${wd}/libs/ixbrl/example_data/basic-1/input_config.json" \
+              --config-path "${wd}/libs/ixbrl/example_data/basic-1/input_config.jsonc" \
               --book "${wd}/libs/ixbrl/example_data/basic-1/input.gnucash"
           '';
           # packages = ''if [ -n "$CRATE" ]; then echo "-p $CRATE"; else echo "--workspace"; fi '';

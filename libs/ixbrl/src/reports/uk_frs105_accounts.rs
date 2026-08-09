@@ -1770,7 +1770,7 @@ mod tests {
         profile: CompanyProfile,
     }
 
-    /// The top-level shape of `input_config.json`: a nested `company`
+    /// The top-level shape of `input_config.jsonc`: a nested `company`
     /// identity + profile block and an `accounts` sub-object (period + report
     /// metadata, incl. the signature asset).
     #[derive(serde::Deserialize)]
@@ -1784,9 +1784,10 @@ mod tests {
     /// the company identity + profile, the report metadata and the
     /// logo/signature assets.
     fn load_example_data() -> ExampleCompanyData {
-        let json = std::fs::read_to_string("example_data/basic-1/input_config.json")
+        let json = std::fs::read_to_string("example_data/basic-1/input_config.jsonc")
             .expect("read example company data file");
-        serde_json::from_str(&json).expect("parse example company data file")
+        // Lenient parse (JSONC: comments / trailing commas allowed).
+        serde_json_lenient::from_str(&json).expect("parse example company data file")
     }
 
     /// The example [`Company`] (identity only) from the JSON.

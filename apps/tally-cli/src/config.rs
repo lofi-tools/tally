@@ -147,7 +147,11 @@ impl ConfigFile {
     pub fn from_file(path: &Path) -> Result<Self> {
         let data = std::fs::read_to_string(path)
             .with_context(|| format!("read config '{}'", path.display()))?;
-        serde_json::from_str(&data).with_context(|| format!("parse config '{}'", path.display()))
+        // Lenient parse (serde_json_lenient): the config files may carry
+        // `//` comments and trailing commas (JSONC), so users can annotate
+        // their config without breaking parsing.
+        serde_json_lenient::from_str(&data)
+            .with_context(|| format!("parse config '{}'", path.display()))
     }
 }
 
@@ -1072,7 +1076,7 @@ mod tests {
     /// succeeding once the book is present.
     #[tokio::test]
     async fn ct600_config_resolves_and_requires_paths() {
-        let path = Path::new("../../libs/ixbrl/example_data/basic-1/input_config.json");
+        let path = Path::new("../../libs/ixbrl/example_data/basic-1/input_config.jsonc");
         let empty_env = EnvVars::default();
 
         let file = ConfigFile::from_file(path).expect("parse example config");
@@ -1330,13 +1334,13 @@ mod tests {
     }
 
     /// The committed minimal config
-    /// (`libs/ixbrl/example_data/basic-1/minimal_config.json`) parses to a
+    /// (`libs/ixbrl/example_data/basic-1/minimal_config.jsonc`) parses to a
     /// blank identity, no period, a blank profile and only the required
     /// report metadata — the live test enriches the identity and period
     /// from the environment and the Companies House API.
     #[test]
     fn minimal_config_parses() {
-        let path = Path::new("../../libs/ixbrl/example_data/basic-1/minimal_config.json");
+        let path = Path::new("../../libs/ixbrl/example_data/basic-1/minimal_config.jsonc");
         let file = ConfigFile::from_file(path).expect("parse the minimal config");
         assert_eq!(file.company.name, None);
         assert_eq!(file.company.tax_reference, None);
@@ -1370,6 +1374,33 @@ mod tests {
             HashMap::from([("2019".to_string(), 1), ("2020".to_string(), 1)])
         );
         assert_eq!(meta.signature_b64, "");
+    }
+
+    /// Config files are parsed as JSONC (`serde_json_lenient`): `//`
+    /// comments and trailing commas are allowed, so users can annotate
+    /// their config without breaking parsing.
+    #[test]
+    fn config_parses_jsonc_comments_and_trailing_commas() {
+        let jsonc = r#"{
+            // the company block: identity + profile (all optional)
+            "company": {
+                "name": "Example Biz Ltd.",  // resolved from Companies House when absent
+                "tax_reference": "8596148860",
+            },
+            "accounts": {
+                "period": { "start": "2023-01-01", "end": "2023-12-31" },
+                // the required (unguessable) report metadata
+                "report_date": "2024-03-01",
+                "authorised_date": "2024-02-01",
+                "signature_b64": "",
+            }
+        }"#;
+        let file: ConfigFile = serde_json_lenient::from_str(jsonc).expect("parse JSONC config");
+        assert_eq!(file.company.name.as_deref(), Some("Example Biz Ltd."));
+        assert_eq!(file.company.tax_reference.as_deref(), Some("8596148860"));
+        let period = file.accounts.period.expect("period from config");
+        assert_eq!(period.start, date(2023, 1, 1));
+        assert_eq!(period.end, date(2023, 12, 31));
     }
 
     /// The employee counts default per financial year: an explicit year
@@ -1533,7 +1564,7 @@ mod live_tests {
     /// With `COMPANIES_HOUSE_API_KEY` (or `COMPANIES_HOUSE_SANDBOX_API_KEY`),
     /// `COMPANY_NUMBER` and `COMPANY_UNIQUE_TAXPAYER_REF` exported, the
     /// committed minimal config
-    /// (`libs/ixbrl/example_data/basic-1/minimal_config.json` — no identity,
+    /// (`libs/ixbrl/example_data/basic-1/minimal_config.jsonc` — no identity,
     /// no period, blank profile; the required report metadata comes from the
     /// config) is enriched from the live profile and officers (name,
     /// registration date, next accounting period, and the descriptive
@@ -1566,7 +1597,7 @@ mod live_tests {
         // The committed minimal config: no identity, no period, blank
         // profile — the identity and period come from the environment and
         // the live API; the required report metadata comes from the config.
-        let path = Path::new("../../libs/ixbrl/example_data/basic-1/minimal_config.json");
+        let path = Path::new("../../libs/ixbrl/example_data/basic-1/minimal_config.jsonc");
         let file = ConfigFile::from_file(path).expect("parse the minimal config");
         let cli = CliArgs {
             config_path: path.to_path_buf(),

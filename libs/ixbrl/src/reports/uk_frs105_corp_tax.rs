@@ -3584,7 +3584,7 @@ mod tests {
         assert!(!html.contains("FY2 less marginal relief"));
     }
 
-    /// The top-level shape of `example_data/ctm03955-marginal-relief/input_config.json`:
+    /// The top-level shape of `example_data/ctm03955-marginal-relief/input_config.jsonc`:
     /// the company identity and the `accounts` sub-object.  The corp-tax
     /// report only reads the identity, so the descriptive profile fields
     /// (which the accounts report consumes) are not deserialised here.
@@ -3609,9 +3609,11 @@ mod tests {
     /// meaningful value.
     fn load_ctm03955() -> (Company, AccountsMeta) {
         let json =
-            std::fs::read_to_string("example_data/ctm03955-marginal-relief/input_config.json")
+            std::fs::read_to_string("example_data/ctm03955-marginal-relief/input_config.jsonc")
                 .expect("read ctm03955 config");
-        let config: Ctm03955Config = serde_json::from_str(&json).expect("parse ctm03955 config");
+        // Lenient parse (JSONC: comments / trailing commas allowed).
+        let config: Ctm03955Config =
+            serde_json_lenient::from_str(&json).expect("parse ctm03955 config");
         let mut company = Company::new(
             config.company.name,
             config.company.tax_reference,

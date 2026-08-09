@@ -1,0 +1,45 @@
+// HMRC CTM03955 marginal-relief example:
+// - calendar-2023 accounting period straddling the FY2022/23 -> FY2023/24
+//   boundary (profits and limits time-apportioned 90/275 days);
+// - two associated companies throughout, so the £50k/£250k limits are
+//   divided by three (see apps/tally-cli/README.md, Corporation-tax
+//   calculation);
+// - the previous period (calendar 2022) made a £50,000 trading loss, which
+//   is brought forward against this period's profits (box 160).
+{
+  // company identity: name, UTR and Companies House number.  With a
+  // COMPANIES_HOUSE_API_KEY set, absent fields resolve from the live
+  // profile instead.
+  "company": {
+    "name": "Example Biz Ltd.",
+    "tax_reference": "8596148860",
+    "company_number": "12345678"
+  },
+  "accounts": {
+    // the return period: 1 Jan 2023 -> 31 Dec 2023, the CTM03955 straddle
+    "period": {
+      "start": "2023-01-01",
+      "end": "2023-12-31"
+    },
+    // the financial years the period falls into (1 Apr -> 31 Mar)
+    "fy1_year": 2022,
+    "fy2_year": 2023,
+    // associated companies in the period (the CTM03955 group); divides
+    // the marginal-relief limits
+    "associated_companies": 2,
+    "report_date": "2024-03-01",
+    "authorised_date": "2024-02-01",
+    "incorporation_date": "2020-01-01",
+    // who signed the accounts; defaults to the first director when omitted
+    "signed_by": "B Smith",
+    "average_employees": {
+      "2023": 2,
+      "2022": 1
+    },
+    "accounting_standards_dimension": "uk-bus:Micro-entities",
+    "accounts_type_dimension": "uk-bus:AbridgedAccounts",
+    "accounts_status_dimension": "uk-bus:AuditExempt-NoAccountantsReport",
+    // the signature image asset, base64 (empty here)
+    "signature_b64": ""
+  }
+}

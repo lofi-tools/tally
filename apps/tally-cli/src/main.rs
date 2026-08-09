@@ -9,7 +9,7 @@
 //! ```
 //!
 //! * `--config-path` — the JSON config (see
-//!   `libs/ixbrl/example_data/basic-1/input_config.json`).  A
+//!   `libs/ixbrl/example_data/basic-1/input_config.jsonc`).  A
 //!   [`config::ConfigBuilder`] merges it with the captured environment
 //!   ([`config::EnvVars`]) and the CLI values ([`config::CliArgs`]) into a
 //!   strict [`config::ResolvedInputs`]: identity fields that the config

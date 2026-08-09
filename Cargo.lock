@@ -1147,7 +1147,7 @@ dependencies = [
  "quick-xml",
  "rucash",
  "serde",
- "serde_json",
+ "serde_json_lenient",
  "snafu",
  "tokio",
 ]
@@ -2100,6 +2100,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json_lenient"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e033097bf0d2b59a62b42c18ebbb797503839b26afdda2c4e1415cb6c813540"
+dependencies = [
+ "itoa",
+ "memchr",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2351,6 +2363,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "serde_json_lenient",
  "tempfile",
  "tokio",
 ]

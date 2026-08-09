@@ -37,13 +37,13 @@ See [roadmap](docs/current-state-and-roadmap.md) for planned features & progress
 
 ```bash
 tally ct600 \
-  --config-path libs/ixbrl/example_data/basic-1/input_config.json \
+  --config-path libs/ixbrl/example_data/basic-1/input_config.jsonc \
   --book libs/ixbrl/example_data/basic-1/input.gnucash \
   --out .cache/tally-cli
   # -> writes .cache/tally-cli/ct600-<company-number>.xml
 ```
 
-See the [example config file](libs/ixbrl/example_data/basic-1/input_config.json)
+See the [example config file](libs/ixbrl/example_data/basic-1/input_config.jsonc)
 And the detailed [tally-cli config options](#tally-cli-configuration) for 
 flags, config, and defaults.
 
@@ -56,7 +56,7 @@ flags, config, and defaults.
 
    ```bash
    cargo run -p tally-cli -- ct600 \
-     --config-path libs/ixbrl/example_data/basic-1/input_config.json \
+     --config-path libs/ixbrl/example_data/basic-1/input_config.jsonc \
      --book libs/ixbrl/example_data/basic-1/input.gnucash \
      --out .cache/tally-cli
      # -> writes .cache/tally-cli/ct600-<company-number>.xml
@@ -168,7 +168,7 @@ the period can be left out and is resolved from Companies House):
     "authorised_date": "2021-02-01",
     "signed_by": "B Smith",
     "average_employees": { "2020": 2, "2019": 1 },
-    "signature_b64": "",      "...": "remaining accounts.* fields — copy them from libs/ixbrl/example_data/basic-1/input_config.json"
+    "signature_b64": "",      "...": "remaining accounts.* fields — copy them from libs/ixbrl/example_data/basic-1/input_config.jsonc"
   }
 }
 ```
