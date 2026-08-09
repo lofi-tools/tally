@@ -118,6 +118,44 @@ Tax reference is never resolved from Companies House.)
 | `libs/ixbrl` | 1, 3 | GnuCash parser + FRS-105 (micro-entity) iXBRL reports |
 | `libs/ct600` | 4 | HMRC GovTalk XML message builder/parser for CT600 submission + Companies House client / company resolution (`companies_house`) |
 
+### JavaScript workspace (web app + design system)
+
+The JS side of the repo is a pnpm workspace (`apps/*`, `packages/*`). It
+currently contains the **design system** and a **web app that showcases it**
+— the app does not do what `tally-cli` does yet.
+
+| Package | Purpose |
+|---------|---------|
+| [`apps/tally-web`](apps/tally-web/README.md) | SolidJS + Panda CSS + Ark UI web app (Vite); design-system showcase for now |
+| `packages/design-system` | Token-driven design system (`@tally/design-system`): theme + components, shared by the web app (and, later, landing/docs sites) |
+
+```bash
+pnpm install     # from the repo root
+pnpm dev         # run the showcase app (http://localhost:5173)
+pnpm typecheck   # typecheck the whole JS workspace
+```
+
+Inside the Nix dev shell, one command does it all (node + pnpm are in the
+shell; it runs `pnpm install` and starts the dev server):
+
+```bash
+nix develop -c dev
+```
+
+The design system is built on **design tokens** (brand/neutral scales, fonts,
+semantic color roles with dark-mode variants, recipes) configured in
+`packages/design-system/src/theme` — components are wired to the tokens, so
+re-theming is a token change, not a component rewrite.
+
+Note: the Cargo workspace globs `apps/*` as crates, so each JS-only app under
+`apps/` needs a matching entry in the `exclude` list in the root
+[`Cargo.toml`](Cargo.toml) (only `apps/tally-web` so far).
+
+**About Astro:** not yet. The web app is mostly dynamic (logged-in), so it
+stays a plain SolidJS app; the landing page and docs subdomain can be added
+later as Astro sites that reuse `@tally/design-system` (see
+`apps/tally-web/README.md`).
+
 
 ## `tally-cli` configuration
 

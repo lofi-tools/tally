@@ -1,0 +1,14 @@
+{
+  "name": "tally",
+  "private": true,
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @tally/web dev",
+    "build": "pnpm --filter @tally/web build",
+    "preview": "pnpm --filter @tally/web preview",
+    "codegen": "pnpm -r codegen",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

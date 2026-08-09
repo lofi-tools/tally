@@ -97,6 +97,15 @@ byte for byte (modulo random element ids).
 
 
 
+### The web app and design system (`apps/tally-web`, `packages/design-system`)
+
+A pnpm JS workspace hosts a **design system** (`@tally/design-system`: design
+tokens + SolidJS components on Ark UI, styled with Panda CSS) and a **web app**
+(`apps/tally-web`) that currently showcases it. The web app does **not** do
+what the CLI does yet — it is the foundation the real Tally UI will be built
+on, reusing the same tokens and components. See the package READMEs for how
+they fit together.
+
 ## Roadmap
 
 Features that are not implemented yet:

@@ -14,7 +14,8 @@
       let
         buildTimeDeps = [ pkgs.pkg-config ];
         runtimeDeps = [ ];
-        devDeps = [ pkgs.cargo-nextest pkgs.arelle ];
+        # node + pnpm back the JS workspace (apps/tally-web, packages/design-system).
+        devDeps = [ pkgs.cargo-nextest pkgs.arelle pkgs.nodejs pkgs.pnpm ];
 
         pythonVers = pkgs.python312Packages;
 
@@ -306,6 +307,23 @@
         };
         scripts = with bash; mapAttrs pkgs.writeShellScriptBin {
           run = ''cargo run -- "$@" '';
+
+          # Install the JS workspace deps and start the web app dev server
+          # (the design-system showcase).  pnpm/node are referenced from the
+          # flake, so this works both in the devShell (`nix develop -c dev`)
+          # and standalone (`nix run .#dev`).  Vite runs directly (via exec)
+          # rather than through `pnpm dev`, so stopping the server with
+          # Ctrl+C shuts down cleanly instead of pnpm reporting the signal
+          # as a failed run (exit 143 / "Command failed with signal").
+          dev = ''
+            set -e
+            cd "${wd}"
+            "${pkgs.pnpm}/bin/pnpm" install
+            cd apps/tally-web
+            ./node_modules/.bin/panda codegen
+            ./node_modules/.bin/panda cssgen
+            exec "${pkgs.nodejs}/bin/node" node_modules/vite/bin/vite.js
+          '';
 
           # Run our Rust tally CLI over the basic-1 data (config + GnuCash
           # book), writing the CT600 GovTalk message to .cache/tally-cli/ct600-<number>.xml.

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Tally — the design system for the Tally web app: SolidJS + Panda CSS + Ark UI."
+    />
+    <title>Tally — Design System</title>
+    <script>
+      // Apply the persisted / preferred color mode before first paint so the
+      // page never flashes the wrong theme. The rest of the app listens to
+      // this class (Panda's `_dark` condition).
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('tally-color-mode')
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+        } catch (e) {
+          /* no-op */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>

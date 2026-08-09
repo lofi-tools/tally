@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 11: settings live here, not in package.json. Allow esbuild's
+# postinstall build script (vite needs it); the workspace otherwise blocks
+# dependency build scripts by default.
+allowBuilds:
+  esbuild: true
