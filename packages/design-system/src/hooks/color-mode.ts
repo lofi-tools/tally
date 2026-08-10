@@ -8,11 +8,11 @@ function initialMode(): ColorMode {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored === 'light' || stored === 'dark') return stored
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'
   } catch {
     /* storage unavailable — fall through */
   }
-  return 'light'
+  // Dark is the identity; only an explicit stored choice opts into light.
+  return 'dark'
 }
 
 export interface ColorModeController {
@@ -25,8 +25,9 @@ export interface ColorModeController {
 /**
  * Class-based dark mode: toggles `.dark` on `<html>` (which Panda's `_dark`
  * semantic-token condition targets) and persists the choice to localStorage.
- * The initial value is read from localStorage, falling back to the OS
- * preference — `index.html` applies the same logic before first paint.
+ * The initial value is read from localStorage, defaulting to **dark** (the
+ * Tally brand identity — see DESIGN.md) — `index.html` applies the same
+ * logic before first paint.
  */
 export function createColorMode(): ColorModeController {
   const [mode, setMode] = createSignal<ColorMode>(initialMode())

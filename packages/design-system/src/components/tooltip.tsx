@@ -14,7 +14,7 @@ const tooltipRecipe = sva({
       borderRadius: 'md',
       px: '2.5',
       py: '1.5',
-      boxShadow: 'elevated',
+      boxShadow: 'overlay',
       _open: { animation: 'fadeIn 120ms ease-out' },
       _closed: { animation: 'fadeOut 100ms ease-in' },
     },

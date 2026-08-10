@@ -39,7 +39,12 @@ const tabsRecipe = sva({
       },
       _disabled: { opacity: '0.5', cursor: 'not-allowed' },
     },
-    indicator: { height: '2px', bg: 'accent' },
+    indicator: {
+      height: '2px',
+      bg: 'accent',
+      // Slide between triggers (Ark sets left/width inline)
+      transition: 'left 200ms ease, width 200ms ease',
+    },
     content: { textStyle: 'bodySm', color: 'fgMuted' },
   },
 })

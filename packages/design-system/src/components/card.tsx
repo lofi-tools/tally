@@ -11,10 +11,12 @@ const card = sva({
       border: '1px solid',
       borderColor: 'border',
       borderRadius: 'xl',
-      boxShadow: 'sm',
       overflow: 'hidden',
-      transitionProperty: 'border-color, box-shadow',
+      // Flat by default (Linear rule: no shadow on non-floating elements);
+      // hover lifts the border, not a shadow.
+      transitionProperty: 'border-color, background-color',
       transitionDuration: '200ms',
+      _hover: { borderColor: 'borderStrong' },
     },
     header: { display: 'flex', flexDirection: 'column', gap: '1', p: '6', pb: '0' },
     title: { textStyle: 'h3', color: 'fg' },

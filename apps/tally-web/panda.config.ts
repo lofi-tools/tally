@@ -12,10 +12,22 @@ export default defineConfig({
   exclude: [],
   outdir: 'styled-system',
   theme,
+  // Recipe variants are applied dynamically through the design-system
+  // components (`button({ size: local.size })` etc.), so cssgen can't see
+  // them statically. Pre-generate every variant — otherwise xs/sm/lg buttons
+  // lose padding/height and badge tone/variant classes never exist.
+  staticCss: {
+    recipes: {
+      button: ['*'],
+      badge: ['*'],
+      kbd: ['*'],
+    },
+  },
   globalCss: {
     html: { scrollBehavior: 'smooth' },
-    ':root': { colorScheme: 'light' },
-    '.dark': { colorScheme: 'dark' },
-    '::selection': { bg: 'accentMuted', color: 'accent' },
+    // Dark is the identity; light mode is opt-in via the `.dark` class toggle
+    ':root': { colorScheme: 'dark' },
+    'html:not(.dark)': { colorScheme: 'light' },
+    '::selection': { bg: 'accent', color: 'accentFg' },
   },
 })

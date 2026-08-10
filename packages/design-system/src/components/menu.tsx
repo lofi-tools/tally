@@ -7,11 +7,11 @@ const menuRecipe = sva({
   base: {
     positioner: { zIndex: 'dropdown' },
     content: {
-      bg: 'surface',
+      bg: 'surfaceOverlay',
       border: '1px solid',
       borderColor: 'border',
       borderRadius: 'lg',
-      boxShadow: 'elevated',
+      boxShadow: 'overlay',
       p: '1',
       minW: '48',
       _open: { animation: 'scaleIn 150ms ease-out' },

@@ -21,11 +21,12 @@ const fieldRecipe = sva({
       transitionDuration: '150ms',
       _placeholder: { color: 'fgSubtle' },
       _hover: { borderColor: 'borderStrong' },
+      // Crisp focus — border brightens to the accent, no glow ring (Linear rule)
       _focus: {
         outline: 'none',
         borderColor: 'accent',
-        boxShadow: '0 0 0 3px',
-        boxShadowColor: 'accentMuted',
+        boxShadow: '0 0 0 1px',
+        boxShadowColor: 'accent',
       },
       _invalid: { borderColor: 'danger' },
       _disabled: { opacity: '0.6', cursor: 'not-allowed', bg: 'surfaceMuted' },

@@ -4,17 +4,19 @@ The Tally design system: a token-driven theme plus SolidJS components built on
 [Ark UI](https://ark-ui.com) primitives, styled with
 [Panda CSS](https://panda-css.com).
 
+**Brand:** dark-first and keyboard-first (Linear / Raycast / Cursor / Framer
+lineage) with a single pastel teal-green accent — see the repo-root [`DESIGN.md`](../../DESIGN.md).
 Everything visual in the system is derived from the design tokens in
 [`src/theme`](src/theme/index.ts) — change a token there and every component
-re-themes, in light and dark mode.
+re-themes, in light and dark mode (dark is the default identity).
 
 ## Layout
 
 | Path | Contents |
 |------|----------|
-| `src/theme/index.ts` | Design tokens — raw scales (brand, neutral, fonts), semantic roles with `_dark` variants, text styles, keyframes, and the `button` / `badge` recipes |
-| `src/components/` | Components wired to the theme: `Button`, `Badge`, `Card`, `Input`, `Textarea`, `Select`, `Dialog`, `Tabs`, `Switch`, `Menu`, `Tooltip` |
-| `src/hooks/color-mode.ts` | `createColorMode()` — class-based dark mode (toggles `.dark` on `<html>`) |
+| `src/theme/index.ts` | Design tokens — raw scales (pastel teal-green brand, neutral, fonts), semantic roles with `_dark` variants, text styles, keyframes, and the `button` / `badge` / `kbd` recipes |
+| `src/components/` | Components wired to the theme: `Button`, `Badge`, `Kbd`, `Card`, `Input`, `Textarea`, `Select`, `Dialog`, `Tabs`, `Switch`, `Menu`, `Tooltip` |
+| `src/hooks/color-mode.ts` | `createColorMode()` — class-based dark mode (toggles `.dark` on `<html>`), dark by default |
 
 ## How a consumer app uses it
 

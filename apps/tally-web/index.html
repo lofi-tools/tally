@@ -9,18 +9,15 @@
     />
     <title>Tally — Design System</title>
     <script>
-      // Apply the persisted / preferred color mode before first paint so the
-      // page never flashes the wrong theme. The rest of the app listens to
-      // this class (Panda's `_dark` condition).
+      // Apply the persisted color mode before first paint so the page never
+      // flashes the wrong theme. Dark is the Tally identity — only an
+      // explicit stored 'light' choice opts out.
       ;(function () {
         try {
           var stored = localStorage.getItem('tally-color-mode')
-          var dark =
-            stored === 'dark' ||
-            (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-          document.documentElement.classList.toggle('dark', dark)
+          document.documentElement.classList.toggle('dark', stored !== 'light')
         } catch (e) {
-          /* no-op */
+          document.documentElement.classList.add('dark')
         }
       })()
     </script>

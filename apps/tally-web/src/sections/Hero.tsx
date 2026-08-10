@@ -40,8 +40,8 @@ export function Hero() {
       </h1>
       <p class={css({ textStyle: 'body', color: 'fgMuted', mt: '4', maxW: '36rem' })}>
         A token-driven foundation for the Tally web app. Configure the palette once in the
-        theme, and every component — buttons, forms, dialogs, menus — follows along, in light
-        and dark mode.
+        theme, and every component — buttons, forms, dialogs, menus — follows along. Dark
+        by default, light when you want it.
       </p>
       <div class={css({ display: 'flex', gap: '3', mt: '8', flexWrap: 'wrap' })}>
         <Button size="lg" onClick={() => scrollTo('components')}>
@@ -54,7 +54,7 @@ export function Hero() {
       <div class={css({ display: 'grid', gap: '4', mt: '14', sm: { gridTemplateColumns: 'repeat(3, 1fr)' } })}>
         <For each={stack}>
           {(item) => (
-            <Card.Root class={css({ _hover: { boxShadow: 'elevated' }, transition: 'box-shadow 200ms ease' })}>
+            <Card.Root>
               <Card.Body class={css({ display: 'flex', alignItems: 'center', gap: '3', p: '5' })}>
                 <span class={css({ h: '10', w: '10', borderRadius: 'lg', display: 'grid', placeItems: 'center', flexShrink: '0' })}>
                   <span class={cx(css({ display: 'grid', placeItems: 'center', h: '8', w: '8', borderRadius: 'md' }), item.class)}>

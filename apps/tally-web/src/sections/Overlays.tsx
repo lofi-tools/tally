@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Dialog,
+  Kbd,
   Menu,
   Switch,
   Tabs,
@@ -64,12 +65,21 @@ export function Overlays(props: { colorMode: ColorModeController }) {
             <Menu.Trigger class={button({ visual: 'outline' })}>Actions</Menu.Trigger>
             <Menu.Positioner>
               <Menu.Content>
-                <Menu.Item value="csv">Download CSV</Menu.Item>
-                <Menu.Item value="ixbrl">Download iXBRL</Menu.Item>
+                <Menu.Item value="csv">
+                  <Menu.ItemText>Download CSV</Menu.ItemText>
+                  <Kbd>⌘⇧E</Kbd>
+                </Menu.Item>
+                <Menu.Item value="ixbrl">
+                  <Menu.ItemText>Download iXBRL</Menu.ItemText>
+                  <Kbd>⌘⇧I</Kbd>
+                </Menu.Item>
                 <Menu.Separator />
-                <Menu.Item value="edit">Edit profile</Menu.Item>
+                <Menu.Item value="edit">
+                  <Menu.ItemText>Edit profile</Menu.ItemText>
+                  <Kbd>⌘,</Kbd>
+                </Menu.Item>
                 <Menu.Item value="delete" disabled>
-                  Delete company
+                  <Menu.ItemText>Delete company</Menu.ItemText>
                 </Menu.Item>
               </Menu.Content>
             </Menu.Positioner>

@@ -104,8 +104,8 @@ export function LogoMark() {
     <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
       <defs>
         <linearGradient id="tally-mark" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-          <stop stop-color="#6366f1" />
-          <stop offset="1" stop-color="#a5b4fc" />
+          <stop stop-color="#5fcdb0" />
+          <stop offset="1" stop-color="#287563" />
         </linearGradient>
       </defs>
       <rect x="1" y="1" width="30" height="30" rx="9" fill="url(#tally-mark)" />

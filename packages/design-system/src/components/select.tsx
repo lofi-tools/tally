@@ -26,11 +26,12 @@ const selectRecipe = sva({
       transitionProperty: 'border-color, box-shadow',
       transitionDuration: '150ms',
       _hover: { borderColor: 'borderStrong' },
+      // Crisp focus — border brightens to the accent, no glow ring
       _focusVisible: {
         outline: 'none',
         borderColor: 'accent',
-        boxShadow: '0 0 0 3px',
-        boxShadowColor: 'accentMuted',
+        boxShadow: '0 0 0 1px',
+        boxShadowColor: 'accent',
       },
       _disabled: { opacity: '0.6', cursor: 'not-allowed', bg: 'surfaceMuted' },
     },
@@ -43,11 +44,11 @@ const selectRecipe = sva({
       _open: { transform: 'rotate(180deg)' },
     },
     content: {
-      bg: 'surface',
+      bg: 'surfaceOverlay',
       border: '1px solid',
       borderColor: 'border',
       borderRadius: 'lg',
-      boxShadow: 'elevated',
+      boxShadow: 'overlay',
       p: '1',
       zIndex: 'dropdown',
       maxH: '64',
