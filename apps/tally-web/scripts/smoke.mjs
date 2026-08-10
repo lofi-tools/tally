@@ -20,6 +20,7 @@ for (const key of [
   'document',
   'navigator',
   'HTMLElement',
+  'HTMLHeadElement',
   'HTMLInputElement',
   'HTMLButtonElement',
   'Element',

@@ -1,32 +1,69 @@
 import { For } from 'solid-js'
-import { Card } from '@tally/design-system'
+import { Badge, Card } from '@tally/design-system'
 import { tokens } from '@tally/design-system/theme'
 import { css } from 'styled-system/css'
+import { colorPaletteSeeds } from '../seeds'
 import { Section } from './Section'
 
-const kebab = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
-/** CSS variable for a semantic color token, e.g. `var(--colors-surface-muted)`. */
+const kebab = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/\./g, '-').toLowerCase()
+/** CSS variable for a semantic color token, e.g. `var(--colors-fg-muted)`. */
 const varOf = (name: string) => `var(--colors-${kebab(name)})`
 
 const core = [
-  ['bg', 'Page background'],
-  ['surface', 'Cards & sheets'],
-  ['surfaceMuted', 'Hover / secondary surfaces'],
-  ['fg', 'Primary text'],
-  ['fgMuted', 'Secondary text'],
-  ['fgSubtle', 'Hint / placeholder text'],
+  ['canvas', 'Page background'],
+  ['fg.default', 'Primary text'],
+  ['fg.muted', 'Secondary text'],
+  ['fg.subtle', 'Hint / placeholder text'],
   ['border', 'Default borders'],
-  ['borderStrong', 'Strong borders'],
-  ['accent', 'Primary action'],
-  ['accentMuted', 'Accent soft fill'],
+  ['bg.subtle', 'Soft fills & hovers'],
+  ['error', 'Error / invalid'],
+] as const
+
+const accent = [
+  ['brown.solid.bg', 'Solid buttons'],
+  ['brown.solid.fg', 'On-solid text'],
+  ['brown.subtle.bg', 'Soft accents'],
+  ['brown.surface.bg', 'Surface accents'],
+  ['brown.outline.border', 'Outlines'],
+  ['brown.plain.fg', 'Plain text accent'],
 ] as const
 
 const feedback = [
-  ['info', 'Info'],
-  ['success', 'Success'],
-  ['warning', 'Warning'],
-  ['danger', 'Danger'],
+  ['green', 'Success'],
+  ['blue', 'Info'],
+  ['amber', 'Warning'],
+  ['red', 'Danger'],
 ] as const
+
+const typography = [
+  { style: '7xl', sample: 'Display' },
+  { style: '6xl', sample: 'Headline' },
+  { style: '5xl', sample: 'Hero title' },
+  { style: '4xl', sample: 'Section heading' },
+  { style: '3xl', sample: 'Sub-heading' },
+  { style: '2xl', sample: 'Card heading' },
+  { style: 'xl', sample: 'Emphasised body' },
+  { style: 'lg', sample: 'Large body' },
+  { style: 'md', sample: 'Body' },
+  { style: 'sm', sample: 'Small body' },
+  { style: 'xs', sample: 'Caption' },
+] as const
+
+// cssgen seeds: the grid below applies `textStyle` from data (dynamic), which
+// cssgen can't extract — precompute the utility class for every role instead.
+const textStyleClasses = {
+  '7xl': css({ textStyle: '7xl' }),
+  '6xl': css({ textStyle: '6xl' }),
+  '5xl': css({ textStyle: '5xl' }),
+  '4xl': css({ textStyle: '4xl' }),
+  '3xl': css({ textStyle: '3xl' }),
+  '2xl': css({ textStyle: '2xl' }),
+  xl: css({ textStyle: 'xl' }),
+  lg: css({ textStyle: 'lg' }),
+  md: css({ textStyle: 'md' }),
+  sm: css({ textStyle: 'sm' }),
+  xs: css({ textStyle: 'xs' }),
+} as const
 
 function Swatch(props: { name: string; label: string }) {
   return (
@@ -36,32 +73,38 @@ function Swatch(props: { name: string; label: string }) {
         style={{ background: varOf(props.name) }}
       />
       <span class={css({ minW: '0' })}>
-        <span class={css({ display: 'block', fontSize: 'xs', fontWeight: '600', color: 'fg', fontFamily: 'mono' })}>
+        <span class={css({ display: 'block', fontSize: 'xs', fontWeight: '600', color: 'fg.default', fontFamily: 'mono' })}>
           {props.name}
         </span>
-        <span class={css({ display: 'block', fontSize: 'xs', color: 'fgMuted' })}>{props.label}</span>
+        <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.muted' })}>{props.label}</span>
       </span>
     </div>
   )
 }
 
-function ScaleCard(props: { title: string; scale: Record<string, { value: string }> }) {
+function ScaleCard(props: {
+  title: string
+  scale: Record<string, any>
+  description?: string
+}) {
+  const entries = () =>
+    Object.entries(props.scale).filter(([k]) => /^\d+$/.test(k))
   return (
     <Card.Root>
       <Card.Header>
         <Card.Title>{props.title}</Card.Title>
-        <Card.Description>Raw palette, defined once in the theme.</Card.Description>
+        <Card.Description>{props.description ?? 'Raw palette, defined once in the theme.'}</Card.Description>
       </Card.Header>
       <Card.Body>
-        <div class={css({ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '2', sm: { gridTemplateColumns: 'repeat(10, 1fr)' } })}>
-          <For each={Object.entries(props.scale)}>
+        <div class={css({ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '2', sm: { gridTemplateColumns: 'repeat(12, 1fr)' } })}>
+          <For each={entries()}>
             {([shade, t]) => (
               <div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
                 <span
                   class={css({ h: '12', borderRadius: 'lg', border: '1px solid', borderColor: 'border', display: 'block' })}
-                  style={{ background: t.value }}
+                  style={{ background: t.value._dark }}
                 />
-                <span class={css({ fontSize: '10px', color: 'fgSubtle', textAlign: 'center', fontFamily: 'mono' })}>
+                <span class={css({ fontSize: '10px', color: 'fg.subtle', textAlign: 'center', fontFamily: 'mono' })}>
                   {shade}
                 </span>
               </div>
@@ -73,21 +116,13 @@ function ScaleCard(props: { title: string; scale: Record<string, { value: string
   )
 }
 
-const typography = [
-  { style: 'display', sample: 'Display — the annual accounts' },
-  { style: 'h1', sample: 'Heading 1' },
-  { style: 'h2', sample: 'Heading 2' },
-  { style: 'h3', sample: 'Heading 3' },
-  { style: 'h4', sample: 'Heading 4' },
-] as const
-
 export function Tokens() {
   return (
     <Section
       id="tokens"
       eyebrow="Design tokens"
-      title="Configure the whole theme from a few tokens"
-      description="Raw scales (brand, neutral, fonts) plus semantic roles with dark-mode variants. Change a value here and every component re-themes."
+      title="Park UI, themed once"
+      description="Semantic roles with dark-mode variants, raw palettes (brown accent, sand neutral), and Outfit text styles. Change a value in the theme and every component re-themes."
     >
       <div class={css({ display: 'grid', gap: '6', lg: { gridTemplateColumns: 'repeat(2, 1fr)' } })}>
         <Card.Root class={css({ lg: { gridColumn: 'span 2' } })}>
@@ -95,7 +130,7 @@ export function Tokens() {
             <Card.Title>Semantic colors</Card.Title>
             <Card.Description>
               Roles, not raw values — each maps to light and dark palettes via the{' '}
-              <code class={css({ fontFamily: 'mono', fontSize: 'xs', bg: 'surfaceMuted', px: '1', py: '0.5', borderRadius: 'sm' })}>
+              <code class={css({ fontFamily: 'mono', fontSize: 'xs', bg: 'bg.subtle', px: '1', py: '0.5', borderRadius: 'sm' })}>
                 _dark
               </code>{' '}
               condition. Toggle dark mode in the header.
@@ -104,54 +139,68 @@ export function Tokens() {
           <Card.Body class={css({ display: 'grid', gap: '3', gridTemplateColumns: '1fr', sm: { gridTemplateColumns: 'repeat(2, 1fr)' } })}>
             <For each={core}>{(item) => <Swatch name={item[0]} label={item[1]} />}</For>
           </Card.Body>
-          <Card.Footer class={css({ borderTop: '1px solid', borderColor: 'border', pt: '4', mt: '0' })}>
-            <div class={css({ display: 'grid', gap: '3', gridTemplateColumns: 'repeat(2, 1fr)', w: 'full', sm: { gridTemplateColumns: 'repeat(4, 1fr)' } })}>
-              <For each={feedback}>
-                {(item) => (
-                  <div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-                    <span
-                      class={css({ h: '6', w: '6', borderRadius: 'md', border: '1px solid', borderColor: 'border', flexShrink: '0' })}
-                      style={{ background: varOf(item[0]) }}
-                    />
-                    <span class={css({ fontSize: 'xs', fontWeight: '600', color: 'fg', fontFamily: 'mono' })}>{item[0]}</span>
-                  </div>
-                )}
-              </For>
-            </div>
-          </Card.Footer>
         </Card.Root>
 
-        <ScaleCard title="Brand" scale={tokens.colors.brand} />
-        <ScaleCard title="Neutral" scale={tokens.colors.neutral} />
+        <Card.Root>
+          <Card.Header>
+            <Card.Title>Accent — brown</Card.Title>
+            <Card.Description>
+              The default <code class={css({ fontFamily: 'mono', fontSize: 'xs', bg: 'bg.subtle', px: '1', py: '0.5', borderRadius: 'sm' })}>colorPalette</code>, set on <code class={css({ fontFamily: 'mono', fontSize: 'xs', bg: 'bg.subtle', px: '1', py: '0.5', borderRadius: 'sm' })}>{'<html>'}</code>. Every recipe resolves <code class={css({ fontFamily: 'mono', fontSize: 'xs', bg: 'bg.subtle', px: '1', py: '0.5', borderRadius: 'sm' })}>colorPalette.*</code> to it.
+            </Card.Description>
+          </Card.Header>
+          <Card.Body class={css({ display: 'grid', gap: '3', gridTemplateColumns: '1fr', sm: { gridTemplateColumns: 'repeat(2, 1fr)' } })}>
+            <For each={accent}>{(item) => <Swatch name={item[0]} label={item[1]} />}</For>
+          </Card.Body>
+        </Card.Root>
+
+        <Card.Root>
+          <Card.Header>
+            <Card.Title>Feedback palettes</Card.Title>
+            <Card.Description>Status chips and alerts — <code class={css({ fontFamily: 'mono', fontSize: 'xs', bg: 'bg.subtle', px: '1', py: '0.5', borderRadius: 'sm' })}>Badge colorPalette</code> swaps them in.</Card.Description>
+          </Card.Header>
+          <Card.Body class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
+            <For each={feedback}>
+              {(item) => (
+                <div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
+                  <span
+                    class={css({ h: '6', w: '6', borderRadius: 'md', border: '1px solid', borderColor: 'border', flexShrink: '0' })}
+                    style={{ background: varOf(`${item[0]}.solid.bg`) }}
+                  />
+                  <span class={css({ fontSize: 'xs', fontWeight: '600', color: 'fg.default', fontFamily: 'mono', w: '24' })}>{item[0]}</span>
+                  <Badge colorPalette={item[0]} class={colorPaletteSeeds[item[0]]}>{item[1]}</Badge>
+                </div>
+              )}
+            </For>
+          </Card.Body>
+        </Card.Root>
+
+        <ScaleCard title="Brown — accent" scale={tokens.colors.brown} description="The brand accent, 1–12 (dark values shown)." />
+        <ScaleCard title="Sand — gray" scale={tokens.colors.sand} description="The neutral family behind every surface and text role." />
 
         <Card.Root class={css({ lg: { gridColumn: 'span 2' } })}>
           <Card.Header>
             <Card.Title>Typography</Card.Title>
-            <Card.Description>Text styles from the theme — <code class={css({ fontFamily: 'mono', fontSize: 'xs', bg: 'surfaceMuted', px: '1', py: '0.5', borderRadius: 'sm' })}>textStyle</code> roles.</Card.Description>
+            <Card.Description>
+              Outfit text styles from the theme — <code class={css({ fontFamily: 'mono', fontSize: 'xs', bg: 'bg.subtle', px: '1', py: '0.5', borderRadius: 'sm' })}>textStyle</code> roles.
+            </Card.Description>
           </Card.Header>
           <Card.Body>
-            <div class={css({ display: 'flex', flexDirection: 'column', gap: '5' })}>
+            <div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
               <For each={typography}>
                 {(t) => (
                   <div class={css({ display: 'flex', alignItems: 'baseline', gap: '4', justifyContent: 'space-between' })}>
-                    <span class={css({ fontSize: 'xs', color: 'fgSubtle', fontFamily: 'mono', flexShrink: '0', w: '16' })}>{t.style}</span>
-                    <span class={css({ textStyle: t.style })}>{t.sample}</span>
+                    <span class={css({ fontSize: 'xs', color: 'fg.subtle', fontFamily: 'mono', flexShrink: '0', w: '16' })}>{t.style}</span>
+                    <span class={textStyleClasses[t.style]}>{t.sample}</span>
                   </div>
                 )}
               </For>
               <div class={css({ display: 'flex', alignItems: 'baseline', gap: '4', justifyContent: 'space-between' })}>
-                <span class={css({ fontSize: 'xs', color: 'fgSubtle', fontFamily: 'mono', flexShrink: '0', w: '16' })}>body</span>
-                <p class={css({ textStyle: 'body', color: 'fgMuted' })}>
-                  Body copy carries the day-to-day text of the product — ledgers, filing status and everything in between.
-                </p>
+                <span class={css({ fontSize: 'xs', color: 'fg.subtle', fontFamily: 'mono', flexShrink: '0', w: '16' })}>label</span>
+                <span class={css({ textStyle: 'label' })}>Field labels and menu items</span>
               </div>
-              <div class={css({ display: 'flex', alignItems: 'baseline', gap: '4', justifyContent: 'space-between' })}>
-                <span class={css({ fontSize: 'xs', color: 'fgSubtle', fontFamily: 'mono', flexShrink: '0', w: '16' })}>caption</span>
-                <span class={css({ textStyle: 'caption', color: 'fgMuted' })}>Captions annotate fields and footnotes.</span>
-              </div>
-              <div class={css({ display: 'flex', alignItems: 'baseline', gap: '4', justifyContent: 'space-between' })}>
-                <span class={css({ fontSize: 'xs', color: 'fgSubtle', fontFamily: 'mono', flexShrink: '0', w: '16' })}>code</span>
-                <code class={css({ textStyle: 'code', bg: 'surfaceMuted', px: '3', py: '1.5', borderRadius: 'lg', color: 'fg' })}>
+              <div class={css({ display: 'flex', alignItems: 'center', gap: '4', justifyContent: 'space-between' })}>
+                <span class={css({ fontSize: 'xs', color: 'fg.subtle', fontFamily: 'mono', flexShrink: '0', w: '16' })}>code</span>
+                <code class={css({ textStyle: 'sm', fontFamily: 'mono', bg: 'bg.subtle', px: '3', py: '1.5', borderRadius: 'lg', color: 'fg.default' })}>
                   tally ct600 --book input.gnucash
                 </code>
               </div>

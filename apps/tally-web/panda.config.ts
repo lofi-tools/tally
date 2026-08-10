@@ -1,5 +1,5 @@
 import { defineConfig } from '@pandacss/dev'
-import { theme } from '../../packages/design-system/src/theme'
+import { parkUI } from '../../packages/design-system/src/theme'
 
 export default defineConfig({
   preflight: true,
@@ -11,23 +11,20 @@ export default defineConfig({
   ],
   exclude: [],
   outdir: 'styled-system',
-  theme,
-  // Recipe variants are applied dynamically through the design-system
-  // components (`button({ size: local.size })` etc.), so cssgen can't see
-  // them statically. Pre-generate every variant — otherwise xs/sm/lg buttons
-  // lose padding/height and badge tone/variant classes never exist.
+  // The vendored Park UI components use `styled()` / `createStyleContext`
+  // from `styled-system/jsx` — those must be generated for Solid.
+  jsxFramework: 'solid',
+  presets: [parkUI],
+  // Components apply recipe variants dynamically (`<Button variant="…">`),
+  // so cssgen can't see them statically. Pre-generate every recipe variant.
   staticCss: {
-    recipes: {
-      button: ['*'],
-      badge: ['*'],
-      kbd: ['*'],
-    },
+    recipes: '*',
   },
   globalCss: {
     html: { scrollBehavior: 'smooth' },
     // Dark is the identity; light mode is opt-in via the `.dark` class toggle
     ':root': { colorScheme: 'dark' },
     'html:not(.dark)': { colorScheme: 'light' },
-    '::selection': { bg: 'accent', color: 'accentFg' },
+    // Selection already follows the palette via the theme's global css.
   },
 })

@@ -14,10 +14,12 @@
   },
   "dependencies": {
     "@ark-ui/solid": "^5.38.1",
+    "lucide-solid": "^1.30.0",
     "solid-js": "^1.9.14"
   },
   "devDependencies": {
     "@pandacss/dev": "^1.12.0",
+    "@pandacss/preset-panda": "^1.12.0",
     "typescript": "~5.9.3"
   }
 }

@@ -38,8 +38,8 @@ export function Overlays(props: { colorMode: ColorModeController }) {
     >
       <div class={css({ display: 'grid', gap: '6', lg: { gridTemplateColumns: 'repeat(2, 1fr)' } })}>
         <DemoCard title="Dialog" description="Modal with a focus trap, ESC to close and a soft scale-in.">
-          <Dialog.Root lazyMount unmountOnExit>
-            <Dialog.Trigger class={button({ visual: 'solid' })}>Open dialog</Dialog.Trigger>
+          <Dialog.Root>
+            <Dialog.Trigger class={button({ variant: 'solid' })}>Open dialog</Dialog.Trigger>
             <Dialog.Backdrop />
             <Dialog.Positioner>
               <Dialog.Content>
@@ -52,7 +52,7 @@ export function Overlays(props: { colorMode: ColorModeController }) {
                   Review the balance sheet and the CT600 before you confirm.
                 </Dialog.Description>
                 <div class={css({ display: 'flex', justifyContent: 'flex-end', gap: '2', mt: '2' })}>
-                  <Dialog.Trigger class={button({ visual: 'ghost' })}>Cancel</Dialog.Trigger>
+                  <Dialog.CloseTrigger class={button({ variant: 'plain' })}>Cancel</Dialog.CloseTrigger>
                   <Button>Confirm & file</Button>
                 </div>
               </Dialog.Content>
@@ -60,9 +60,9 @@ export function Overlays(props: { colorMode: ColorModeController }) {
           </Dialog.Root>
         </DemoCard>
 
-        <DemoCard title="Menu" description="A contextual menu with groups, separators and keyboard support.">
+        <DemoCard title="Menu" description="A contextual menu with items, separators and keyboard support.">
           <Menu.Root>
-            <Menu.Trigger class={button({ visual: 'outline' })}>Actions</Menu.Trigger>
+            <Menu.Trigger class={button({ variant: 'outline' })}>Actions</Menu.Trigger>
             <Menu.Positioner>
               <Menu.Content>
                 <Menu.Item value="csv">
@@ -88,20 +88,14 @@ export function Overlays(props: { colorMode: ColorModeController }) {
 
         <DemoCard title="Tooltip" description="Hover a control for more context — appears with a fade.">
           <div class={css({ display: 'flex', flexWrap: 'wrap', gap: '2.5' })}>
-            <Tooltip.Root openDelay={0}>
-              <Tooltip.Trigger class={button({ visual: 'outline' })}>Hover me</Tooltip.Trigger>
-              <Tooltip.Positioner>
-                <Tooltip.Content>Filing goes through HMRC's XML gateway</Tooltip.Content>
-                <Tooltip.Arrow />
-              </Tooltip.Positioner>
-            </Tooltip.Root>
-            <Tooltip.Root openDelay={0}>
-              <Tooltip.Trigger class={button({ visual: 'ghost' })}>And me</Tooltip.Trigger>
-              <Tooltip.Positioner>
-                <Tooltip.Content>Accounts are due 9 months after the period end</Tooltip.Content>
-                <Tooltip.Arrow />
-              </Tooltip.Positioner>
-            </Tooltip.Root>
+            {/* Content is JSX, not a string literal: cssgen scans string props as
+                CSS `content:` values and would emit bogus classes for them. */}
+            <Tooltip content={<span>Filing goes through HMRC&apos;s XML gateway</span>} showArrow openDelay={0}>
+              <Button variant="outline">Hover me</Button>
+            </Tooltip>
+            <Tooltip content={<span>Accounts are due 9 months after the period end</span>} showArrow openDelay={0}>
+              <Button variant="plain">And me</Button>
+            </Tooltip>
           </div>
         </DemoCard>
 
@@ -127,18 +121,29 @@ export function Overlays(props: { colorMode: ColorModeController }) {
 
         <DemoCard title="Switch & color mode" description="Class-based dark mode: toggling adds .dark to <html>, and the semantic tokens follow.">
           <div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
-            <Switch
+            <Switch.Root
               checked={props.colorMode.mode() === 'dark'}
               onCheckedChange={(d) => props.colorMode.set(d.checked ? 'dark' : 'light')}
-              label={
+            >
+              <Switch.Control />
+              <Switch.Label>
                 <span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
                   {props.colorMode.mode() === 'dark' ? <Moon /> : <Sun />}
                   Dark mode
                 </span>
-              }
-            />
-            <Switch defaultChecked label="Email notifications" />
-            <Switch disabled label="Archived company" />
+              </Switch.Label>
+              <Switch.HiddenInput />
+            </Switch.Root>
+            <Switch.Root defaultChecked>
+              <Switch.Control />
+              <Switch.Label>Email notifications</Switch.Label>
+              <Switch.HiddenInput />
+            </Switch.Root>
+            <Switch.Root disabled>
+              <Switch.Control />
+              <Switch.Label>Archived company</Switch.Label>
+              <Switch.HiddenInput />
+            </Switch.Root>
           </div>
         </DemoCard>
 
@@ -146,19 +151,19 @@ export function Overlays(props: { colorMode: ColorModeController }) {
           <div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
             <div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3', flexWrap: 'wrap' })}>
               <div>
-                <div class={css({ fontSize: 'sm', fontWeight: '600', color: 'fg' })}>CT600 — Example Ltd.</div>
-                <div class={css({ fontSize: 'xs', color: 'fgMuted', mt: '0.5' })}>Period ended 31 Mar 2026</div>
+                <div class={css({ fontSize: 'sm', fontWeight: '600', color: 'fg.default' })}>CT600 — Example Ltd.</div>
+                <div class={css({ fontSize: 'xs', color: 'fg.muted', mt: '0.5' })}>Period ended 31 Mar 2026</div>
               </div>
-              <Badge tone="success" variant="solid">
+              <Badge colorPalette="green" variant="solid">
                 Validated
               </Badge>
             </div>
             <div class={css({ display: 'flex', gap: '2', flexWrap: 'wrap' })}>
               <Button size="sm">File now</Button>
-              <Button size="sm" visual="outline">
+              <Button size="sm" variant="outline">
                 Preview
               </Button>
-              <Button size="sm" visual="ghost">
+              <Button size="sm" variant="plain">
                 Discard
               </Button>
             </div>

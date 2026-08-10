@@ -6,7 +6,7 @@ displays every component and token in the
 does **not** (yet) do what `tally-cli` does; that work starts from this
 foundation.
 
-Stack: **SolidJS** + **Panda CSS** + **Ark UI**, built with Vite.
+Stack: **SolidJS** + **Panda CSS** + **Ark UI** + **Park UI** (stock, via `@tally/design-system`), built with Vite.
 
 ## Run it
 
@@ -26,9 +26,10 @@ pnpm typecheck
 
 ## How the design system plugs in
 
-- `panda.config.ts` spreads the theme exported by `@tally/design-system`
-  (tokens, semantic colors, recipes) and scans both the app and the package
-  sources, so components are styled by the app's own Panda codegen.
+- `panda.config.ts` applies the `parkUI` preset exported by
+  `@tally/design-system` (brown accent, sand gray, Outfit, all recipes) and
+  scans both the app and the package sources, so components are styled by the
+  app's own Panda codegen.
 - `vite.config.ts` aliases `styled-system/*` to this app's generated directory
   (the design-system package's source imports `styled-system/*` too).
 - `index.html` applies the persisted/OS color mode before first paint; the

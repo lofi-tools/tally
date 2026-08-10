@@ -17,13 +17,13 @@ const nav = [
 
 const navLink = css({
   fontSize: 'sm',
-  color: 'fgMuted',
+  color: 'fg.muted',
   px: '2',
   py: '1.5',
   borderRadius: 'md',
   textDecoration: 'none',
   transition: 'color 150ms ease, background-color 150ms ease',
-  _hover: { color: 'fg', bg: 'surfaceMuted' },
+  _hover: { color: 'fg.default', bg: 'bg.subtle' },
 })
 
 function Header(props: { colorMode: ColorModeController }) {
@@ -35,7 +35,7 @@ function Header(props: { colorMode: ColorModeController }) {
         zIndex: 'sticky',
         borderBottom: '1px solid',
         borderColor: 'border',
-        bg: 'bg/85',
+        bg: 'canvas/85',
         backdropFilter: 'auto',
         backdropBlur: '8px',
       })}
@@ -59,14 +59,14 @@ function Header(props: { colorMode: ColorModeController }) {
             gap: '2.5',
             fontWeight: '700',
             fontSize: 'lg',
-            color: 'fg',
+            color: 'fg.default',
             textDecoration: 'none',
           })}
         >
           <LogoMark />
           Tally
         </a>
-        <Badge tone="primary" variant="outline" class={css({ display: { base: 'none', sm: 'inline-flex' } })}>
+        <Badge variant="outline" class={css({ display: { base: 'none', sm: 'inline-flex' } })}>
           design system
         </Badge>
         <nav class={css({ display: 'none', alignItems: 'center', gap: '1', md: { display: 'flex' } })}>
@@ -79,16 +79,21 @@ function Header(props: { colorMode: ColorModeController }) {
           </For>
         </nav>
         <div class={css({ ml: 'auto' })}>
-          <Switch
+          <Switch.Root
             checked={props.colorMode.mode() === 'dark'}
             onCheckedChange={(d) => props.colorMode.set(d.checked ? 'dark' : 'light')}
-            label={
+          >
+            <Switch.Control />
+            <Switch.Label>
               <span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
                 {props.colorMode.mode() === 'dark' ? <Moon /> : <Sun />}
                 Dark
               </span>
-            }
-          />
+            </Switch.Label>
+            {/* Zag's switch machine only listens to the hidden input's `change`
+                (native label activation / keyboard) — without it the toggle is dead. */}
+            <Switch.HiddenInput />
+          </Switch.Root>
         </div>
       </div>
     </header>
@@ -98,7 +103,7 @@ function Header(props: { colorMode: ColorModeController }) {
 export function App() {
   const colorMode = createColorMode()
   return (
-    <div id="top" class={css({ minH: '100dvh', display: 'flex', flexDirection: 'column', bg: 'bg', color: 'fg', fontFamily: 'sans' })}>
+    <div id="top" class={css({ minH: '100dvh', display: 'flex', flexDirection: 'column', bg: 'canvas', color: 'fg.default', fontFamily: 'sans' })}>
       <Header colorMode={colorMode} />
       <main class={css({ flex: '1', w: 'full', maxW: '72rem', mx: 'auto', px: { base: '5', md: '8' } })}>
         <Hero />
@@ -120,8 +125,8 @@ export function App() {
             flexWrap: 'wrap',
           })}
         >
-          <span class={css({ fontSize: 'xs', color: 'fgMuted' })}>Tally — UK company accounts &amp; CT600 filing</span>
-          <span class={css({ fontSize: 'xs', color: 'fgSubtle' })}>SolidJS · Panda CSS · Ark UI</span>
+          <span class={css({ fontSize: 'xs', color: 'fg.muted' })}>Tally — UK company accounts &amp; CT600 filing</span>
+          <span class={css({ fontSize: 'xs', color: 'fg.subtle' })}>SolidJS · Panda CSS · Ark UI · Park UI</span>
         </div>
       </footer>
     </div>

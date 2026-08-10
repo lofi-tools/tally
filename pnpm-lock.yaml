@@ -10,8 +10,8 @@ importers:
 
   apps/tally-web:
     dependencies:
-      '@fontsource-variable/inter':
-        specifier: ^5.2.6
+      '@fontsource-variable/outfit':
+        specifier: ^5.3.0
         version: 5.3.0
       '@tally/design-system':
         specifier: workspace:*
@@ -23,6 +23,9 @@ importers:
       '@pandacss/dev':
         specifier: ^1.12.0
         version: 1.12.0(jsdom@30.0.1)(typescript@5.9.3)
+      '@pandacss/preset-panda':
+        specifier: ^1.12.0
+        version: 1.12.0
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -47,6 +50,9 @@ importers:
       '@ark-ui/solid':
         specifier: ^5.38.1
         version: 5.38.1(solid-js@1.9.14)
+      lucide-solid:
+        specifier: ^1.30.0
+        version: 1.30.0(solid-js@1.9.14)
       solid-js:
         specifier: ^1.9.14
         version: 1.9.14
@@ -54,6 +60,9 @@ importers:
       '@pandacss/dev':
         specifier: ^1.12.0
         version: 1.12.0(jsdom@30.0.1)(typescript@5.9.3)
+      '@pandacss/preset-panda':
+        specifier: ^1.12.0
+        version: 1.12.0
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -388,8 +397,8 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@fontsource-variable/inter@5.3.0':
-    resolution: {integrity: sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA==}
+  '@fontsource-variable/outfit@5.3.0':
+    resolution: {integrity: sha512-fPb5XnYK0k7SbR++HEmm4+ZqDszmLKQ+sPRUr8oQ/KNC0vy6r6hazJFe8iYozv4cqlHbvJ/JECkJWrfDodUMVQ==}
 
   '@internationalized/date@3.12.2':
     resolution: {integrity: sha512-FY1Y+H64NDs+HAF6omlnWxm3mEpfgaCSWtL5l551ZZfImA+kGjPFgrnJrGjH6lfmLL0g8Z/mBu1R3kufeCp6Jw==}
@@ -1325,6 +1334,11 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
+  lucide-solid@1.30.0:
+    resolution: {integrity: sha512-BjNqMaZ4cDjE8DjW3ALA3u7o/7bnkLophQ9QUPU0MOsLmXBYbDub4o+iQNAgpZ7+1jKkSiQvpaGWZUGTaFTp0w==}
+    peerDependencies:
+      solid-js: ^1.4.7
+
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
@@ -2068,7 +2082,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@fontsource-variable/inter@5.3.0': {}
+  '@fontsource-variable/outfit@5.3.0': {}
 
   '@internationalized/date@3.12.2':
     dependencies:
@@ -3375,6 +3389,10 @@ snapshots:
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
+
+  lucide-solid@1.30.0(solid-js@1.9.14):
+    dependencies:
+      solid-js: 1.9.14
 
   magic-string@0.30.21:
     dependencies:

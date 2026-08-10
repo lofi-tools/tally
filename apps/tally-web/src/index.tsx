@@ -1,4 +1,4 @@
-import '@fontsource-variable/inter'
+import '@fontsource-variable/outfit'
 import 'styled-system/styles.css'
 import { render } from 'solid-js/web'
 import { App } from './App'

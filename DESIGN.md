@@ -3,39 +3,38 @@ version: alpha
 name: Tally Design System
 description: >-
   Dark-first product design system for Tally — UK company accounts & CT600
-  filing. A crafted,  keyboard-first interface language inspired by Linear,
-  Raycast, Cursor and Framer: near-black surfaces, hairline borders, a single
-  pastel teal-green accent, and dense, precise type.
+  filing. Built on stock Park UI (SolidJS): the brown accent palette, the sand
+  gray family and the Outfit typeface, tuned as a dense, keyboard-first tool
+  in the lineage of Linear, Raycast, Cursor and Framer.
 colors:
-  background: "#0D0F0B"
-  surface: "#171A14"
-  surfaceOverlay: "#22261E"
-  text: "#F2F4EE"
-  muted: "#A8AE9F"
-  border: "#262B22"
-  accent: "#5FCDB0"
-  accentStrong: "#287563"
-  success: "#34D399"
-  warning: "#FACC15"
-  danger: "#F87171"
+  canvas: "#111110"
+  surface: "#111110"
+  accent: "#AD7F58"
+  accentHover: "#B88C67"
+  onAccent: "#FFFFFF"
+  text: "#EEEEEC"
+  muted: "#B5B3AD"
+  border: "#2A2A28"
+  success: "#6A9F75"
+  info: "#5E9EA3"
+  warning: "#B8933C"
+  danger: "#B54E4E"
 typography:
+  fontFamily: "Outfit Variable, Outfit, ui-sans-serif, system-ui, sans-serif"
   display:
-    fontFamily: "Inter Variable, Inter, system-ui, sans-serif"
-    fontSize: 48px
-    fontWeight: 600
-    lineHeight: 1.05
-    letterSpacing: -0.035em
+    fontSize: 60px
+    fontWeight: 800
+    lineHeight: 1
+    letterSpacing: -0.03em
   body:
-    fontFamily: "Inter Variable, Inter, system-ui, sans-serif"
     fontSize: 16px
     fontWeight: 400
-    lineHeight: 1.6
-    letterSpacing: -0.011em
+    lineHeight: 1.5
   mono:
     fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace"
     fontSize: 13px
-    fontWeight: 400
 rounded:
+  xs: 2px
   sm: 4px
   md: 6px
   lg: 8px
@@ -52,19 +51,14 @@ spacing:
   3xl: 48px
   4xl: 64px
 components:
-  button-primary:
+  button:
     backgroundColor: "{colors.accent}"
-    textColor: "{colors.background}"
-    rounded: "{rounded.lg}"
-    padding: 8px 16px
+    textColor: "{colors.onAccent}"
+    rounded: "{rounded.sm}"
+    height: 40px
   card:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
-    rounded: "{rounded.xl}"
-    padding: 16px
-  kbd:
-    backgroundColor: "{colors.surfaceOverlay}"
-    textColor: "{colors.muted}"
     rounded: "{rounded.md}"
     border: "1px solid {colors.border}"
 ---
@@ -74,116 +68,128 @@ components:
 Tally is an accounting product for preparing and filing UK company accounts
 and CT600 corporation-tax returns. It is a **tool first**: dense, fast,
 keyboard-driven, and calm — the same design temperament as Linear, Raycast,
-Cursor and Framer. The interface is a dark near-black cathedral with cool,
-slightly warm-tinted greys and **one** pastel teal-green accent that is used
-rarely and only where it means something: the primary action, the selected
-state, focus.
+Cursor and Framer. The interface is a dark sand-tinted canvas with **one**
+brown accent (Park UI's `brown` palette) used rarely and only where it means
+something: the primary action, the selected state, focus.
 
-Dark mode is the identity. Light mode exists as a courtesy, not a second
-personality. Everything in the system is derived from design tokens in
-`packages/design-system/src/theme`; nothing is hard-coded.
+The design system is **stock Park UI**, vendored in full as local source (see
+`packages/design-system/src/theme` and `.../components/ui`) from the official
+registry (park-ui.com/registry) — theme tokens, colors, recipes and 60+
+Solid components, all from one snapshot so they can never drift. The brand is
+expressed in exactly three choices:
+
+- **Accent color — `brown`** — the default `colorPalette`, set on `<html>`.
+  Recipes resolve `colorPalette.*` to it, so solid buttons are brown
+  (`brown.9` ≈ `#AD7F58`) with **white text**.
+- **Gray color — `sand`** — a warm neutral family (Radix-derived), registered
+  as the `gray` palette that backs every surface and text role.
+- **Font family — Outfit** — a geometric grotesque, geometric enough for
+  display but neutral enough for ledgers. Loaded via
+  `@fontsource-variable/outfit`.
+
+Dark mode is the identity (class-based: toggling `.dark` on `<html>` flips
+every `_dark` semantic token). Light mode exists as a courtesy, not a second
+personality. Everything is derived from design tokens; nothing is
+hard-coded.
 
 ## Colors
 
-Dark-first palette (all hex values above are the dark-mode values).
+All values below are the dark-mode values (the identity).
 
-- `background` (`#0D0F0B`) — the near-black canvas. Never pure black; a
-  whisper of warm green keeps it alive next to the teal-green.
-- `surface` (`#171A14`) — cards, raised panels, inputs.
-- `surfaceOverlay` (`#22261E`) — modals, menus, popovers, dropdowns,
-  command-palette surfaces. One tier above `surface`, never the same.
-- `text` (`#F2F4EE`) — primary copy, deliberately off-white.
-- `muted` (`#A8AE9F`) — secondary copy, timestamps, metadata.
-- `border` (`#262B22`) — hairline borders; nearly invisible by design.
-- `accent` (`#5FCDB0`) — the pastel teal-green. A mint-teal (hue ~164°):
-  soft and pastel, yet vibrant enough to lead the eye against near-black
-  without going neon. Use on the primary CTA, the selected row/state, and
-  focus.
-- `accentStrong` (`#287563`) — the deeper teal used as the accent surface in
-  light mode (white text on it clears AA contrast ~5.5:1).
-- Feedback — `success`, `warning`, `danger` as above; use their soft
-  container variants (`successSoft`, `dangerSoft`, …) for badges and fills.
+- `canvas` (`sand.1`, `#111110`) — page background. A whisper of warm sand
+  keeps it alive against the brown.
+- `gray.surface.bg` (`sand.1`) — cards and raised panels (same tier as the
+  canvas; hairline borders carry the separation).
+- `fg.default` (`sand.12`, `#EEEEEC`) — primary text.
+- `fg.muted` (`sand.11`, `#B5B3AD`) — secondary text, timestamps, metadata.
+- `fg.subtle` (`sand.10`, `#7C7B74`) — hint/placeholder text.
+- `border` (`sand.4`, `#2A2A28`) — hairline borders.
+- `brown.solid.bg` (`brown.9`, `#AD7F58`) — the accent fill: primary
+  buttons, selected states, focus. **White text on it keeps AA.**
+- `brown.subtle.bg` / `brown.surface.bg` / `brown.outline.border` —
+  soft accents, surface accents and outlines (alpha-composited).
+- `brown.plain.fg` (`brown.11`, `#DBB594`) — accent-toned **text** on dark
+  fills: subtle buttons, highlighted list items, badge text.
+- Feedback palettes — `green`, `blue`, `amber`, `red` — each with the same
+  `solid` / `subtle` / `surface` / `outline` / `plain` sub-tokens; swap them
+  in via `colorPalette="green"` etc. on badges and buttons.
 
-**Light mode** keeps the same roles with inverted values (page `#F6F7F2`,
-surface white, accent `accentStrong`). It is a secondary skin — never add a
-second accent for it.
-
-**Do:** treat the teal-green as a rarity — one CTA per surface, selected
-states only. **Don't:** fill large backgrounds with full-saturation teal; it
-is an accent, not a canvas. **Don't** add a second hue; the palette is
+**Do:** treat the brown as a rarity — one CTA per surface, selected states
+only. **Don't:** fill large backgrounds with full-saturation brown; it is an
+accent, not a canvas. **Don't** add a second hue; the palette is
 intentionally a single-accent system.
 
 ## Typography
 
-Inter is the workhorse, set tight and precise. Display weight is **600**
-(never 700+ — the brands we follow cap at 600), with tight tracking
-(`-0.035em` on display, `-0.011em` on body). Hierarchy is enforced through
-scale and weight, never color — only secondary copy shifts hue (to `muted`).
+Outfit is the workhorse. Display weight is **800** with tight tracking
+(`-0.03em`); body copy is 400. Hierarchy is enforced through scale and
+weight — only secondary copy shifts hue (to `fg.muted`). Text styles
+(`xs` → `7xl` plus `label`) come from the Park theme; every component uses
+them, so type is consistent by construction.
 
 Mono (`ui-monospace`/SF Mono stack) appears in keyboard-shortcut chips, code
 blocks, token names and numeric tables. Numerals in figures should use tabular
 spacing where the layout is columnar.
 
 **Do:** surface keyboard shortcuts everywhere — chips next to menu items,
-tooltips, command palette, empty states. **Don't:** use heavy display weights;
-600 is the max. **Don't** switch to a serif anywhere.
+tooltips, command palette, empty states. **Don't:** switch to a serif
+anywhere.
 
 ## Layout
 
 Dense vertical rhythm — 4 and 8 px increments dominate, rarely above 64 px in
 product surfaces. App layouts follow the three-column dev-tool pattern:
-240 px sidebar, fluid main, optional 320 px detail rail. Marketing-style
-surfaces cap at ~1100 px. Rows are compact (28–32 px) and hover-fill carries
-the affordance — no separators between list rows.
+240 px sidebar, fluid main, optional 320 px detail rail. Rows are compact
+(28–32 px) and hover-fill carries the affordance — no separators between list
+rows.
 
 ## Elevation & Depth
 
 The product is essentially flat with hairline borders. Elevation is reserved
-for floating things — modals, popovers, menus, toasts — and even then the
-shadow is dark, soft and **layered** (an ambient halo plus a sharp contact
-edge), never a single big drop shadow. Raised surfaces in dark mode carry a
-1 px inset top highlight (`rgba(255,255,255,0.06)`) that sells the lift
-without light-mode gimmicks.
+for floating things — modals, popovers, menus, toasts — which use Park's
+semantic `shadow` tokens (layered: an ambient halo plus a sharp contact edge),
+never a single big drop shadow.
 
 - base (page) → never elevated
-- raised (cards, sticky headers) → hairline border, `raised` shadow token
-- overlay (modals, menus, dropdowns) → `surfaceOverlay` bg, `overlay` shadow
-- scrim → translucent dark (`rgba(4,5,3,0.7)`), no blur on the backdrop
-
-A child surface's radius must be ≤ its parent's.
+- raised (cards, sticky headers) → hairline border only
+- overlay (modals, menus, dropdowns) → `shadow.lg`–`shadow.xl`, slide/fade in
+  via the vendored animation styles
+- scrim → `black.a6`-style translucent dark, no blur on the backdrop
 
 ## Shapes
 
-- Buttons/inputs/selects: 6–8 px radius (`lg`), 32 px default height.
-- Cards/modals: 12 px radius (`xl`).
-- Badges, avatars, keyboard chips: pill or near-pill.
-- Focus: a crisp 1–2 px accent outline or border brightening — **no glow,
-  no 3 px blurred ring** (Linear's rule).
+- Buttons: `l2` radius (`radii.sm`, 4 px), 40 px default height.
+- Inputs/selects: `l2` (4 px).
+- Cards: `l3` (`radii.md`, 6 px).
+- Badges, avatars, keyboard chips: `l2`, near-pill.
+- Focus: a crisp 1–2 px accent outline (`focusVisibleRing`) — no glow, no
+  3 px blurred ring (Linear's rule).
 
 ## Components
 
-- **Buttons**: solid = teal-green fill, near-black text, no shadow, color
-  shift on hover; subtle = soft teal tint; outline/ghost = hairline border or
-  bare.
-- **Inputs**: 32 px, 8 px radius, hairline border that brightens to the teal
-  on focus; no ring.
-- **Tabs**: underline indicator that slides between triggers (animated),
-  selected trigger keeps weight + accent.
-- **Keyboard chips (`kbd`)**: monospace ~12 px, `surfaceOverlay` bg, hairline
-  border, rounded — used beside menu items, tooltips and shortcuts.
-- **Cards**: `surface` bg, hairline border, 12 px radius, flat in dark; hover
-  lifts the border, not a shadow.
-- **Dialog/Menu/Select overlays**: `surfaceOverlay` bg, hairline border,
-  layered `overlay` shadow, 100–180 ms scale/fade in.
+Everything is recipe-driven and lives in the Park theme:
+- **Buttons**: `solid` = brown fill with **white text**, hover brightens
+  (`brown.10`); `surface` / `subtle` / `outline` / `plain` for the quieter
+  tiers. Sizes `2xs`–`2xl`.
+- **Inputs/Selects/Textareas**: `l2` radius, hairline border that brightens
+  to the accent on focus (`focusVisibleRing: 'inside'`).
+- **Tabs**: animated indicator that slides between triggers, roving focus.
+- **Keyboard chips (`kbd`)**: monospace, sand-tinted bg, hairline border —
+  used beside menu items and shortcuts.
+- **Cards**: `gray.surface.bg`, hairline border, `l3` radius, flat in dark.
+- **Dialog/Menu/Select overlays**: `gray.surface.bg`, hairline border,
+  layered shadow, 100–180 ms slide/fade in.
 
 ## Do's & Don'ts
 
 **Do**
 
-- Default to dark; use the warm near-black canvas everywhere.
+- Default to dark; use the sand-tinted near-black canvas everywhere.
 - Keep rows dense and let hover-fill carry affordance.
 - Show keyboard shortcuts as mono chips next to actions.
-- Use the teal-green as the single brand color; make it rare.
+- Use the brown as the single brand color; make it rare.
+- Put white text on accent fills; use `brown.plain.fg` for accent-toned text
+  on dark fills.
 - Animate briskly (100–180 ms) with smooth standard easing; transforms and
   opacity only.
 - Keep focus rings visible for keyboard users — crisp, not glowy.
@@ -192,11 +198,11 @@ A child surface's radius must be ≤ its parent's.
 
 - Use drop shadows on non-floating elements.
 - Add icons to list rows unless functionally required.
-- Switch to warm *brown* greys — Tally's greys are cool with a green cast.
-- Use the teal-green as a full-saturation background fill.
+- Mix hue families — everything derives from the sand/brown families.
+- Use the brown as a full-saturation background fill.
 - Animate longer than 300 ms; Tally feels fast.
-- Ever use the default indigo (`#6366f1`) or purple gradients — that is
-  generic AI default, not this system.
+- Reach for loud purple/blue gradients or generic AI-accent colors — stock
+  Park palettes only.
 
 ## Responsive Behavior
 
@@ -209,17 +215,24 @@ very narrow screens. Dark mode is the default at every breakpoint.
 
 When designing "in the style of Tally":
 
-1. Start dark: `#0D0F0B` canvas, `#F2F4EE` text, `#262B22` hairline borders.
-2. Use the pastel teal-green (`#5FCDB0`) as the only accent — primary CTA
-   and selected state.
-3. Set type in Inter at 600 max for display, tight tracking, dense 4/8 px
-   rhythm, 32 px controls, 6–8 px radii.
+1. Start dark: `canvas` (`#111110`), `fg.default` (`#EEEEEC`), hairline
+   `border`; raise with `gray.surface.bg` cards.
+2. Use the brown accent (`brown.9`, `#AD7F58`) as the only accent — primary
+   CTA and selected state, with **white text on accent fills**; accent-toned
+   text on dark fills uses `brown.11` (`#DBB594`).
+3. Set type in Outfit — 800 display weight with tight tracking, dense 4/8 px
+   rhythm, 40 px controls, 4 px button radius (`l2`).
 4. Put keyboard shortcuts in mono chips next to actions — keyboard-first.
 5. Keep it flat: hairline borders, layered shadows only on floating surfaces,
    animation under 200 ms.
+6. Prefer stock Park UI components and recipes; express brand through the
+   three knobs (accent, gray, font) rather than custom styles.
 
 ---
 
-*Tokens defined in `packages/design-system/src/theme`. Design language
-inspired by Linear, Raycast, Cursor and Framer public materials. Source
-structure based on [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md) (MIT).*
+*Brand is stock Park UI (MIT, vendored from park-ui.com/registry): brown
+accent palette, sand gray family, Outfit typeface. Tokens and components in
+`packages/design-system/src/theme` and `packages/design-system/src/components/ui`.
+Design language inspired by Linear, Raycast, Cursor and Framer public
+materials. Source structure based on
+[VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md) (MIT).*
