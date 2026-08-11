@@ -22,7 +22,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_yaml = "0.9"
 quick-xml = { version = "0.41.0", features = ["serialize"] }
-serde_with = "3.21.0"
+serde_with = "3.22.0"
 chrono = { workspace = true, features = ["serde"] }
 base64.workspace = true
 url = "2.5"
