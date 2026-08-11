@@ -158,7 +158,64 @@ export const transactions: Transaction[] = [
   { id: 't14', date: '2026-06-30', description: 'Salaries — June', account: 'Payroll', source: 'Barclays', amount: -12840.0, status: 'cleared' },
   { id: 't15', date: '2026-06-27', description: 'Sale — invoice #1039 (BrightBox Ltd)', account: 'Sales', source: 'Starling', amount: 3560.0, status: 'cleared' },
   { id: 't16', date: '2026-06-18', description: 'Office supplies — Printworks', account: 'Office', source: 'Starling', amount: -238.4, status: 'cleared' },
+  // Incorporation-era entries: they give Assets / Liabilities / Equity derived
+  // balances in the chart of accounts without disturbing the "recent" lists.
+  { id: 't17', date: '2024-04-02', description: 'Loan drawdown — Lloyds', account: 'Loan', source: 'Barclays', amount: -20000, status: 'cleared' },
+  { id: 't18', date: '2024-04-01', description: 'Share capital — incorporation', account: 'Share capital', source: 'Manual', amount: -15000, status: 'cleared' },
+  { id: 't19', date: '2024-04-01', description: 'Opening balance — bank transfer', account: 'Starling', source: 'Starling', amount: 45000, status: 'cleared' },
 ]
+
+// ---------- chart of accounts ----------
+// GnuCash-style top-level groups with their leaf accounts. Leaf names MUST
+// match `Transaction.account`, because balances are derived from the
+// transactions list (tree and table therefore always agree).
+export interface AccountLeaf {
+  name: string
+}
+
+export interface AccountGroup {
+  name: string
+  accounts: AccountLeaf[]
+}
+
+export const chartOfAccounts: AccountGroup[] = [
+  { name: 'Assets', accounts: [{ name: 'Starling' }, { name: 'Barclays' }] },
+  { name: 'Liabilities', accounts: [{ name: 'Loan' }] },
+  { name: 'Equity', accounts: [{ name: 'Share capital' }] },
+  { name: 'Income', accounts: [{ name: 'Sales' }] },
+  {
+    name: 'Expenses',
+    accounts: [
+      { name: 'Rent' },
+      { name: 'Utilities' },
+      { name: 'Software' },
+      { name: 'Telecom' },
+      { name: 'Insurance' },
+      { name: 'Office' },
+      { name: 'Payroll' },
+      { name: 'Tax' },
+    ],
+  },
+]
+
+export function transactionsFor(account: string): Transaction[] {
+  return transactions.filter((t) => t.account === account)
+}
+
+/** Balance of one account: the sum of its transactions (app sign convention). */
+export function accountBalance(account: string): number {
+  return transactionsFor(account).reduce((s, t) => s + t.amount, 0)
+}
+
+/** Rolled-up total of a top-level group's leaf accounts. */
+export function groupBalance(group: AccountGroup): number {
+  return group.accounts.reduce((s, a) => s + accountBalance(a.name), 0)
+}
+
+/** Leaf account names in chart order (drives the Transactions filter dropdown). */
+export function chartAccountNames(): string[] {
+  return chartOfAccounts.flatMap((g) => g.accounts.map((a) => a.name))
+}
 
 // ---------- summaries ----------
 export interface MonthSummary {
