@@ -1,0 +1,33 @@
+# Local development services for the tally workspace.
+#
+#   nix develop -c dev-db    # or: docker compose up -d --wait db
+#   cargo run -p tally-api   # connects via DATABASE_URL (default below)
+#
+# Optional tooling (not started by default): `docker compose --profile tools up adminer`.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: tally
+      POSTGRES_PASSWORD: tally
+      POSTGRES_DB: tally
+    ports:
+      - "5432:5432"
+    volumes:
+      - tally-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tally -d tally"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  adminer:
+    image: adminer:latest
+    profiles: ["tools"]
+    ports:
+      - "8082:8080"
+    depends_on:
+      - db
+
+volumes:
+  tally-pg:

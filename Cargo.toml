@@ -16,7 +16,28 @@ anyhow = { version = "^1.0" }
 thiserror = { version = "^1.0" }
 snafu = { version = "^0.8" }
 async-trait = { version = "0.1.92" }
-uuid = { version = "1.24.0" }
+uuid = { version = "1.24.0", features = ["serde", "v4"] }
 base64 = { version = "0.23.1" }
 futures = { version = "^0.3" }
 rucash = { version = "0.7" }
+axum = { version = "0.8.9", features = ["multipart"] }
+toasty = { version = "0.9.0", features = ["postgresql", "serde", "rust_decimal"] }
+tower = "0.5"
+tower-http = { version = "0.7.0", features = ["cors", "trace", "catch-panic", "request-id", "limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+argon2 = "0.5"
+rand = "0.9"
+sha2 = "0.10"
+hex = "0.4"
+mime = "0.3"
+tokio-util = "0.7"
+rust_decimal = "1.36"
+tempfile = "3.27"
+
+# toasty's never-built sqlite dev-driver would pull a rusqlite incompatible
+# with rucash's (libsqlite3-sys links conflict); we use only the postgresql
+# driver, so patch the sqlite driver to a resolution-only stub (see
+# vendor/toasty-driver-sqlite).
+[patch.crates-io]
+toasty-driver-sqlite = { path = "vendor/toasty-driver-sqlite" }

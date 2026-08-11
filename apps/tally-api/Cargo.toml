@@ -1,0 +1,56 @@
+[package]
+name = "tally-api"
+version = "0.1.0"
+edition = "2024"
+
+# Integration tests against a real Postgres are compiled behind the
+# `pg-tests` feature, on by default.  First-clone / DB-less runs use
+# `cargo test -p tally-api --no-default-features` (the pg-gated tests are
+# then reported as ignored), matching the workspace's offline convention
+# (tally-cli's `api_tests`, ct600's `api_tests`).
+[features]
+default = ["pg-tests"]
+pg-tests = []
+
+[dependencies]
+# async, http
+tokio = { workspace = true, features = ["full"] }
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+# ORM / db
+toasty.workspace = true
+# formats, serde
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+rust_decimal.workspace = true
+# errors, logs
+anyhow.workspace = true
+snafu.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# auth
+argon2.workspace = true
+rand.workspace = true
+# argon2's `rand_core::OsRng` is cfg'd out unless the `getrandom` feature
+# is enabled on the shared 0.6.x build (password-hash does not enable it).
+rand_core = { version = "0.6", features = ["getrandom"] }
+sha2.workspace = true
+hex.workspace = true
+uuid.workspace = true
+# web client (Companies House search adapter)
+reqwest.workspace = true
+# internal
+ixbrl = { path = "../../libs/ixbrl" }
+# default-features = false: ct600's only feature is `api_tests` (live
+# Companies House integration tests).  Kept off so
+# `cargo test --workspace --no-default-features` runs fully offline.
+ct600 = { path = "../../libs/ct600", default-features = false }
+
+# Used in src/ledgers.rs (temp-file streaming for uploads), not just tests.
+tempfile.workspace = true
+
+[dev-dependencies]
+# Test-only database administration (create/drop per-test databases).
+tokio-postgres = "0.7"

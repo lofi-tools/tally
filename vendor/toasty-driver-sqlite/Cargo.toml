@@ -1,0 +1,23 @@
+# Stub replacement for `toasty-driver-sqlite` (see src/lib.rs).
+#
+# WHY: cargo resolves dev-dependencies of *every* package in the dependency
+# graph into the lockfile.  toasty 0.9.0 lists `toasty-driver-sqlite` as a
+# dev-dependency, and the real crate pulls `rusqlite ^0.40` → `libsqlite3-sys
+# ^0.38`.  This workspace's GnuCash libs (rucash 0.7, via ixbrl/ct600) pin
+# `rusqlite 0.37` → `libsqlite3-sys ^0.35`, and `libsqlite3-sys` links the
+# native `sqlite3` library, so only one version may be in the graph — the two
+# requirements are disjoint and resolution fails.
+#
+# tally-api only ever uses the Postgres driver (`postgresql` feature), so the
+# sqlite driver is never compiled.  This stub satisfies resolution and stays
+# out of the final binary.  The `[features]` below exist because toasty's
+# feature graph references them (`toasty-driver-sqlite?/rust_decimal`, …).
+[package]
+name = "toasty-driver-sqlite"
+version = "0.9.0"
+edition = "2021"
+
+[features]
+rust_decimal = []
+bigdecimal = []
+jiff = []

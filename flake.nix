@@ -549,6 +549,20 @@
 
           # Kill the Local Test Service (also the lts tab's cleanup hook).
           hmrc-lts-stop = ''${bin.rip} LTSStandalone'';
+
+          # The tally-api dev database: start the compose postgres and wait
+          # for its healthcheck (`--wait` needs docker compose v2).
+          dev-db = ''docker compose up -d --wait db'';
+          db-down = ''docker compose down'';
+
+          # Run the tally-api service (env from .env / defaults; see
+          # apps/tally-api/README.md).
+          api = ''cargo run -p tally-api'';
+
+          # The tally-api suites: full (needs the compose DB up: `dev-db`
+          # first) and the offline first-clone variant.
+          test-api = ''cargo test -p tally-api'';
+          test-api-offline = ''cargo test -p tally-api --no-default-features'';
         };
 
         env = {
