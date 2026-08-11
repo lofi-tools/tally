@@ -6,6 +6,7 @@ mod common;
 
 use axum::http::{Method, StatusCode};
 use common::{assert_error, json_body, request, TestApp};
+use tally_api::models::{Session, User};
 
 #[tokio::test]
 async fn register_login_me_logout_roundtrip() {
@@ -174,4 +175,69 @@ async fn protected_routes_require_bearer_token() {
         .send(request(Method::GET, "/api/v1/companies", Some(&"a".repeat(64)), None))
         .await;
     assert_error(resp, StatusCode::UNAUTHORIZED, "auth_invalid").await;
+}
+
+#[tokio::test]
+async fn expired_session_returns_auth_expired() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+
+    let token = app.register("expiring@example.com").await;
+
+    // sanity: the fresh token works
+    let resp = app
+        .send(request(Method::GET, "/api/v1/auth/me", Some(&token), None))
+        .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Backdate the session.  tokio::time::pause/advance can't do this: the
+    // expiry check compares the stored `expires_at` against
+    // `chrono::Utc::now()` (wall clock), which tokio's virtual clock does
+    // not affect.  Instead, rewrite the row directly — same token_hash, past
+    // `expires_at`.
+    let mut db = app.db.clone();
+    let token_hash = tally_api::auth::sha256_hex(token.as_bytes());
+    Session::filter_by_token_hash(&token_hash)
+        .delete()
+        .exec(&mut db)
+        .await
+        .expect("delete current session");
+    let user = User::filter_by_email("expiring@example.com")
+        .first()
+        .exec(&mut db)
+        .await
+        .expect("lookup user")
+        .expect("user exists");
+    toasty::create!(Session {
+        user_id: user.id,
+        token_hash,
+        created_at: "2000-01-01T00:00:00Z".to_string(),
+        expires_at: "2000-01-01T00:00:00Z".to_string(),
+    })
+    .exec(&mut db)
+    .await
+    .expect("recreate expired session");
+
+    // Same bearer token now reports auth_expired (not auth_invalid — the
+    // token hash is still valid, only the expiry differs).
+    let resp = app
+        .send(request(Method::GET, "/api/v1/auth/me", Some(&token), None))
+        .await;
+    assert_error(resp, StatusCode::UNAUTHORIZED, "auth_expired").await;
+
+    // Expiry is per-session: a fresh login is unaffected.
+    let resp = app
+        .send(request(
+            Method::POST,
+            "/api/v1/auth/login",
+            None,
+            Some(&serde_json::json!({
+                "email": "expiring@example.com",
+                "password": "correct horse battery staple",
+            })),
+        ))
+        .await;
+    assert_eq!(resp.status(), StatusCode::OK);
 }

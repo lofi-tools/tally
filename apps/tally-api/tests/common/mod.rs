@@ -37,6 +37,11 @@ pub const DEFAULT_MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
 /// A running test app + the admin handle that owns its database.
 pub struct TestApp {
     pub app: Router,
+    /// The app's toasty `Db` (clone), exposed so tests can poke at rows
+    /// directly — e.g. backdate a session's `expires_at` for the
+    /// `auth_expired` path.
+    #[allow(dead_code)] // only some of the test binaries use it
+    pub db: toasty::Db,
     admin: Option<tokio_postgres::Client>,
     db_name: String,
     _upload_dir: TempDir,
@@ -73,7 +78,7 @@ impl TestApp {
 
         let upload_dir = TempDir::new().ok()?;
         let state = Arc::new(AppState {
-            db,
+            db: db.clone(),
             ch: None,
             upload_dir: upload_dir.path().to_path_buf(),
             max_upload_bytes,
@@ -81,6 +86,7 @@ impl TestApp {
 
         Some(Self {
             app: router(state),
+            db,
             admin: Some(admin),
             db_name,
             _upload_dir: upload_dir,
