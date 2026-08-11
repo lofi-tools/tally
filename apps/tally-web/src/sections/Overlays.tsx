@@ -46,15 +46,17 @@ export function Overlays(props: { colorMode: ColorModeController }) {
                 <Dialog.CloseTrigger>
                   <X />
                 </Dialog.CloseTrigger>
-                <Dialog.Title>Submit your accounts</Dialog.Title>
-                <Dialog.Description>
-                  Your FRS 105 micro-entity accounts are ready to file with Companies House.
-                  Review the balance sheet and the CT600 before you confirm.
-                </Dialog.Description>
-                <div class={css({ display: 'flex', justifyContent: 'flex-end', gap: '2', mt: '2' })}>
-                  <Dialog.CloseTrigger class={button({ variant: 'plain' })}>Cancel</Dialog.CloseTrigger>
+                <Dialog.Header>
+                  <Dialog.Title>Submit your accounts</Dialog.Title>
+                  <Dialog.Description>
+                    Your FRS 105 micro-entity accounts are ready to file with Companies House.
+                    Review the balance sheet and the CT600 before you confirm.
+                  </Dialog.Description>
+                </Dialog.Header>
+                <Dialog.Footer>
+                  <Dialog.ActionTrigger class={button({ variant: 'plain' })}>Cancel</Dialog.ActionTrigger>
                   <Button>Confirm & file</Button>
-                </div>
+                </Dialog.Footer>
               </Dialog.Content>
             </Dialog.Positioner>
           </Dialog.Root>
