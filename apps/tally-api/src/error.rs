@@ -278,8 +278,11 @@ impl IntoResponse for AppError {
 }
 
 // ---------------------------------------------------------------------------
-// Axum extractor rejections → AppError (so handlers can return
-// `Result<_, AppError>` with Json/Query/Path/Multipart extractors).
+// Axum extractor rejections → AppError.  axum 0.8 renders an extractor's
+// own rejection (never converting to the handler error type), so these
+// impls are consumed by the wrapper extractors in `extract.rs`, whose
+// rejection type is `AppError` — every rejection then renders this
+// envelope instead of axum's default text/plain response.
 // ---------------------------------------------------------------------------
 
 impl From<axum::extract::rejection::JsonRejection> for AppError {

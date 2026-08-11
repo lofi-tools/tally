@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 
 use crate::app::AppState;
 use crate::error::{AppError, FieldIssue};
+use crate::extract::AppJson;
 use crate::models::{Session, User};
 
 /// 30 days, per spec §10.
@@ -57,7 +58,7 @@ pub struct AuthResponse {
 /// `POST /auth/register` → `{ token, user }`.
 pub async fn register(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<RegisterBody>,
+    AppJson(body): AppJson<RegisterBody>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let email = body.email.trim().to_lowercase();
     let mut fields = Vec::new();
@@ -109,7 +110,7 @@ pub async fn register(
 /// `POST /auth/login` → `{ token, user }`.
 pub async fn login(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<LoginBody>,
+    AppJson(body): AppJson<LoginBody>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let email = body.email.trim().to_lowercase();
     let mut db = state.db.clone();

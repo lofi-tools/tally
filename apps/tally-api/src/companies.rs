@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::Json;
 use serde::Deserialize;
 
@@ -12,6 +12,7 @@ use crate::app::AppState;
 use crate::auth::AuthUser;
 use crate::companies_house::key_missing_hint;
 use crate::error::{AppError, FieldIssue};
+use crate::extract::{AppJson, AppPath, AppQuery};
 use crate::models::{Account, Company, Ledger, Split, Transaction};
 
 // The CLI's fixed defaults for the accounts metadata (config.rs keeps the
@@ -114,7 +115,7 @@ pub async fn list(
 pub async fn create(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Json(input): Json<CompanyInput>,
+    AppJson(input): AppJson<CompanyInput>,
 ) -> Result<Json<Company>, AppError> {
     validate_create(&input)?;
     let mut input = input;
@@ -149,7 +150,7 @@ pub async fn create(
 pub async fn get(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(id): Path<uuid::Uuid>,
+    AppPath(id): AppPath<uuid::Uuid>,
 ) -> Result<Json<Company>, AppError> {
     let mut db = state.db.clone();
     let company = owned_company(&mut db, user.id, id).await?;
@@ -160,8 +161,8 @@ pub async fn get(
 pub async fn patch(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(id): Path<uuid::Uuid>,
-    Json(input): Json<CompanyInput>,
+    AppPath(id): AppPath<uuid::Uuid>,
+    AppJson(input): AppJson<CompanyInput>,
 ) -> Result<Json<Company>, AppError> {
     let mut db = state.db.clone();
     let mut company = owned_company(&mut db, user.id, id).await?;
@@ -176,7 +177,7 @@ pub async fn patch(
 pub async fn delete(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(id): Path<uuid::Uuid>,
+    AppPath(id): AppPath<uuid::Uuid>,
 ) -> Result<axum::http::StatusCode, AppError> {
     let mut db = state.db.clone();
     let company = owned_company(&mut db, user.id, id).await?;
@@ -205,7 +206,7 @@ pub async fn delete(
 pub async fn search(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Query(params): Query<SearchParams>,
+    AppQuery(params): AppQuery<SearchParams>,
 ) -> Result<Json<Vec<crate::companies_house::SearchItem>>, AppError> {
     let q = params.q.unwrap_or_default().trim().to_string();
     if q.is_empty() {
@@ -225,7 +226,7 @@ pub async fn search(
 pub async fn enrich(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(id): Path<uuid::Uuid>,
+    AppPath(id): AppPath<uuid::Uuid>,
 ) -> Result<Json<Company>, AppError> {
     let mut db = state.db.clone();
     let mut company = owned_company(&mut db, user.id, id).await?;

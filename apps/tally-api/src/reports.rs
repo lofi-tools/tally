@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::header;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Json;
@@ -34,6 +34,7 @@ use crate::companies::{
     DEFAULT_ACCOUNTS_STATUS_DIMENSION, DEFAULT_ACCOUNTS_TYPE_DIMENSION,
 };
 use crate::error::{AppError, FieldIssue};
+use crate::extract::{AppJson, AppPath};
 use crate::models::{Account, Company, Ledger, Split, Transaction};
 use crate::period::{self, PeriodRequest};
 
@@ -77,8 +78,8 @@ impl PeriodRequest for ReportRequest {
 pub async fn accounts(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(company_id): Path<uuid::Uuid>,
-    Json(request): Json<ReportRequest>,
+    AppPath(company_id): AppPath<uuid::Uuid>,
+    AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Html<String>, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
     let accounts = Frs105Accounts::new(&inputs.book, &inputs.company, &inputs.profile, &inputs.meta);
@@ -89,8 +90,8 @@ pub async fn accounts(
 pub async fn corp_tax(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(company_id): Path<uuid::Uuid>,
-    Json(request): Json<ReportRequest>,
+    AppPath(company_id): AppPath<uuid::Uuid>,
+    AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Html<String>, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
     let corp_tax = Frs105CorpTax::builder(&inputs.book, &inputs.company, &inputs.meta).build();
@@ -102,8 +103,8 @@ pub async fn corp_tax(
 pub async fn corp_tax_json(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(company_id): Path<uuid::Uuid>,
-    Json(request): Json<ReportRequest>,
+    AppPath(company_id): AppPath<uuid::Uuid>,
+    AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
     let tax = Frs105CorpTax::builder(&inputs.book, &inputs.company, &inputs.meta).build();
@@ -147,8 +148,8 @@ pub async fn corp_tax_json(
 pub async fn ct600(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(company_id): Path<uuid::Uuid>,
-    Json(request): Json<ReportRequest>,
+    AppPath(company_id): AppPath<uuid::Uuid>,
+    AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Response, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
     let accounts = Frs105Accounts::new(&inputs.book, &inputs.company, &inputs.profile, &inputs.meta);

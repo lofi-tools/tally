@@ -10,9 +10,7 @@ use std::collections::HashMap;
 use std::io::Write as _;
 use std::sync::Arc;
 
-// `AxumPath` to avoid colliding with `std::path::Path` (used by
-// `stored_path`).
-use axum::extract::{Multipart, Path as AxumPath, Query, State};
+use axum::extract::State;
 use axum::Json;
 use chrono::NaiveDateTime;
 use ixbrl::{AccountType, GnucashBook};
@@ -23,6 +21,7 @@ use crate::app::AppState;
 use crate::auth::AuthUser;
 use crate::companies::owned_company;
 use crate::error::{AppError, FieldIssue};
+use crate::extract::{AppMultipart, AppPath, AppQuery};
 use crate::models::{Account, Ledger, Split, Transaction};
 
 // ---------------------------------------------------------------------------
@@ -80,8 +79,8 @@ pub struct AccountsView {
 pub async fn upload(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    AxumPath(company_id): AxumPath<uuid::Uuid>,
-    mut multipart: Multipart,
+    AppPath(company_id): AppPath<uuid::Uuid>,
+    AppMultipart(mut multipart): AppMultipart,
 ) -> Result<Json<Ledger>, AppError> {
     let mut db = state.db.clone();
     // Ownership first, before any parsing work.
@@ -233,7 +232,7 @@ pub async fn upload(
 pub async fn list(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    AxumPath(company_id): AxumPath<uuid::Uuid>,
+    AppPath(company_id): AppPath<uuid::Uuid>,
 ) -> Result<Json<Vec<Ledger>>, AppError> {
     let mut db = state.db.clone();
     owned_company(&mut db, user.id, company_id).await?;
@@ -248,7 +247,7 @@ pub async fn list(
 pub async fn get(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    AxumPath(id): AxumPath<uuid::Uuid>,
+    AppPath(id): AppPath<uuid::Uuid>,
 ) -> Result<Json<Ledger>, AppError> {
     let mut db = state.db.clone();
     let ledger = owned_ledger(&mut db, user.id, id).await?;
@@ -259,7 +258,7 @@ pub async fn get(
 pub async fn delete(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    AxumPath(id): AxumPath<uuid::Uuid>,
+    AppPath(id): AppPath<uuid::Uuid>,
 ) -> Result<axum::http::StatusCode, AppError> {
     let mut db = state.db.clone();
     let ledger = owned_ledger(&mut db, user.id, id).await?;
@@ -279,7 +278,7 @@ pub async fn delete(
 pub async fn accounts_view(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    AxumPath(id): AxumPath<uuid::Uuid>,
+    AppPath(id): AppPath<uuid::Uuid>,
 ) -> Result<Json<AccountsView>, AppError> {
     let mut db = state.db.clone();
     let ledger = owned_ledger(&mut db, user.id, id).await?;
@@ -294,8 +293,8 @@ pub async fn accounts_view(
 pub async fn transactions_view(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    AxumPath(id): AxumPath<uuid::Uuid>,
-    Query(q): Query<TxnQuery>,
+    AppPath(id): AppPath<uuid::Uuid>,
+    AppQuery(q): AppQuery<TxnQuery>,
 ) -> Result<Json<TransactionsPage>, AppError> {
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
     let offset = q.offset.unwrap_or(0);

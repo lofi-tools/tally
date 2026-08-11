@@ -200,3 +200,133 @@ async fn upload_requires_file_field() {
         .await;
     assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
 }
+
+#[tokio::test]
+async fn upload_garbage_gnucash_is_rejected() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let (token, company_id) = seed_company(&app, "garbage@example.com").await;
+
+    // Valid extension, garbage content: the parser must fail with the 422
+    // `ledger_parse_failed` envelope, not 500.  (This relies on rucash
+    // rejecting the malformed XML — a lenient parser would instead yield an
+    // empty book and a 200.)
+    let boundary = "----tally-test-boundary";
+    let resp = app
+        .send(
+            axum::http::Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v1/companies/{company_id}/ledgers"))
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(multipart_body(boundary, "bad.gnucash", b"<gnc-v2>not a real gnucash book"))
+                .expect("request"),
+        )
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "ledger_parse_failed").await;
+}
+
+#[tokio::test]
+async fn upload_too_large_is_rejected() {
+    // A tiny cap so a 1 KiB body trips the streaming size check mid-upload.
+    let Some(app) = TestApp::setup_with_max_upload_bytes(256).await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let (token, company_id) = seed_company(&app, "big@example.com").await;
+
+    let boundary = "----tally-test-boundary";
+    let payload = vec![b'x'; 1024];
+    let resp = app
+        .send(
+            axum::http::Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v1/companies/{company_id}/ledgers"))
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(multipart_body(boundary, "big.gnucash", &payload))
+                .expect("request"),
+        )
+        .await;
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let json = json_body(resp).await;
+    assert_eq!(json["error"]["code"], "file_too_large");
+    assert_eq!(json["error"]["details"]["limit_bytes"], 256);
+}
+
+#[tokio::test]
+async fn upload_malformed_multipart_is_rejected() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let (token, company_id) = seed_company(&app, "mime@example.com").await;
+
+    // Declares the boundary and a `file` field but never closes it: the
+    // stream ends mid-field, so multer errors while reading chunks → 400
+    // `multipart_error` (not a hang, not a parse failure).
+    let boundary = "----tally-test-boundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"x.gnucash\"\r\n\r\nsome bytes but no closing boundary"
+    );
+    let resp = app
+        .send(
+            axum::http::Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v1/companies/{company_id}/ledgers"))
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(axum::body::Body::from(body))
+                .expect("request"),
+        )
+        .await;
+    assert_error(resp, StatusCode::BAD_REQUEST, "multipart_error").await;
+}
+
+#[tokio::test]
+async fn ledger_route_rejects_invalid_uuid() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let token = app.register("badpath@example.com").await;
+
+    // A non-UUID path segment fails the `Path<Uuid>` extractor before the
+    // handler runs → field-level 422 `validation_failed`.
+    let resp = app
+        .send(request(Method::GET, "/api/v1/ledgers/not-a-uuid", Some(&token), None))
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
+}
+
+#[tokio::test]
+async fn transactions_view_rejects_bad_query() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let token = app.register("badquery@example.com").await;
+
+    // The `Query` extractor rejects before the handler runs, so the ledger
+    // id need not exist; `limit=abc` fails u32 deserialization → 422.
+    let resp = app
+        .send(request(
+            Method::GET,
+            "/api/v1/ledgers/00000000-0000-0000-0000-000000000000/transactions?limit=abc",
+            Some(&token),
+            None,
+        ))
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
+}

@@ -5,7 +5,8 @@
 
 mod common;
 
-use axum::http::{Method, StatusCode};
+use axum::body::Body;
+use axum::http::{header, Method, Request, StatusCode};
 use common::{assert_error, json_body, request, TestApp};
 use serde_json::json;
 
@@ -165,4 +166,35 @@ async fn search_without_key_is_a_clear_400() {
         ))
         .await;
     assert_error(resp, StatusCode::BAD_REQUEST, "companies_house_key_missing").await;
+}
+
+#[tokio::test]
+async fn create_rejects_malformed_json() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let token = app.register("badjson@example.com").await;
+
+    // A body that is not valid JSON (with the JSON content type) → 400
+    // `invalid_json` with the serde position in details.
+    let resp = app
+        .send(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/companies")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{"))
+                .expect("request"),
+        )
+        .await;
+    // The §11.1 envelope: 400 + code, and details carry the serde message
+    // with the position parsed from the rejection text (§11.2).
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let json = json_body(resp).await;
+    assert_eq!(json["error"]["code"], "invalid_json");
+    assert!(json["error"]["details"]["message"].is_string());
+    assert_eq!(json["error"]["details"]["line"], 1);
+    assert_eq!(json["error"]["details"]["column"], 1);
 }

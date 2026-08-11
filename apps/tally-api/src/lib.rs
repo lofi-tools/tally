@@ -9,6 +9,7 @@ pub mod auth;
 pub mod companies;
 pub mod companies_house;
 pub mod error;
+pub mod extract;
 pub mod ledgers;
 pub mod models;
 pub mod period;

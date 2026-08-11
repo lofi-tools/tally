@@ -28,6 +28,11 @@ pub const FIXTURE_GNUCASH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../libs/ixbrl/example_data/basic-1/input.gnucash"
 );
+/// The per-upload size cap `setup()` uses (mirrors production `main.rs`).
+/// Tests that want to trip the 413 branch use
+/// [`setup_with_max_upload_bytes`](TestApp::setup_with_max_upload_bytes)
+/// with a tiny cap.
+pub const DEFAULT_MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
 
 /// A running test app + the admin handle that owns its database.
 pub struct TestApp {
@@ -38,9 +43,15 @@ pub struct TestApp {
 }
 
 impl TestApp {
-    /// Build the app on a fresh database.  `None` when Postgres is
-    /// unreachable (test then skips).
+    /// Build the app on a fresh database, with the default upload cap.
+    /// `None` when Postgres is unreachable (test then skips).
     pub async fn setup() -> Option<Self> {
+        Self::setup_with_max_upload_bytes(DEFAULT_MAX_UPLOAD_BYTES).await
+    }
+
+    /// Like [`setup`](Self::setup), but with a custom per-upload size cap
+    /// (the 413 test needs a small one so a tiny fixture body trips it).
+    pub async fn setup_with_max_upload_bytes(max_upload_bytes: u64) -> Option<Self> {
         let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DB_URL.to_string());
 
         // Admin connection to the default DB (same server): create the
@@ -65,7 +76,7 @@ impl TestApp {
             db,
             ch: None,
             upload_dir: upload_dir.path().to_path_buf(),
-            max_upload_bytes: 50 * 1024 * 1024,
+            max_upload_bytes,
         });
 
         Some(Self {
