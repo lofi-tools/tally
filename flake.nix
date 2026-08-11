@@ -559,9 +559,16 @@
           # apps/tally-api/README.md).
           api = ''cargo run -p tally-api'';
 
-          # The tally-api suites: full (needs the compose DB up: `dev-db`
-          # first) and the offline first-clone variant.
-          test-api = ''cargo test -p tally-api'';
+          # The tally-api suites.  `test-api` is self-sufficient: it first
+          # ensures the compose Postgres is up (`docker compose up -d --wait db`
+          # is idempotent), then runs the full suite.  If docker isn't
+          # available the pg-gated tests print a notice and skip rather than
+          # failing; `test-api-offline` is the first-clone / DB-less variant.
+          apitest = ''
+            docker compose up -d --wait db 2>/dev/null \
+              || echo "warning: docker db not available; pg-gated tests will skip"
+            cargo test -p tally-api
+          '';
           test-api-offline = ''cargo test -p tally-api --no-default-features'';
         };
 

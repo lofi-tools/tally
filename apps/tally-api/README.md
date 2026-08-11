@@ -49,16 +49,17 @@ spec); `5xx` responses echo `X-Request-Id` in `details.request_id`.
 ## Testing
 
 ```sh
+# Full suite — `test-api` first ensures the compose Postgres is up, then
+# runs everything:
+nix develop -c test-api
+
 # First-clone / DB-less (integration tests compile away):
 cargo test -p tally-api --no-default-features
-
-# Full suite against the compose DB:
-nix develop -c dev-db
-nix develop -c test-api            # cargo test -p tally-api
+# (or: nix develop -c test-api-offline)
 ```
 
-Without a reachable Postgres the pg-gated tests skip (they print a notice and
-pass) rather than failing, so plain `cargo test -p tally-api` is safe either way.
+Without docker/Postgres the pg-gated tests print a notice and skip (pass)
+rather than failing, so plain `cargo test -p tally-api` is safe either way.
 
 ## Layout
 
