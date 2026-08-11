@@ -156,9 +156,16 @@ async fn protected_routes_require_bearer_token() {
     let resp = app.send(request(Method::GET, "/api/v1/companies", None, None)).await;
     assert_error(resp, StatusCode::UNAUTHORIZED, "auth_missing").await;
 
-    // non-bearer scheme → 401 auth_missing
+    // non-bearer scheme (e.g. Basic) → 401 auth_missing
     let resp = app
-        .send(request(Method::GET, "/api/v1/companies", Some("nope"), None))
+        .send(
+            axum::http::Request::builder()
+                .method(Method::GET)
+                .uri("/api/v1/companies")
+                .header(axum::http::header::AUTHORIZATION, "Basic abc")
+                .body(axum::body::Body::empty())
+                .expect("request"),
+        )
         .await;
     assert_error(resp, StatusCode::UNAUTHORIZED, "auth_missing").await;
 

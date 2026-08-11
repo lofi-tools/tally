@@ -98,22 +98,22 @@ fn api_v1() -> Router<Arc<AppState>> {
         .route("/companies", get(companies::list).post(companies::create))
         .route("/companies/search", get(companies::search))
         .route(
-            "/companies/:id",
+            "/companies/{id}",
             get(companies::get).patch(companies::patch).delete(companies::delete),
         )
-        .route("/companies/:id/enrich", post(companies::enrich))
+        .route("/companies/{id}/enrich", post(companies::enrich))
         // ledgers
         .route(
-            "/companies/:id/ledgers",
+            "/companies/{id}/ledgers",
             get(ledgers::list).post(ledgers::upload),
         )
-        .route("/ledgers/:id", get(ledgers::get).delete(ledgers::delete))
-        .route("/ledgers/:id/accounts", get(ledgers::accounts_view))
-        .route("/ledgers/:id/transactions", get(ledgers::transactions_view))
+        .route("/ledgers/{id}", get(ledgers::get).delete(ledgers::delete))
+        .route("/ledgers/{id}/accounts", get(ledgers::accounts_view))
+        .route("/ledgers/{id}/transactions", get(ledgers::transactions_view))
         // reports
-        .route("/companies/:id/reports/accounts", post(reports::accounts))
-        .route("/companies/:id/reports/corp-tax", post(reports::corp_tax))
-        .route("/companies/:id/reports/corp-tax.json", post(reports::corp_tax_json))
-        .route("/companies/:id/reports/ct600", post(reports::ct600))
+        .route("/companies/{id}/reports/accounts", post(reports::accounts))
+        .route("/companies/{id}/reports/corp-tax", post(reports::corp_tax))
+        .route("/companies/{id}/reports/corp-tax.json", post(reports::corp_tax_json))
+        .route("/companies/{id}/reports/ct600", post(reports::ct600))
 }
 
