@@ -1,33 +1,17 @@
 import { createSignal, For, Show } from 'solid-js'
-import { Button, Dialog, toaster } from '@tally/design-system'
-import { Landmark, Plus, X } from 'lucide-solid'
+import { Button, Card, Dialog, toaster } from '@tally/design-system'
+import { FileUp, Landmark, Plus, X } from 'lucide-solid'
 import { css } from 'styled-system/css'
 import { button } from 'styled-system/recipes'
-import { bankOptions, dataSources, type Company, type DataSource } from '../mock_data'
-import { DataSourceRows, PageHeader, StatusBadge } from '../components/Shared'
+import { bankOptions, type Company, type DataSource } from '../mock_data'
+import { DataSourceRows, EmptyState, PageHeader, StatusBadge } from '../components/Shared'
 
-export function IntegrationsView(props: { company: Company }) {
+export function IntegrationsView(props: {
+  company: Company
+  sources: DataSource[]
+  onConnect: (bank: (typeof bankOptions)[number]) => void
+}) {
   const [addOpen, setAddOpen] = createSignal(false)
-  const [extra, setExtra] = createSignal<DataSource[]>([])
-
-  const sources = () => [...dataSources, ...extra()]
-
-  const connect = (bank: (typeof bankOptions)[number]) => {
-    if (sources().some((s) => s.id === bank.id)) {
-      toaster.create({ title: `${bank.name} is already connected`, type: 'info' })
-      return
-    }
-    setExtra((xs) => [
-      ...xs,
-      { id: bank.id, name: `${bank.name} Business`, kind: 'bank', institution: bank.name, status: 'pending', lastSync: '—', accountCount: 0 },
-    ])
-    toaster.create({
-      title: `Connection started with ${bank.name}`,
-      description: 'Open Banking consent flow lands with the backend.',
-      type: 'success',
-    })
-    setAddOpen(false)
-  }
 
   return (
     <>
@@ -41,19 +25,47 @@ export function IntegrationsView(props: { company: Company }) {
         }
       />
 
-      <DataSourceRows
-        sources={sources}
-        onSync={(ds) =>
-          toaster.create({ title: `Syncing ${ds.name}…`, description: 'A real Open Banking fetch lands with the backend.', type: 'info' })
+      <Show
+        when={props.sources.length > 0}
+        fallback={
+          <Card.Root>
+            <EmptyState
+              icon={<Landmark class={css({ w: '6', h: '6' })} />}
+              title="No data sources yet"
+              description="Connect a bank or upload a GnuCash ledger to pull in transactions."
+              action={
+                <>
+                  <Button onClick={() => setAddOpen(true)}>
+                    <Plus class={css({ w: '3.5', h: '3.5' })} /> Connect a bank
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      toaster.create({ title: 'Upload ledger (mock)', description: 'GnuCash / CSV import arrives with the backend.', type: 'info' })
+                    }
+                  >
+                    <FileUp class={css({ w: '3.5', h: '3.5' })} /> Upload a GnuCash ledger
+                  </Button>
+                </>
+              }
+            />
+          </Card.Root>
         }
-        footer={
-          <div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3', flexWrap: 'wrap' })}>
-            <span class={css({ textStyle: 'xs', color: 'fg.subtle' })}>
-              {sources().filter((s) => s.status === 'connected').length} connected · CSV import and HMRC MTD arrive with the backend.
-            </span>
-          </div>
-        }
-      />
+      >
+        <DataSourceRows
+          sources={() => props.sources}
+          onSync={(ds) =>
+            toaster.create({ title: `Syncing ${ds.name}…`, description: 'A real Open Banking fetch lands with the backend.', type: 'info' })
+          }
+          footer={
+            <div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3', flexWrap: 'wrap' })}>
+              <span class={css({ textStyle: 'xs', color: 'fg.subtle' })}>
+                {props.sources.filter((s) => s.status === 'connected').length} connected · CSV import and HMRC MTD arrive with the backend.
+              </span>
+            </div>
+          }
+        />
+      </Show>
 
       {/* ---------- Add bank account ---------- */}
       <Dialog.Root open={addOpen()} onOpenChange={(d) => setAddOpen(d.open)}>
@@ -73,7 +85,7 @@ export function IntegrationsView(props: { company: Company }) {
               <div class={css({ display: 'flex', flexDirection: 'column' })}>
                 <For each={bankOptions}>
                   {(bank) => {
-                    const existing = sources().find((s) => s.id === bank.id)
+                    const existing = props.sources.find((s) => s.id === bank.id)
                     return (
                       <div
                         class={css({
@@ -104,14 +116,9 @@ export function IntegrationsView(props: { company: Company }) {
                         <span class={css({ flex: '1', fontSize: 'sm', fontWeight: '600' })}>{bank.name}</span>
                         <Show
                           when={!existing}
-                          fallback={
-                            <StatusBadge
-                              status={existing?.status ?? 'pending'}
-                              label={existing?.status === 'connected' ? 'Connected' : 'Pending'}
-                            />
-                          }
+                          fallback={<StatusBadge status={existing?.status ?? 'pending'} label={existing?.status === 'connected' ? 'Connected' : 'Pending'} />}
                         >
-                          <Button size="xs" variant="outline" onClick={() => connect(bank)}>
+                          <Button size="xs" variant="outline" onClick={() => props.onConnect(bank)}>
                             Connect
                           </Button>
                         </Show>

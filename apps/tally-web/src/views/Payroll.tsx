@@ -1,11 +1,15 @@
-import { For } from 'solid-js'
+import { For, Show } from 'solid-js'
 import { Avatar, Button, Card, Table, toaster } from '@tally/design-system'
 import { CalendarDays, Play } from 'lucide-solid'
 import { css } from 'styled-system/css'
-import { employees, fmtDate, fmtMoney, payroll, payrollHistory, type Company } from '../mock_data'
-import { numCell, PageHeader, StatCard, StatusBadge } from '../components/Shared'
+import { fmtDate, fmtMoney, type Company, type CompanyData } from '../mock_data'
+import { EmptyState, numCell, PageHeader, StatCard, StatusBadge } from '../components/Shared'
 
-export function PayrollView(props: { company: Company }) {
+export function PayrollView(props: { company: Company; data: CompanyData }) {
+  const employees = () => props.data.employees
+  const payroll = () => props.data.payroll
+  const payrollHistory = () => props.data.payrollHistory
+
   return (
     <>
       <PageHeader
@@ -20,11 +24,23 @@ export function PayrollView(props: { company: Company }) {
         }
       />
 
+      <Show
+        when={employees().length > 0}
+        fallback={
+          <Card.Root>
+            <EmptyState title="No payroll yet" description="Add employees and run the first payroll once your company has a book." />
+          </Card.Root>
+        }
+      >
+      <Show when={payroll()} fallback={null}>
+        {(pr) => (
       <div class={css({ display: 'grid', gap: '4', sm: { gridTemplateColumns: 'repeat(3, 1fr)' }, mb: '6' })}>
-        <StatCard label="Next run" value={fmtDate(payroll.nextRun)} hint={`${payroll.frequency} · ${employees.length} employees`} />
-        <StatCard label="Net pay per run" value={fmtMoney(payroll.netPerRun)} hint={`Gross ${fmtMoney(payroll.grossPerRun)}`} />
-        <StatCard label="Employer NI (YTD)" value={fmtMoney(payroll.employerNi)} hint="Per run" />
+        <StatCard label="Next run" value={fmtDate(pr().nextRun)} hint={`${pr().frequency} · ${employees().length} employees`} />
+        <StatCard label="Net pay per run" value={fmtMoney(pr().netPerRun)} hint={`Gross ${fmtMoney(pr().grossPerRun)}`} />
+        <StatCard label="Employer NI (YTD)" value={fmtMoney(pr().employerNi)} hint="Per run" />
       </div>
+        )}
+      </Show>
 
       <div class={css({ display: 'grid', gap: '6', lg: { gridTemplateColumns: 'repeat(2, 1fr)' } })}>
         {/* ---------- Employees ---------- */}
@@ -43,7 +59,7 @@ export function PayrollView(props: { company: Company }) {
               </Table.Row>
             </Table.Head>
             <Table.Body>
-              <For each={employees}>
+              <For each={employees()}>
                 {(e) => (
                   <Table.Row>
                     <Table.Cell>
@@ -86,7 +102,7 @@ export function PayrollView(props: { company: Company }) {
               </Table.Row>
             </Table.Head>
             <Table.Body>
-              <For each={payrollHistory}>
+              <For each={payrollHistory()}>
                 {(r) => (
                   <Table.Row>
                     <Table.Cell>
@@ -114,6 +130,7 @@ export function PayrollView(props: { company: Company }) {
           </Table.Root>
         </Card.Root>
       </div>
+      </Show>
     </>
   )
 }

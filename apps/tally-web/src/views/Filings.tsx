@@ -3,7 +3,7 @@ import { Badge, Button, Card, Select, Table, toaster } from '@tally/design-syste
 import { createListCollection } from '@tally/design-system'
 import { ArrowUpRight, CalendarDays, Download, FileCheck2 } from 'lucide-solid'
 import { css } from 'styled-system/css'
-import { financialYears, fmtDate, nextFiling, previousFilings, type Company } from '../mock_data'
+import { financialYears, fmtDate, type Company, type CompanyData } from '../mock_data'
 import { EmptyState, numCell, PageHeader, StatusBadge } from '../components/Shared'
 
 const fyOptions = createListCollection({
@@ -16,10 +16,11 @@ function daysTone(days: number) {
   return 'green' as const
 }
 
-export function FilingsView(props: { company: Company }) {
+export function FilingsView(props: { company: Company; data: CompanyData }) {
   const [fy, setFy] = createSignal('FY2025/26')
 
-  const previous = createMemo(() => previousFilings.filter((f) => f.period === fy()))
+  const next = () => props.data.nextFiling
+  const previous = createMemo(() => props.data.previousFilings.filter((f) => f.period === fy()))
 
   return (
     <>
@@ -52,50 +53,64 @@ export function FilingsView(props: { company: Company }) {
       />
 
       {/* ---------- Next filing ---------- */}
-      <Card.Root class={css({ mb: '6' })}>
-        <div class={css({ display: 'flex', gap: '6', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', p: '5' })}>
-          <div class={css({ minW: '0', flex: '1' })}>
-            <div class={css({ display: 'flex', alignItems: 'center', gap: '2.5', mb: '2' })}>
-              <Badge variant="subtle" class={css({ gap: '1.5' })}>
-                <CalendarDays class={css({ w: '3', h: '3' })} /> Next filing
-              </Badge>
-              <StatusBadge status="due" tone={daysTone(nextFiling.daysLeft)} label={`Due in ${nextFiling.daysLeft} days`} />
-            </div>
-            <div class={css({ textStyle: 'lg', fontWeight: '700' })}>{nextFiling.type}</div>
-            <div class={css({ textStyle: 'sm', color: 'fg.muted', mt: '1' })}>
-              Period {fmtDate(nextFiling.start)} – {fmtDate(nextFiling.end)} · {nextFiling.period} · due{' '}
-              <span class={css({ color: 'fg.default', fontWeight: '600' })}>{fmtDate(nextFiling.due)}</span>
-            </div>
+      <Show
+        when={next()}
+        fallback={
+          <Card.Root class={css({ mb: '6' })}>
+            <EmptyState
+              title="No filings yet"
+              description="Prepare your first accounts once transactions start flowing into the books."
+            />
+          </Card.Root>
+        }
+      >
+        {(nf) => (
+          <Card.Root class={css({ mb: '6' })}>
+            <div class={css({ display: 'flex', gap: '6', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', p: '5' })}>
+              <div class={css({ minW: '0', flex: '1' })}>
+                <div class={css({ display: 'flex', alignItems: 'center', gap: '2.5', mb: '2' })}>
+                  <Badge variant="subtle" class={css({ gap: '1.5' })}>
+                    <CalendarDays class={css({ w: '3', h: '3' })} /> Next filing
+                  </Badge>
+                  <StatusBadge status="due" tone={daysTone(nf().daysLeft)} label={`Due in ${nf().daysLeft} days`} />
+                </div>
+                <div class={css({ textStyle: 'lg', fontWeight: '700' })}>{nf().type}</div>
+                <div class={css({ textStyle: 'sm', color: 'fg.muted', mt: '1' })}>
+                  Period {fmtDate(nf().start)} – {fmtDate(nf().end)} · {nf().period} · due{' '}
+                  <span class={css({ color: 'fg.default', fontWeight: '600' })}>{fmtDate(nf().due)}</span>
+                </div>
 
-            <div class={css({ mt: '4', maxW: '28rem' })}>
-              <div class={css({ display: 'flex', justifyContent: 'space-between', fontSize: 'xs', color: 'fg.muted', mb: '1.5' })}>
-                <span>Accounts prepared</span>
-                <span class={css({ fontVariantNumeric: 'tabular-nums' })}>{nextFiling.progress}%</span>
+                <div class={css({ mt: '4', maxW: '28rem' })}>
+                  <div class={css({ display: 'flex', justifyContent: 'space-between', fontSize: 'xs', color: 'fg.muted', mb: '1.5' })}>
+                    <span>Accounts prepared</span>
+                    <span class={css({ fontVariantNumeric: 'tabular-nums' })}>{nf().progress}%</span>
+                  </div>
+                  <div class={css({ h: '1.5', borderRadius: 'full', bg: 'bg.subtle', overflow: 'hidden' })}>
+                    <div
+                      class={css({ h: 'full', borderRadius: 'full', bg: 'brown.solid.bg', transition: 'width 200ms ease' })}
+                      style={{ width: `${nf().progress}%` }}
+                    />
+                  </div>
+                </div>
               </div>
-              <div class={css({ h: '1.5', borderRadius: 'full', bg: 'bg.subtle', overflow: 'hidden' })}>
-                <div
-                  class={css({ h: 'full', borderRadius: 'full', bg: 'brown.solid.bg', transition: 'width 200ms ease' })}
-                  style={{ width: `${nextFiling.progress}%` }}
-                />
+
+              <div class={css({ display: 'flex', gap: '2', flexDirection: 'column', alignItems: 'stretch', sm: { flexDirection: 'row', alignItems: 'center' } })}>
+                <Button
+                  variant="outline"
+                  onClick={() => toaster.create({ title: 'Preview draft (mock)', description: 'iXBRL rendering lands with the backend.', type: 'info' })}
+                >
+                  <FileCheck2 class={css({ w: '3.5', h: '3.5' })} /> Preview
+                </Button>
+                <Button
+                  onClick={() => toaster.create({ title: 'File now (mock)', description: 'Submitting to Companies House lands with the backend.', type: 'info' })}
+                >
+                  <ArrowUpRight class={css({ w: '3.5', h: '3.5' })} /> File now
+                </Button>
               </div>
             </div>
-          </div>
-
-          <div class={css({ display: 'flex', gap: '2', flexDirection: 'column', alignItems: 'stretch', sm: { flexDirection: 'row', alignItems: 'center' } })}>
-            <Button
-              variant="outline"
-              onClick={() => toaster.create({ title: 'Preview draft (mock)', description: 'iXBRL rendering lands with the backend.', type: 'info' })}
-            >
-              <FileCheck2 class={css({ w: '3.5', h: '3.5' })} /> Preview
-            </Button>
-            <Button
-              onClick={() => toaster.create({ title: 'File now (mock)', description: 'Submitting to Companies House lands with the backend.', type: 'info' })}
-            >
-              <ArrowUpRight class={css({ w: '3.5', h: '3.5' })} /> File now
-            </Button>
-          </div>
-        </div>
-      </Card.Root>
+          </Card.Root>
+        )}
+      </Show>
 
       {/* ---------- Previous filings ---------- */}
       <div class={css({ fontSize: 'sm', fontWeight: '600', mb: '3' })}>Previous filings — {fy()}</div>

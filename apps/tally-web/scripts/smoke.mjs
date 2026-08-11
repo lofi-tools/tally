@@ -92,4 +92,19 @@ if (!root || children === 0) {
   console.error('SMOKE FAIL: #root is empty — app rendered nothing')
   process.exit(1)
 }
-console.log(`SMOKE OK: app rendered (${children} root children)`)
+
+// First-run onboarding state: fresh localStorage -> sample company selected,
+// sample banner visible, sample dataset rendered.
+const text = root.textContent
+const checks = [
+  ['sample company selected', text.includes('Sample Co Ltd')],
+  ['sample banner', text.includes('Sample data') && text.includes('add your company')],
+  ['sample dataset (transactions)', text.includes('Stripe payout') || text.includes('Northwind Trading')],
+  ['workspace nav', text.includes('Accounts') && text.includes('Filings') && text.includes('Payroll')],
+]
+const failed = checks.filter(([, ok]) => !ok)
+if (failed.length > 0) {
+  console.error('SMOKE FAIL — onboarding state missing:', failed.map(([name]) => name).join(', '))
+  process.exit(1)
+}
+console.log(`SMOKE OK: app rendered (${children} root children) — onboarding state verified`)

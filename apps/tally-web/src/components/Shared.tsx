@@ -178,13 +178,19 @@ export function DataSourceRows(props: {
 /** Compact numeric table cell (monospace + tabular figures). */
 export const numCell = css({ fontFamily: 'mono', fontSize: 'sm', fontVariantNumeric: 'tabular-nums' })
 
-/** Empty-state placeholder for filtered lists. */
-export function EmptyState(props: { title: string; description: string; action?: JSX.Element }) {
+/** Empty-state placeholder for empty lists and first-run guidance. */
+export function EmptyState(props: {
+  title: string
+  description: string
+  icon?: JSX.Element
+  action?: JSX.Element
+}) {
   return (
     <div class={css({ py: '12', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '1' })}>
+      {props.icon && <span class={css({ color: 'fg.subtle', mb: '2' })}>{props.icon}</span>}
       <span class={css({ textStyle: 'md', fontWeight: '600', color: 'fg.default' })}>{props.title}</span>
       <span class={css({ textStyle: 'sm', color: 'fg.muted', maxW: '24rem' })}>{props.description}</span>
-      {props.action && <div class={css({ mt: '3' })}>{props.action}</div>}
+      {props.action && <div class={css({ mt: '4', display: 'flex', gap: '2', flexWrap: 'wrap', justifyContent: 'center' })}>{props.action}</div>}
     </div>
   )
 }

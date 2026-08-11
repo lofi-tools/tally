@@ -28,35 +28,107 @@ export interface Company {
   standard: 'FRS 105' | 'FRS 102'
 }
 
-export const seedCompanies: Company[] = [
+// The demo entity shown to users before they add their own company. It is
+// never persisted and carries the full seeded dataset (see sampleCompanyData).
+export const SAMPLE_COMPANY_ID = 'sample'
+
+export const sampleCompany: Company = {
+  id: SAMPLE_COMPANY_ID,
+  name: 'Sample Co Ltd',
+  companyNumber: '00000000',
+  utr: '—',
+  sic: '—',
+  address: '—',
+  standard: 'FRS 105',
+}
+
+// ---------- simulated Companies House search ----------
+// The real search endpoint will forward to Companies House; for now results
+// come from this local fixture so the onboarding flow can be exercised.
+export interface CompanySearchResult {
+  name: string
+  companyNumber: string
+  sic: string
+  incorporationDate: string
+  jurisdiction: string
+  address: string
+}
+
+export const companySearchResults: CompanySearchResult[] = [
   {
-    id: 'northwind',
     name: 'Northwind Trading Ltd',
     companyNumber: '12345678',
-    utr: '8596148860',
     sic: '47910 — Retail sale via mail order or internet',
+    incorporationDate: '2018-03-14',
+    jurisdiction: 'England and Wales',
     address: '12 Market Street, Manchester, M1 1AA',
-    standard: 'FRS 105',
   },
   {
-    id: 'ashford',
     name: 'Ashford & Cole Ltd',
     companyNumber: '09651234',
-    utr: '4471829356',
     sic: '70229 — Management consultancy activities',
+    incorporationDate: '2016-11-02',
+    jurisdiction: 'England and Wales',
     address: '27 Queen Square, Bristol, BS1 4NH',
-    standard: 'FRS 105',
   },
   {
-    id: 'brightline',
     name: 'Brightline Media Ltd',
     companyNumber: '11345678',
-    utr: '3321098745',
     sic: '73110 — Advertising agencies',
+    incorporationDate: '2020-01-30',
+    jurisdiction: 'England and Wales',
     address: '4 Clerkenwell Road, London, EC1M 5PS',
-    standard: 'FRS 102',
+  },
+  {
+    name: 'Harbour & Finch Ltd',
+    companyNumber: '13456789',
+    sic: '56101 — Restaurants and mobile food service activities',
+    incorporationDate: '2019-07-19',
+    jurisdiction: 'Scotland',
+    address: '8 Shore Road, Edinburgh, EH6 6QW',
+  },
+  {
+    name: 'Meridian Trade Co Ltd',
+    companyNumber: '14567890',
+    sic: '46190 — Agents involved in the sale of a variety of goods',
+    incorporationDate: '2021-04-08',
+    jurisdiction: 'England and Wales',
+    address: '55 Anchor Lane, Liverpool, L3 4DP',
+  },
+  {
+    name: 'Cedar & Vine Studio Ltd',
+    companyNumber: '15678901',
+    sic: '71111 — Architectural activities',
+    incorporationDate: '2017-09-25',
+    jurisdiction: 'England and Wales',
+    address: '102 Regent Court, Leeds, LS2 7QA',
+  },
+  {
+    name: 'Ironwood Logistics Ltd',
+    companyNumber: '16789012',
+    sic: '49410 — Freight transport by road',
+    incorporationDate: '2015-02-11',
+    jurisdiction: 'England and Wales',
+    address: '3 Gateway Business Park, Birmingham, B4 6TF',
+  },
+  {
+    name: 'Penrose Healthcare Group Ltd',
+    companyNumber: '17890123',
+    sic: '86900 — Other human health activities',
+    incorporationDate: '2022-06-21',
+    jurisdiction: 'Wales',
+    address: '18 Bryn Road, Cardiff, CF10 3DX',
   },
 ]
+
+/** Mock Companies House search: case-insensitive name / company-number match. */
+export function searchCompanies(query: string): CompanySearchResult[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  return companySearchResults.filter(
+    (r) => r.name.toLowerCase().includes(q) || r.companyNumber.includes(q),
+  )
+}
 
 // ---------- transactions ----------
 export interface Transaction {
@@ -197,6 +269,63 @@ export const payrollHistory: PayrollRun[] = [
   { period: 'Jun 2026', gross: 17400, tax: 2435, ni: 2095, net: 12870, paid: '2026-06-30', status: 'paid' },
   { period: 'May 2026', gross: 17400, tax: 2410, ni: 2090, net: 12900, paid: '2026-05-29', status: 'paid' },
 ]
+
+// ---------- per-company datasets ----------
+// Static content a company has (transactions, filings, payroll…). Only the
+// sample company is pre-seeded; user companies start empty until a backend
+// exists. Data sources live separately in the DB (see src/db.ts) because they
+// are mutable per company.
+export interface NextFiling {
+  period: string
+  type: string
+  start: string
+  end: string
+  due: string
+  daysLeft: number
+  progress: number
+}
+
+export interface PayrollMeta {
+  nextRun: string
+  frequency: string
+  grossPerRun: number
+  netPerRun: number
+  employerNi: number
+}
+
+export interface CompanyData {
+  transactions: Transaction[]
+  summaries: MonthSummary[]
+  nextFiling: NextFiling | null
+  previousFilings: PreviousFiling[]
+  employees: Employee[]
+  payroll: PayrollMeta | null
+  payrollHistory: PayrollRun[]
+}
+
+export const sampleCompanyData: CompanyData = {
+  transactions,
+  summaries,
+  nextFiling,
+  previousFilings,
+  employees,
+  payroll,
+  payrollHistory,
+}
+
+export const emptyCompanyData: CompanyData = {
+  transactions: [],
+  summaries: [],
+  nextFiling: null,
+  previousFilings: [],
+  employees: [],
+  payroll: null,
+  payrollHistory: [],
+}
+
+export function getCompanyData(companyId: string): CompanyData {
+  return companyId === SAMPLE_COMPANY_ID ? sampleCompanyData : emptyCompanyData
+}
 
 // ---------- preferences ----------
 export const preferences = {

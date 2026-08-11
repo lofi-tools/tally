@@ -1,26 +1,18 @@
 import { createMemo, createSignal, For, Match, onCleanup, onMount, Show, Switch as SolidSwitch, type Component } from 'solid-js'
-import {
-  Avatar,
-  Badge,
-  Button,
-  Dialog,
-  Field,
-  Input,
-  Kbd,
-  Select,
-  Toaster,
-  toaster,
-} from '@tally/design-system'
+import { Avatar, Badge, Button, Kbd, Select, Toaster, toaster } from '@tally/design-system'
 import { createListCollection } from '@tally/design-system'
-import { Building2, ChevronDown, FileCheck2, LayoutGrid, Plug, Plus, Settings, Users, X } from 'lucide-solid'
+import { Building2, ChevronDown, FileCheck2, LayoutGrid, Plug, Plus, Settings, Users } from 'lucide-solid'
 import { css } from 'styled-system/css'
-import { button } from 'styled-system/recipes'
-import { seedCompanies, type Company } from './mock_data'
+import { bankOptions, getCompanyData, SAMPLE_COMPANY_ID, sampleCompany, type Company, type DataSource } from './mock_data'
+import { loadDb, saveDb, type Db } from './db'
 import { AccountsView } from './views/Accounts'
 import { FilingsView } from './views/Filings'
 import { PayrollView } from './views/Payroll'
 import { IntegrationsView } from './views/Integrations'
 import { SettingsView } from './views/Settings'
+import { AddCompanyDialog, type NewCompanyInput } from './components/AddCompanyDialog'
+import { SaveProgressDialog } from './components/SaveProgressDialog'
+import { SampleBanner } from './components/SampleBanner'
 
 type ViewKey = 'accounts' | 'filings' | 'payroll' | 'integrations' | 'settings'
 
@@ -113,18 +105,32 @@ function NavButton(props: { item: NavItem; active: boolean; onClick: () => void 
 }
 
 export function App() {
+  const [db, setDb] = createSignal<Db>(loadDb())
+  const updateDb = (fn: (d: Db) => Db) => {
+    const next = fn(db())
+    setDb(next)
+    saveDb(next)
+  }
+
   const [view, setView] = createSignal<ViewKey>('accounts')
-  const [companies, setCompanies] = createSignal<Company[]>(seedCompanies)
-  const [companyId, setCompanyId] = createSignal(seedCompanies[0].id)
+  const [companyId, setCompanyId] = createSignal<string>(SAMPLE_COMPANY_ID)
   const [addOpen, setAddOpen] = createSignal(false)
-  const [form, setForm] = createSignal({ name: '', number: '', utr: '' })
+  const [accountOpen, setAccountOpen] = createSignal(false)
 
-  const currentCompany = createMemo(
-    () => companies().find((c) => c.id === companyId()) ?? companies()[0],
-  )
+  const companies = () => db().companies
+  const sources = () => db().sources
+  const account = () => db().account
 
-  // Company picker items: the companies + a trailing "Add company" choice.
+  // The sample company retires once ANY user company has a data source.
+  const sampleRetired = createMemo(() => companies().some((c) => (sources()[c.id] ?? []).length > 0))
+  const allCompanies = createMemo(() => (sampleRetired() ? companies() : [sampleCompany, ...companies()]))
+  const currentCompany = createMemo(() => allCompanies().find((c) => c.id === companyId()) ?? allCompanies()[0])
+  const hasRealCompany = () => companies().length > 0
+  const bannerVisible = () => !hasRealCompany() && !db().bannerDismissed
+
+  // Company picker items: sample (until retired) + user companies + "Add company".
   const pickerItems = createMemo(() => [
+    ...(sampleRetired() ? [] : [{ label: sampleCompany.name, value: SAMPLE_COMPANY_ID, sample: true as const }]),
     ...companies().map((c) => ({ label: c.name, value: c.id })),
     { label: 'Add company…', value: '__add__' },
   ])
@@ -134,7 +140,7 @@ export function App() {
     const v = d.value[0]
     if (v === '__add__') {
       setAddOpen(true)
-    } else if (v && companies().some((c) => c.id === v)) {
+    } else if (v && allCompanies().some((c) => c.id === v)) {
       setCompanyId(v)
     }
   }
@@ -158,27 +164,84 @@ export function App() {
     onCleanup(() => window.removeEventListener('keydown', handler))
   })
 
-  const addCompany = () => {
-    const name = form().name.trim()
-    if (!name) {
-      toaster.create({ title: 'Company name required', type: 'error' })
+  const addCompany = (input: NewCompanyInput) => {
+    const company: Company = {
+      id: input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'company',
+      name: input.name,
+      companyNumber: input.companyNumber,
+      utr: input.utr,
+      sic: input.sic,
+      address: input.address,
+      standard: input.standard,
+    }
+    updateDb((d) => ({ ...d, companies: [...d.companies, company] }))
+    setCompanyId(company.id)
+    toaster.create({
+      title: 'Company added',
+      description: 'Connect a bank or upload your ledger to start.',
+      type: 'success',
+    })
+  }
+
+  const connectSource = (cid: string, bank: (typeof bankOptions)[number]) => {
+    if (sources()[cid]?.some((s) => s.id === bank.id)) {
+      toaster.create({ title: `${bank.name} is already connected`, type: 'info' })
       return
     }
-    const company: Company = {
-      id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      name,
-      companyNumber: form().number.trim() || '—',
-      utr: form().utr.trim() || '—',
-      sic: '—',
-      address: '—',
-      standard: 'FRS 105',
+    const src: DataSource = {
+      id: bank.id,
+      name: `${bank.name} Business`,
+      kind: 'bank',
+      institution: bank.name,
+      status: 'connected',
+      lastSync: 'just now',
+      accountCount: 0,
     }
-    setCompanies((cs) => [...cs, company])
-    setCompanyId(company.id)
-    setAddOpen(false)
-    setForm({ name: '', number: '', utr: '' })
-    toaster.create({ title: `Added ${name}`, description: 'Mock — persisted company data lands with the backend.', type: 'success' })
+    updateDb((d) => ({ ...d, sources: { ...d.sources, [cid]: [...(d.sources[cid] ?? []), src] } }))
+    // If connecting retires the sample while it is selected, move to the user's company.
+    if (companyId() === SAMPLE_COMPANY_ID) setCompanyId(cid)
+    toaster.create({
+      title: `Connected ${bank.name}`,
+      description: 'Mock — real Open Banking consent lands with the backend.',
+      type: 'success',
+    })
   }
+
+  const saveAccount = (name: string, email: string) => {
+    updateDb((d) => ({ ...d, account: { saved: true, name, email } }))
+    toaster.create({ title: 'Progress saved', description: 'Mock — real auth lands with the backend.', type: 'success' })
+  }
+
+  const dismissBanner = () => updateDb((d) => ({ ...d, bannerDismissed: true }))
+
+  // Safety net: zero companies of any kind (sample retired + none added).
+  if (!currentCompany()) {
+    return (
+      <div class={css({ h: '100dvh', display: 'grid', placeItems: 'center', bg: 'canvas', color: 'fg.default', fontFamily: 'sans', px: '4' })}>
+        <div class={css({ textAlign: 'center', maxW: '24rem' })}>
+          <div class={css({ display: 'flex', justifyContent: 'center', mb: '4' })}>
+            <LogoMark />
+          </div>
+          <h1 class={css({ textStyle: '2xl', fontWeight: '800', letterSpacing: '-0.02em' })}>Add your first company</h1>
+          <p class={css({ textStyle: 'sm', color: 'fg.muted', mt: '2' })}>Tally needs a company before you can prepare accounts or file returns.</p>
+          <div class={css({ mt: '5' })}>
+            <Button onClick={() => setAddOpen(true)}>Add company</Button>
+          </div>
+        </div>
+        <AddCompanyDialog
+          open={addOpen()}
+          onOpenChange={setAddOpen}
+          existingNumbers={companies().map((c) => c.companyNumber)}
+          onAdd={addCompany}
+        />
+        <Toaster />
+      </div>
+    )
+  }
+
+  // Reactive getter — Solid JSX only updates when expressions read signals
+  // directly, so the current company must be read via a function in JSX.
+  const cd = () => currentCompany()!
 
   return (
     <div class={css({ h: '100dvh', display: 'flex', bg: 'canvas', color: 'fg.default', fontFamily: 'sans' })}>
@@ -205,7 +268,7 @@ export function App() {
           {/* Company picker */}
           <Select.Root
             collection={pickerCollection()}
-            value={[currentCompany().id]}
+            value={[companyId()]}
             onValueChange={onCompanyChange}
             positioning={{ sameWidth: true }}
           >
@@ -229,9 +292,16 @@ export function App() {
               >
                 <Building2 class={css({ w: '4', h: '4', color: 'fg.muted', flexShrink: '0' })} />
                 <span class={css({ minW: '0', flex: '1' })}>
-                  <span class={css({ display: 'block', fontSize: 'sm', fontWeight: '600', truncate: true })}>{currentCompany().name}</span>
+                  <span class={css({ display: 'flex', alignItems: 'center', gap: '2', fontSize: 'sm', fontWeight: '600', minW: '0' })}>
+                    <span class={css({ truncate: true })}>{cd().name}</span>
+                    <Show when={cd().id === SAMPLE_COMPANY_ID}>
+                      <Badge variant="outline" class={css({ flexShrink: '0', fontSize: '10px', px: '1.5', py: '0' })}>
+                        Sample
+                      </Badge>
+                    </Show>
+                  </span>
                   <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.subtle', fontFamily: 'mono' })}>
-                    {currentCompany().companyNumber}
+                    {cd().companyNumber}
                   </span>
                 </span>
                 <ChevronDown class={css({ w: '3.5', h: '3.5', color: 'fg.muted', flexShrink: '0' })} />
@@ -253,7 +323,19 @@ export function App() {
                       )}
                     >
                       <Select.ItemText>
-                        <Show when={item.value === '__add__'} fallback={item.label}>
+                        <Show
+                          when={item.value === '__add__'}
+                          fallback={
+                            <span class={css({ display: 'inline-flex', alignItems: 'center', gap: '2' })}>
+                              {item.label}
+                              <Show when={'sample' in item && item.sample}>
+                                <Badge variant="outline" class={css({ fontSize: '10px', px: '1.5', py: '0' })}>
+                                  Sample
+                                </Badge>
+                              </Show>
+                            </span>
+                          }
+                        >
                           <span class={css({ display: 'inline-flex', alignItems: 'center', gap: '2' })}>
                             <Plus class={css({ w: '3.5', h: '3.5' })} /> {item.label}
                           </span>
@@ -286,97 +368,92 @@ export function App() {
           </div>
         </nav>
 
-        <div class={css({ borderTop: '1px solid {colors.border.subtle}', px: '3', py: '2.5', display: 'flex', alignItems: 'center', gap: '2.5' })}>
-          <Avatar.Root class={css({ h: '8', w: '8' })}>
-            <Avatar.Fallback name="Sam Rivera" />
-          </Avatar.Root>
-          <span class={css({ minW: '0', flex: '1' })}>
-            <span class={css({ display: 'block', fontSize: 'sm', fontWeight: '600', truncate: true })}>Sam Rivera</span>
-            <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.subtle' })}>Director</span>
-          </span>
+        <div class={css({ borderTop: '1px solid {colors.border.subtle}', px: '3', py: '2.5', display: 'flex', flexDirection: 'column', gap: '2' })}>
+          <Show when={hasRealCompany()}>
+            <Show
+              when={account()}
+              fallback={
+                <button
+                  type="button"
+                  onClick={() => setAccountOpen(true)}
+                  class={css({
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '2',
+                    w: 'full',
+                    px: '2.5',
+                    py: '1.5',
+                    borderRadius: 'md',
+                    fontSize: 'xs',
+                    fontWeight: '500',
+                    color: 'fg.muted',
+                    bg: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    _hover: { bg: 'bg.subtle', color: 'fg.default' },
+                  })}
+                >
+                  Save your progress — <span class={css({ color: 'brown.11', fontWeight: '600' })}>create an account</span>
+                </button>
+              }
+            >
+              <span class={css({ px: '2.5', fontSize: 'xs', color: 'fg.subtle' })}>Saved · {account()!.name}</span>
+            </Show>
+          </Show>
+          <div class={css({ display: 'flex', alignItems: 'center', gap: '2.5' })}>
+            <Avatar.Root class={css({ h: '8', w: '8' })}>
+              <Avatar.Fallback name="Sam Rivera" />
+            </Avatar.Root>
+            <span class={css({ minW: '0', flex: '1' })}>
+              <span class={css({ display: 'block', fontSize: 'sm', fontWeight: '600', truncate: true })}>Sam Rivera</span>
+              <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.subtle' })}>Director</span>
+            </span>
+          </div>
         </div>
       </aside>
 
       {/* ---------- Main ---------- */}
       <main class={css({ flex: '1', minW: '0', overflowY: 'auto' })}>
         <div class={css({ maxW: '60rem', mx: 'auto', p: { base: '5', md: '8' } })}>
+          <Show when={bannerVisible()}>
+            <SampleBanner onAddCompany={() => setAddOpen(true)} onDismiss={dismissBanner} />
+          </Show>
           <SolidSwitch>
             <Match when={view() === 'accounts'}>
-              <AccountsView company={currentCompany()} />
+              <AccountsView
+                company={cd()}
+                data={getCompanyData(cd().id)}
+                sources={sources()[cd().id] ?? []}
+                onGoToIntegrations={() => setView('integrations')}
+              />
             </Match>
             <Match when={view() === 'filings'}>
-              <FilingsView company={currentCompany()} />
+              <FilingsView company={cd()} data={getCompanyData(cd().id)} />
             </Match>
             <Match when={view() === 'payroll'}>
-              <PayrollView company={currentCompany()} />
+              <PayrollView company={cd()} data={getCompanyData(cd().id)} />
             </Match>
             <Match when={view() === 'integrations'}>
-              <IntegrationsView company={currentCompany()} />
+              <IntegrationsView company={cd()} sources={sources()[cd().id] ?? []} onConnect={(bank) => connectSource(cd().id, bank)} />
             </Match>
             <Match when={view() === 'settings'}>
-              <SettingsView company={currentCompany()} />
+              <SettingsView company={cd()} />
             </Match>
           </SolidSwitch>
         </div>
       </main>
 
-      {/* ---------- Add company ---------- */}
-      <Dialog.Root open={addOpen()} onOpenChange={(d) => setAddOpen(d.open)}>
-        <Dialog.Backdrop />
-        <Dialog.Positioner>
-          <Dialog.Content>
-            <Dialog.CloseTrigger>
-              <X />
-            </Dialog.CloseTrigger>
-            <Dialog.Header>
-              <Dialog.Title>Add company</Dialog.Title>
-              <Dialog.Description>
-                The profile is usually pulled from Companies House — this is a mock form until the backend exists.
-              </Dialog.Description>
-            </Dialog.Header>
-            <Dialog.Body>
-              <div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
-                <Field.Root required>
-                  <Field.Label>
-                    Company name <Field.RequiredIndicator />
-                  </Field.Label>
-                  <Input
-                    placeholder="Example Ltd."
-                    value={form().name}
-                    onInput={(e) => setForm((f) => ({ ...f, name: e.currentTarget.value }))}
-                  />
-                </Field.Root>
-                <div class={css({ display: 'grid', gap: '4', sm: { gridTemplateColumns: 'repeat(2, 1fr)' } })}>
-                  <Field.Root>
-                    <Field.Label>Companies House number</Field.Label>
-                    <Input
-                      placeholder="12345678"
-                      class={css({ fontFamily: 'mono' })}
-                      value={form().number}
-                      onInput={(e) => setForm((f) => ({ ...f, number: e.currentTarget.value }))}
-                    />
-                  </Field.Root>
-                  <Field.Root>
-                    <Field.Label>UTR</Field.Label>
-                    <Input
-                      placeholder="10-digit tax reference"
-                      class={css({ fontFamily: 'mono' })}
-                      value={form().utr}
-                      onInput={(e) => setForm((f) => ({ ...f, utr: e.currentTarget.value }))}
-                    />
-                  </Field.Root>
-                </div>
-              </div>
-            </Dialog.Body>
-            <Dialog.Footer>
-              <Dialog.ActionTrigger class={button({ variant: 'outline' })}>Cancel</Dialog.ActionTrigger>
-              <Button onClick={addCompany}>
-                <Plus class={css({ w: '3.5', h: '3.5' })} /> Add company
-              </Button>
-            </Dialog.Footer>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Dialog.Root>
+      {/* ---------- Add company (search) ---------- */}
+      <AddCompanyDialog
+        open={addOpen()}
+        onOpenChange={setAddOpen}
+        existingNumbers={companies().map((c) => c.companyNumber)}
+        onAdd={addCompany}
+      />
+
+      {/* ---------- Save progress (simulated account) ---------- */}
+      <SaveProgressDialog open={accountOpen()} onOpenChange={setAccountOpen} onSave={saveAccount} />
 
       <Toaster />
     </div>
