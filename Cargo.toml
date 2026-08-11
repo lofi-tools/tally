@@ -2,7 +2,7 @@
 members = ["apps/*", "libs/*"]
 # JS-only packages that live under apps/* but are not Cargo crates
 # (cargo requires every workspace-member glob match to be a crate).
-exclude = ["apps/tally-web"]
+exclude = ["apps/design-system-showcase", "apps/tally-web"]
 resolver = "2"
 
 [workspace.dependencies]

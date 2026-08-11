@@ -6,8 +6,11 @@ const STORAGE_KEY = 'tally-color-mode'
 
 function initialMode(): ColorMode {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored === 'light' || stored === 'dark') return stored
+    // Guard for SSR (Astro server-renders islands): no window/localStorage.
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(STORAGE_KEY)
+      if (stored === 'light' || stored === 'dark') return stored
+    }
   } catch {
     /* storage unavailable — fall through */
   }
@@ -26,16 +29,22 @@ export interface ColorModeController {
  * Class-based dark mode: toggles `.dark` on `<html>` (which Panda's `_dark`
  * semantic-token condition targets) and persists the choice to localStorage.
  * The initial value is read from localStorage, defaulting to **dark** (the
- * Tally brand identity — see DESIGN.md) — `index.html` applies the same
- * logic before first paint.
+ * Tally brand identity — see DESIGN.md) — the app's `index.html`/Astro page
+ * applies the same logic before first paint. SSR-safe: the storage read is
+ * guarded and the effect only touches `document`/`localStorage` on the client
+ * (Solid effects don't run during server render anyway).
  */
 export function createColorMode(): ColorModeController {
   const [mode, setMode] = createSignal<ColorMode>(initialMode())
 
   createEffect(() => {
-    document.documentElement.classList.toggle('dark', mode() === 'dark')
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', mode() === 'dark')
+    }
     try {
-      localStorage.setItem(STORAGE_KEY, mode())
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, mode())
+      }
     } catch {
       /* storage unavailable — the class still toggles */
     }

@@ -97,14 +97,15 @@ byte for byte (modulo random element ids).
 
 
 
-### The web app and design system (`apps/tally-web`, `packages/design-system`)
+### The web apps and design system (`apps/*`, `packages/design-system`)
 
 A pnpm JS workspace hosts a **design system** (`@tally/design-system`: design
-tokens + SolidJS components on Ark UI, styled with Panda CSS) and a **web app**
-(`apps/tally-web`) that currently showcases it. The web app does **not** do
-what the CLI does yet — it is the foundation the real Tally UI will be built
-on, reusing the same tokens and components. See the package READMEs for how
-they fit together.
+tokens + SolidJS components on Ark UI, styled with Panda CSS), an **Astro
+showcase** for it (`apps/design-system-showcase`: a Solid island rendering the
+whole component catalog) and a **blank web app** (`apps/tally-web`, SolidJS +
+Vite) that the real Tally UI will be built on. Neither app does what the CLI
+does yet — both reuse the same tokens and components. See the package READMEs
+for how they fit together.
 
 ## Roadmap
 

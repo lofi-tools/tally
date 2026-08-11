@@ -1,0 +1,40 @@
+---
+// Font + generated Panda styles, bundled by Astro.
+import '@fontsource-variable/outfit'
+import 'styled-system/styles.css'
+import { Showcase } from '../Showcase'
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="The Tally design system showcase — SolidJS + Panda CSS + Ark UI + Park UI, built with Astro."
+    />
+    <title>Tally — Design System</title>
+    <script is:inline>
+      // Apply the persisted color mode before first paint so the page never
+      // flashes the wrong theme. Dark is the Tally identity — only an
+      // explicit stored 'light' choice opts out.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('tally-color-mode')
+          document.documentElement.classList.toggle('dark', stored !== 'light')
+        } catch (e) {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <!-- The whole showcase is one Solid island. It is rendered client-only
+         (no SSR): solid-js/web's server entry stubs the client-only APIs
+         that lucide-solid's Icon imports (spread/insert/template), which
+         makes dev-mode SSR throw — the showcase is a client-side app, so
+         SSR buys nothing here. `client:only="solid-js"` skips it and the
+         island hydrates on load. -->
+    <Showcase client:only="solid-js" />
+  </body>
+</html>

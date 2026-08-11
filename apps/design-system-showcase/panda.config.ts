@@ -25,5 +25,6 @@ export default defineConfig({
     // Dark is the identity; light mode is opt-in via the `.dark` class toggle
     ':root': { colorScheme: 'dark' },
     'html:not(.dark)': { colorScheme: 'light' },
+    // Selection already follows the palette via the theme's global css.
   },
 })

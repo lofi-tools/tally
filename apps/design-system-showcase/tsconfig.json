@@ -1,0 +1,15 @@
+{
+  // `strict` matters: without it, the design-system's `as` casts (e.g. in
+  // select.tsx) fail to typecheck under the Astro base config.
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "baseUrl": ".",
+    "paths": {
+      "styled-system/*": ["./styled-system/*"]
+    }
+  },
+  "include": ["src", ".astro"]
+}

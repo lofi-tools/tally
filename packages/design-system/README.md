@@ -50,7 +50,8 @@ export default defineConfig({
 ```
 
 The app's bundler aliases `styled-system/*` to its own generated directory (see
-`apps/tally-web/vite.config.ts`), and its `tsconfig.json` maps the same paths.
+`apps/design-system-showcase/astro.config.mjs`), and its `tsconfig.json` maps the
+same paths.
 Run `pnpm codegen` in the app before typechecking/building (the repo-root
 `prepare` script does this automatically after `pnpm install`).
 
@@ -62,9 +63,11 @@ direct `@ark-ui/solid` dependency — e.g. `createListCollection` for
 > it can read statically. If a consumer passes `colorPalette={…}` /
 > `textStyle: …` from data, the classes won't be generated (silently
 > unstyled). The app seeds them at module scope — see
-> [`apps/tally-web/src/seeds.ts`](../apps/tally-web/src/seeds.ts).
+> [`apps/design-system-showcase/src/seeds.ts`](../apps/design-system-showcase/src/seeds.ts).
 
-See [`apps/tally-web`](../apps/tally-web/README.md) for a working consumer.
+See [`apps/design-system-showcase`](../apps/design-system-showcase/README.md)
+for a working consumer (an Astro site with a Solid island), and
+[`apps/tally-web`](../apps/tally-web/README.md) for the plain Vite app wiring.
 
 ## Development
 

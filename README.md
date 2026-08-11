@@ -121,22 +121,25 @@ Tax reference is never resolved from Companies House.)
 ### JavaScript workspace (web app + design system)
 
 The JS side of the repo is a pnpm workspace (`apps/*`, `packages/*`). It
-currently contains the **design system** and a **web app that showcases it**
-— the app does not do what `tally-cli` does yet.
+currently contains the **design system**, an **Astro showcase** for it, and the
+**blank web app** the real Tally UI will be built in — the app does not do
+what `tally-cli` does yet.
 
 | Package | Purpose |
 |---------|---------|
-| [`apps/tally-web`](apps/tally-web/README.md) | SolidJS + Panda CSS + Ark UI web app (Vite); design-system showcase for now |
-| `packages/design-system` | Token-driven design system (`@tally/design-system`): theme + components, shared by the web app (and, later, landing/docs sites) |
+| [`apps/design-system-showcase`](apps/design-system-showcase/README.md) | Astro site (one Solid island) displaying every component and token in the design system; the pattern for the future landing/docs site |
+| [`apps/tally-web`](apps/tally-web/README.md) | The Tally web app (SolidJS + Vite) — a blank starter, design system already wired |
+| `packages/design-system` | Token-driven design system (`@tally/design-system`): theme + components, shared by both apps (and, later, landing/docs sites) |
 
 ```bash
 pnpm install     # from the repo root
-pnpm dev         # run the showcase app (http://localhost:5173)
+pnpm dev         # run the design-system showcase (http://localhost:4321)
+pnpm dev:web     # run the blank Tally web app (http://localhost:5173)
 pnpm typecheck   # typecheck the whole JS workspace
 ```
 
 Inside the Nix dev shell, one command does it all (node + pnpm are in the
-shell; it runs `pnpm install` and starts the dev server):
+shell; it runs `pnpm install` and starts the showcase dev server):
 
 ```bash
 nix develop -c dev
@@ -149,12 +152,12 @@ re-theming is a token change, not a component rewrite.
 
 Note: the Cargo workspace globs `apps/*` as crates, so each JS-only app under
 `apps/` needs a matching entry in the `exclude` list in the root
-[`Cargo.toml`](Cargo.toml) (only `apps/tally-web` so far).
+[`Cargo.toml`](Cargo.toml) (both JS apps are excluded so far).
 
-**About Astro:** not yet. The web app is mostly dynamic (logged-in), so it
-stays a plain SolidJS app; the landing page and docs subdomain can be added
-later as Astro sites that reuse `@tally/design-system` (see
-`apps/tally-web/README.md`).
+**About Astro:** the design-system showcase is an Astro site (a Solid island
+on `client:load`, server-rendered). The landing page and docs subdomain can be
+added later the same way — Astro pages that reuse `@tally/design-system` (see
+`apps/design-system-showcase/README.md`).
 
 
 ## `tally-cli` configuration

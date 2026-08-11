@@ -8,6 +8,7 @@ tarpaulin-report.html
 **/node_modules/
 **/dist/
 **/styled-system/
+**/.astro/
 
 # GIT
 **/*.~undo-tree~

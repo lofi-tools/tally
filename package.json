@@ -6,9 +6,10 @@
   },
   "scripts": {
     "prepare": "pnpm -r codegen",
-    "dev": "pnpm --filter @tally/web dev",
-    "build": "pnpm --filter @tally/web build",
-    "preview": "pnpm --filter @tally/web preview",
+    "dev": "pnpm --filter @tally/design-system-showcase dev",
+    "dev:web": "pnpm --filter @tally/web dev",
+    "build": "pnpm -r build",
+    "preview": "pnpm --filter @tally/design-system-showcase preview",
     "codegen": "pnpm -r codegen",
     "typecheck": "pnpm -r typecheck"
   }
