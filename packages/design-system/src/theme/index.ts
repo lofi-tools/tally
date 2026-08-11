@@ -130,7 +130,12 @@ export const parkUI = definePreset({
             subtle: { value: { _light: '{colors.gray.10}', _dark: '{colors.gray.10}' } },
           },
           canvas: { value: { _light: '{colors.gray.1}', _dark: '{colors.gray.1}' } },
-          border: { value: { _light: '{colors.gray.4}', _dark: '{colors.gray.4}' } },
+          border: {
+            // Default hairline; `subtle` is dimmer (for low-emphasis dividers
+            // like the sidebar section separators).
+            DEFAULT: { value: { _light: '{colors.gray.4}', _dark: '{colors.gray.4}' } },
+            subtle: { value: { _light: '{colors.gray.a3}', _dark: '{colors.gray.a3}' } },
+          },
           error: { value: { _light: '{colors.red.9}', _dark: '{colors.red.9}' } },
           bg: {
             subtle: { value: { _light: '{colors.gray.2}', _dark: '{colors.gray.3}' } },
