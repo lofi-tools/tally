@@ -55,6 +55,19 @@ const type = (el, value) => {
 if (errors.length) fail('render threw: ' + errors[0])
 if (!text().includes('Sample data')) fail('banner missing at start')
 
+// 0. Dismissing hides it; switching screens brings it back
+const dismissBtn = document.querySelector('button[aria-label="Dismiss"]')
+if (!dismissBtn) fail('banner dismiss button missing')
+click(dismissBtn)
+await sleep(50)
+if (text().includes('Sample data')) fail('banner still visible after dismiss')
+click(findByText('button', 'Filings'))
+await sleep(50)
+if (!text().includes('Sample data')) fail('banner did not re-appear after switching screens')
+click(findByText('button', 'Accounts'))
+await sleep(50)
+if (!text().includes('Sample data')) fail('banner missing after switching back')
+
 // 1. Open the add-company dialog from the banner
 const addBtn = findByText('button', 'Add company')
 if (!addBtn) fail('banner "Add company" button missing')

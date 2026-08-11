@@ -116,6 +116,9 @@ export function App() {
   const [companyId, setCompanyId] = createSignal<string>(SAMPLE_COMPANY_ID)
   const [addOpen, setAddOpen] = createSignal(false)
   const [accountOpen, setAccountOpen] = createSignal(false)
+  // Transient banner dismissal: closing it only hides it for the current
+  // screen — switching views brings it back until a real company exists.
+  const [bannerDismissed, setBannerDismissed] = createSignal(false)
 
   const companies = () => db().companies
   const sources = () => db().sources
@@ -126,7 +129,12 @@ export function App() {
   const allCompanies = createMemo(() => (sampleRetired() ? companies() : [sampleCompany, ...companies()]))
   const currentCompany = createMemo(() => allCompanies().find((c) => c.id === companyId()) ?? allCompanies()[0])
   const hasRealCompany = () => companies().length > 0
-  const bannerVisible = () => !hasRealCompany() && !db().bannerDismissed
+  const bannerVisible = () => !hasRealCompany() && !bannerDismissed()
+
+  const switchView = (v: ViewKey) => {
+    setBannerDismissed(false)
+    setView(v)
+  }
 
   // Company picker items: sample (until retired) + user companies + "Add company".
   const pickerItems = createMemo(() => [
@@ -158,7 +166,7 @@ export function App() {
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
       const next = map[e.key]
-      if (next) setView(next)
+      if (next) switchView(next)
     }
     window.addEventListener('keydown', handler)
     onCleanup(() => window.removeEventListener('keydown', handler))
@@ -212,7 +220,7 @@ export function App() {
     toaster.create({ title: 'Progress saved', description: 'Mock — real auth lands with the backend.', type: 'success' })
   }
 
-  const dismissBanner = () => updateDb((d) => ({ ...d, bannerDismissed: true }))
+  const dismissBanner = () => setBannerDismissed(true)
 
   // Safety net: zero companies of any kind (sample retired + none added).
   if (!currentCompany()) {
@@ -358,12 +366,12 @@ export function App() {
             Workspace
           </div>
           <For each={navTop}>
-            {(item) => <NavButton item={item} active={view() === item.id} onClick={() => setView(item.id)} />}
+            {(item) => <NavButton item={item} active={view() === item.id} onClick={() => switchView(item.id)} />}
           </For>
           <div class={css({ flex: '1' })} />
           <div class={css({ borderTop: '1px solid {colors.border.subtle}', pt: '2', mt: '2', display: 'flex', flexDirection: 'column', gap: '0.5' })}>
             <For each={navBottom}>
-              {(item) => <NavButton item={item} active={view() === item.id} onClick={() => setView(item.id)} />}
+              {(item) => <NavButton item={item} active={view() === item.id} onClick={() => switchView(item.id)} />}
             </For>
           </div>
         </nav>
@@ -415,17 +423,18 @@ export function App() {
 
       {/* ---------- Main ---------- */}
       <main class={css({ flex: '1', minW: '0', overflowY: 'auto' })}>
+        {/* Full-width banner: bleeds to the edges of the main column. */}
+        <Show when={bannerVisible()}>
+          <SampleBanner onAddCompany={() => setAddOpen(true)} onDismiss={dismissBanner} />
+        </Show>
         <div class={css({ maxW: '60rem', mx: 'auto', p: { base: '5', md: '8' } })}>
-          <Show when={bannerVisible()}>
-            <SampleBanner onAddCompany={() => setAddOpen(true)} onDismiss={dismissBanner} />
-          </Show>
           <SolidSwitch>
             <Match when={view() === 'accounts'}>
               <AccountsView
                 company={cd()}
                 data={getCompanyData(cd().id)}
                 sources={sources()[cd().id] ?? []}
-                onGoToIntegrations={() => setView('integrations')}
+                onGoToIntegrations={() => switchView('integrations')}
               />
             </Match>
             <Match when={view() === 'filings'}>

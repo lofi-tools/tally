@@ -18,8 +18,6 @@ export interface Db {
   sources: Record<string, DataSource[]>
   /** Simulated "create account to save progress" state. */
   account: AccountInfo | null
-  /** Whether the sample-data banner has been dismissed. */
-  bannerDismissed: boolean
 }
 
 export const DB_KEY = 'tally.db.v1'
@@ -30,7 +28,6 @@ function defaults(): Db {
     companies: [],
     sources: { [SAMPLE_COMPANY_ID]: [...dataSources] },
     account: null,
-    bannerDismissed: false,
   }
 }
 

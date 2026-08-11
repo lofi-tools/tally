@@ -59,8 +59,9 @@ pnpm --filter @tally/web typecheck
 
 ## Onboarding flow (no login)
 
-1. App opens on `Sample Co Ltd` with seeded data; a dismissible banner says
-   "Sample data — add your company to get started".
+1. App opens on `Sample Co Ltd` with seeded data; a banner says "Sample data —
+   add your company to get started". Closing it only hides it for the current
+   screen — it returns when you switch screens.
 2. Adding a company runs a **simulated Companies House search** (per
    [`docs/spec/first-run-onboarding-spec.md`](../../docs/spec/first-run-onboarding-spec.md))
    → pick a result → fill only fields a search can't infer (UTR, standard,
