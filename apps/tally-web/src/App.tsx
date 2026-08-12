@@ -14,6 +14,7 @@ import { SettingsView } from './views/Settings'
 import { AddCompanyDialog, type NewCompanyInput } from './components/AddCompanyDialog'
 import { migrateCompanies, SignInDialog, toastMigration } from './components/SignInDialog'
 import { SampleBanner } from './components/SampleBanner'
+import { DevtoolsBanner } from './components/DevtoolsBanner'
 
 type ViewKey = 'accounts' | 'filings' | 'payroll' | 'integrations' | 'settings'
 
@@ -269,22 +270,27 @@ export function App() {
   // Safety net: zero companies of any kind (sample retired + none added).
   if (!currentCompany()) {
     return (
-      <div class={css({ h: '100dvh', display: 'grid', placeItems: 'center', bg: 'canvas', color: 'fg.default', fontFamily: 'sans', px: '4' })}>
-        <div class={css({ textAlign: 'center', maxW: '24rem' })}>
-          <div class={css({ display: 'flex', justifyContent: 'center', mb: '4' })}>
-            <LogoMark />
+      <div class={css({ h: '100dvh', display: 'flex', flexDirection: 'column', bg: 'canvas', color: 'fg.default', fontFamily: 'sans' })}>
+        <div class={css({ flex: '1', minH: '0', display: 'grid', placeItems: 'center', px: '4' })}>
+          <div class={css({ textAlign: 'center', maxW: '24rem' })}>
+            <div class={css({ display: 'flex', justifyContent: 'center', mb: '4' })}>
+              <LogoMark />
+            </div>
+            <h1 class={css({ textStyle: '2xl', fontWeight: '800', letterSpacing: '-0.02em' })}>Add your first company</h1>
+            <p class={css({ textStyle: 'sm', color: 'fg.muted', mt: '2' })}>Tally needs a company before you can prepare accounts or file returns.</p>
+            <div class={css({ mt: '5' })}>
+              <Button onClick={() => setAddOpen(true)}>Add company</Button>
+            </div>
+            <Show when={sessionUser()}>
+              <Button variant="plain" size="sm" onClick={() => void signOut()} class={css({ mt: '3', color: 'fg.muted' })}>
+                <LogOut class={css({ w: '3.5', h: '3.5' })} /> Sign out
+              </Button>
+            </Show>
           </div>
-          <h1 class={css({ textStyle: '2xl', fontWeight: '800', letterSpacing: '-0.02em' })}>Add your first company</h1>
-          <p class={css({ textStyle: 'sm', color: 'fg.muted', mt: '2' })}>Tally needs a company before you can prepare accounts or file returns.</p>
-          <div class={css({ mt: '5' })}>
-            <Button onClick={() => setAddOpen(true)}>Add company</Button>
-          </div>
-          <Show when={sessionUser()}>
-            <Button variant="plain" size="sm" onClick={() => void signOut()} class={css({ mt: '3', color: 'fg.muted' })}>
-              <LogOut class={css({ w: '3.5', h: '3.5' })} /> Sign out
-            </Button>
-          </Show>
         </div>
+
+        <DevtoolsBanner />
+
         <AddCompanyDialog
           open={addOpen()}
           onOpenChange={setAddOpen}
@@ -309,8 +315,9 @@ export function App() {
   const cd = () => currentCompany()!
 
   return (
-    <div class={css({ h: '100dvh', display: 'flex', bg: 'canvas', color: 'fg.default', fontFamily: 'sans' })}>
-      {/* ---------- Sidebar ---------- */}
+    <div class={css({ h: '100dvh', display: 'flex', flexDirection: 'column', bg: 'canvas', color: 'fg.default', fontFamily: 'sans' })}>
+      <div class={css({ flex: '1', minH: '0', display: 'flex' })}>
+        {/* ---------- Sidebar ---------- */}
       <aside
         class={css({
           w: '60',
@@ -534,6 +541,9 @@ export function App() {
           </SolidSwitch>
         </div>
       </main>
+      </div>
+
+      <DevtoolsBanner />
 
       {/* ---------- Add company (search) ---------- */}
       <AddCompanyDialog

@@ -13,7 +13,7 @@ const API_BASE = '/api/v1'
 // Token storage (§14.3)
 // ---------------------------------------------------------------------------
 
-const TOKEN_KEY = 'tally.token.v1'
+export const TOKEN_KEY = 'tally.token.v1'
 
 export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY)
 
