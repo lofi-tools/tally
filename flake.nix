@@ -584,6 +584,16 @@
           dev-db = ''docker compose up -d --wait db'';
           db-down = ''docker compose down'';
 
+          # Wipe the dev database (compose container + named volume) and any
+          # uploaded ledger files — a clean slate.  The next `nix develop -c
+          # dev` recreates the db and its schema from scratch.  The web app's
+          # localStorage is browser-side and untouched; clear it in devtools
+          # to also reset the UI to the empty onboarding state.
+          reset = ''
+            docker compose down -v
+            rm -rf "${wd}/.cache/tally-api/uploads"
+          '';
+
           # Run the tally-api service (env from .env / defaults; see
           # apps/tally-api/README.md).
           api = ''cargo run -p tally-api'';
