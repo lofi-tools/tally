@@ -203,9 +203,12 @@ pub async fn delete(
 }
 
 /// `GET /companies/search?q=` — Companies House search (requires a key).
+///
+/// Deliberately **unprotected**: the web app searches pre-login and the
+/// backend holds the CH key (web-api-wiring-spec §7.2). Rate-limiting /
+/// abuse is accepted at this stage.
 pub async fn search(
     State(state): State<Arc<AppState>>,
-    AuthUser { .. }: AuthUser,
     AppQuery(params): AppQuery<SearchParams>,
 ) -> Result<Json<Vec<crate::companies_house::SearchItem>>, AppError> {
     let q = params.q.unwrap_or_default().trim().to_string();

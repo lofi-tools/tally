@@ -14,6 +14,9 @@ nix develop -c dev-db        # postgres:16 on :5432 (tally/tally/tally)
 nix develop -c api           # cargo run -p tally-api → http://127.0.0.1:8080
 ```
 
+Or run the whole stack (db + api + web app) at once in a zellij session:
+`nix develop -c dev` (from the repo root).
+
 ```sh
 curl -s localhost:8080/health                    # {"status":"ok"}
 curl -s -X POST localhost:8080/api/v1/auth/register \

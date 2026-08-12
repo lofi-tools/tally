@@ -89,6 +89,9 @@ async fn upload_list_get_views_delete() {
     let accounts = json_body(resp).await;
     assert!(accounts["accounts"].as_array().unwrap().len() > 0);
     assert!(accounts["net_assets"].is_string());
+    // §15: every node carries its GnuCash guid (for split→name resolution).
+    let first_account = &accounts["accounts"][0];
+    assert!(first_account["guid"].as_str().unwrap_or("").len() >= 8);
 
     // transactions view
     let resp = app
@@ -101,9 +104,13 @@ async fn upload_list_get_views_delete() {
         .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let page = json_body(resp).await;
-    assert!(page["items"].as_array().unwrap().len() > 0);
+    let items = page["items"].as_array().unwrap();
+    assert!(items.len() > 0);
     assert_eq!(page["limit"], 50);
     assert_eq!(page["offset"], 0);
+    // §15: the GnuCash description survives ingest and is returned.
+    assert!(items[0]["description"].is_string());
+    assert!(items[0]["splits"].as_array().unwrap().len() >= 2);
 
     // delete → 204, then get → 404 not_found
     let resp = app

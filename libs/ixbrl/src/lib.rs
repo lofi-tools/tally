@@ -81,6 +81,8 @@ pub struct RawAccount {
 pub struct RawTransaction {
     pub guid: String,
     pub post_datetime: chrono::NaiveDateTime,
+    /// GnuCash transaction description/memo ("" when the book has none).
+    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,6 +266,7 @@ impl GnucashBook {
             .map(|t| RawTransaction {
                 guid: t.guid.clone(),
                 post_datetime: t.post_datetime,
+                description: t.description.clone(),
             })
             .collect();
         let raw_splits: Vec<RawSplit> = splits
@@ -307,6 +310,7 @@ impl GnucashBook {
             .map(|t| RawTransaction {
                 guid: t.guid.clone(),
                 post_datetime: t.post_datetime,
+                description: t.description.clone(),
             })
             .collect();
         let raw_splits: Vec<RawSplit> = splits
@@ -483,6 +487,12 @@ impl GnucashBook {
             writeln!(out, "      <trn:date-entered>").unwrap();
             writeln!(out, "        <ts:date>{posted}</ts:date>").unwrap();
             writeln!(out, "      </trn:date-entered>").unwrap();
+            writeln!(
+                out,
+                "      <trn:description>{}</trn:description>",
+                xml_escape(&txn.description)
+            )
+            .unwrap();
             writeln!(out, "      <trn:splits>").unwrap();
             for (i, split) in self
                 .raw_splits

@@ -14,4 +14,14 @@ export default defineConfig({
       'styled-system': styledSystem,
     },
   },
+  server: {
+    // Dev-only: forward the API to the Rust backend (spec §4). Start it with
+    // `nix develop -c dev-db` + `nix develop -c api`.
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+      },
+    },
+  },
 })

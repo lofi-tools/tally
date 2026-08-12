@@ -38,6 +38,8 @@ pub struct TxnQuery {
 pub struct TransactionOut {
     pub guid: String,
     pub post_datetime: String,
+    /// The GnuCash transaction description ("" when the book had none).
+    pub description: String,
     pub splits: Vec<SplitOut>,
 }
 
@@ -58,6 +60,9 @@ pub struct TransactionsPage {
 /// omitted, children sorted by name).
 #[derive(Debug, Serialize)]
 pub struct AccountNodeOut {
+    /// GnuCash account guid — lets the frontend resolve split
+    /// `account_guid`s to names/types (web-api-wiring-spec §15).
+    pub guid: String,
     pub name: String,
     #[serde(rename = "type")]
     pub account_type: String,
@@ -193,6 +198,7 @@ pub async fn upload(
                 ledger_id: ledger.id,
                 guid: t.guid.clone(),
                 post_datetime: post_datetime(&t.post_datetime),
+                description: t.description.clone(),
             })
         });
         let split_builders = raw_splits.iter().map(|s| {
@@ -319,6 +325,7 @@ pub async fn transactions_view(
         .map(|t| TransactionOut {
             guid: t.guid.clone(),
             post_datetime: t.post_datetime.clone(),
+            description: t.description.clone(),
             splits: by_tx
                 .get(&t.guid)
                 .map(|splits| {
@@ -378,6 +385,7 @@ fn build_account_tree(accounts: &[Account]) -> AccountsView {
             .unwrap_or_default();
         children.sort_by(|a, b| a.name.cmp(&b.name));
         AccountNodeOut {
+            guid: acc.guid.clone(),
             name: acc.name.clone(),
             account_type: acc.account_type.clone(),
             balance: acc.balance.to_string(),

@@ -1,17 +1,18 @@
 import { createMemo, createSignal, For, Match, onCleanup, onMount, Show, Switch as SolidSwitch, type Component } from 'solid-js'
 import { Avatar, Badge, Button, Kbd, Select, Toaster, toaster } from '@tally/design-system'
 import { createListCollection } from '@tally/design-system'
-import { Building2, ChevronDown, FileCheck2, LayoutGrid, Plug, Plus, Settings, Users } from 'lucide-solid'
+import { Building2, ChevronDown, FileCheck2, LayoutGrid, LogIn, LogOut, Plug, Plus, Settings, Users, WifiOff } from 'lucide-solid'
 import { css } from 'styled-system/css'
 import { bankOptions, getCompanyData, SAMPLE_COMPANY_ID, sampleCompany, type Company, type DataSource } from './mock_data'
 import { loadDb, saveDb, type Db } from './db'
+import { restoreSession, session, signOut } from './session'
 import { AccountsView } from './views/Accounts'
 import { FilingsView } from './views/Filings'
 import { PayrollView } from './views/Payroll'
 import { IntegrationsView } from './views/Integrations'
 import { SettingsView } from './views/Settings'
 import { AddCompanyDialog, type NewCompanyInput } from './components/AddCompanyDialog'
-import { SaveProgressDialog } from './components/SaveProgressDialog'
+import { migrateCompanies, SignInDialog, toastMigration } from './components/SignInDialog'
 import { SampleBanner } from './components/SampleBanner'
 
 type ViewKey = 'accounts' | 'filings' | 'payroll' | 'integrations' | 'settings'
@@ -21,12 +22,14 @@ interface NavItem {
   label: string
   icon: Component
   key: string
+  /** Disabled nav item, shown with a "Soon" badge (payroll — no endpoints yet). */
+  soon?: boolean
 }
 
 const navTop: NavItem[] = [
   { id: 'accounts', label: 'Accounts', icon: LayoutGrid, key: '1' },
   { id: 'filings', label: 'Filings', icon: FileCheck2, key: '2' },
-  { id: 'payroll', label: 'Payroll', icon: Users, key: '3' },
+  { id: 'payroll', label: 'Payroll', icon: Users, key: '3', soon: true },
 ]
 
 const navBottom: NavItem[] = [
@@ -51,11 +54,14 @@ function LogoMark() {
 }
 
 function NavButton(props: { item: NavItem; active: boolean; onClick: () => void }) {
+  const disabled = () => !!props.item.soon
   return (
     <button
       type="button"
       onClick={props.onClick}
+      disabled={disabled()}
       aria-current={props.active ? 'page' : undefined}
+      title={disabled() ? `${props.item.label} is coming soon` : undefined}
       class={css({
         position: 'relative',
         w: 'full',
@@ -70,10 +76,10 @@ function NavButton(props: { item: NavItem; active: boolean; onClick: () => void 
         color: props.active ? 'fg.default' : 'fg.muted',
         bg: props.active ? 'bg.subtle' : 'transparent',
         // Unselected rows sit a touch dimmer than the active one.
-        opacity: props.active ? '1' : '0.82',
-        _hover: { bg: 'bg.subtle', color: 'fg.default', opacity: '1' },
+        opacity: disabled() ? '0.45' : props.active ? '1' : '0.82',
+        cursor: disabled() ? 'not-allowed' : 'pointer',
+        _hover: disabled() ? {} : { bg: 'bg.subtle', color: 'fg.default', opacity: '1' },
         transition: 'background-color 120ms ease, color 120ms ease, opacity 120ms ease',
-        cursor: 'pointer',
         border: 'none',
         textAlign: 'left',
       })}
@@ -99,10 +105,25 @@ function NavButton(props: { item: NavItem; active: boolean; onClick: () => void 
       </Show>
       <props.item.icon />
       <span class={css({ flex: '1' })}>{props.item.label}</span>
+      <Show when={props.item.soon}>
+        <Badge variant="outline" class={css({ flexShrink: '0', fontSize: '10px', px: '1.5', py: '0' })}>
+          Soon
+        </Badge>
+      </Show>
       <Kbd class={css({ fontSize: '10px', lineHeight: '1', py: '0.5', px: '1' })}>{props.item.key}</Kbd>
     </button>
   )
 }
+
+/** "Sam Rivera" → "SR" for the avatar fallback. */
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((p) => p[0]!)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
 
 export function App() {
   const [db, setDb] = createSignal<Db>(loadDb())
@@ -115,14 +136,25 @@ export function App() {
   const [view, setView] = createSignal<ViewKey>('accounts')
   const [companyId, setCompanyId] = createSignal<string>(SAMPLE_COMPANY_ID)
   const [addOpen, setAddOpen] = createSignal(false)
-  const [accountOpen, setAccountOpen] = createSignal(false)
+  const [signInOpen, setSignInOpen] = createSignal(false)
+  const [retrying, setRetrying] = createSignal(false)
   // Transient banner dismissal: closing it only hides it for the current
   // screen — switching views brings it back until a real company exists.
   const [bannerDismissed, setBannerDismissed] = createSignal(false)
 
   const companies = () => db().companies
   const sources = () => db().sources
-  const account = () => db().account
+
+  // Session: restore a stored token on boot (local mode until resolved — no
+  // login-wall flash, §5.2 / §14.6).
+  onMount(() => {
+    void restoreSession()
+  })
+
+  const sessionUser = createMemo(() => {
+    const s = session()
+    return s.status === 'signed-in' ? s.user : null
+  })
 
   // The sample company retires once ANY user company has a data source.
   const sampleRetired = createMemo(() => companies().some((c) => (sources()[c.id] ?? []).length > 0))
@@ -132,6 +164,7 @@ export function App() {
   const bannerVisible = () => !hasRealCompany() && !bannerDismissed()
 
   const switchView = (v: ViewKey) => {
+    if (v === 'payroll') return // disabled until payroll endpoints exist
     setBannerDismissed(false)
     setView(v)
   }
@@ -215,9 +248,20 @@ export function App() {
     })
   }
 
-  const saveAccount = (name: string, email: string) => {
-    updateDb((d) => ({ ...d, account: { saved: true, name, email } }))
-    toaster.create({ title: 'Progress saved', description: 'Mock — real auth lands with the backend.', type: 'success' })
+  /** Remove local companies that the API now owns (§7.3). */
+  const onMigrationComplete = (migratedIds: string[]) => {
+    if (migratedIds.length === 0) return
+    updateDb((d) => ({ ...d, companies: d.companies.filter((c) => !migratedIds.includes(c.id)) }))
+  }
+
+  /** Sidebar "Retry migration": re-runs §7.3 with the token already set. */
+  const retryMigration = async () => {
+    if (retrying()) return
+    setRetrying(true)
+    const result = await migrateCompanies(db().companies)
+    onMigrationComplete(result.migratedIds)
+    setRetrying(false)
+    toastMigration(result)
   }
 
   const dismissBanner = () => setBannerDismissed(true)
@@ -235,12 +279,25 @@ export function App() {
           <div class={css({ mt: '5' })}>
             <Button onClick={() => setAddOpen(true)}>Add company</Button>
           </div>
+          <Show when={sessionUser()}>
+            <Button variant="plain" size="sm" onClick={() => void signOut()} class={css({ mt: '3', color: 'fg.muted' })}>
+              <LogOut class={css({ w: '3.5', h: '3.5' })} /> Sign out
+            </Button>
+          </Show>
         </div>
         <AddCompanyDialog
           open={addOpen()}
           onOpenChange={setAddOpen}
           existingNumbers={companies().map((c) => c.companyNumber)}
           onAdd={addCompany}
+        />
+        {/* Keep auth reachable here too — a signed-in user who removed every
+            company still needs Sign out. */}
+        <SignInDialog
+          open={signInOpen()}
+          onOpenChange={setSignInOpen}
+          localCompanies={companies}
+          onMigrationComplete={onMigrationComplete}
         />
         <Toaster />
       </div>
@@ -376,54 +433,79 @@ export function App() {
           </div>
         </nav>
 
+        {/* ---------- Auth footer (§5.1) ---------- */}
         <div class={css({ borderTop: '1px solid {colors.border.subtle}', px: '3', py: '2.5', display: 'flex', flexDirection: 'column', gap: '2' })}>
-          <Show when={hasRealCompany()}>
-            <Show
-              when={account()}
-              fallback={
-                <button
-                  type="button"
-                  onClick={() => setAccountOpen(true)}
-                  class={css({
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '2',
-                    w: 'full',
-                    px: '2.5',
-                    py: '1.5',
-                    borderRadius: 'md',
-                    fontSize: 'xs',
-                    fontWeight: '500',
-                    color: 'fg.muted',
-                    bg: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    _hover: { bg: 'bg.subtle', color: 'fg.default' },
-                  })}
-                >
-                  Save your progress — <span class={css({ color: 'brown.11', fontWeight: '600' })}>create an account</span>
-                </button>
-              }
-            >
-              <span class={css({ px: '2.5', fontSize: 'xs', color: 'fg.subtle' })}>Saved · {account()!.name}</span>
-            </Show>
+          <Show when={session().status === 'restoring'}>
+            <span class={css({ px: '2.5', fontSize: 'xs', color: 'fg.subtle' })}>Checking your session…</span>
           </Show>
-          <div class={css({ display: 'flex', alignItems: 'center', gap: '2.5' })}>
-            <Avatar.Root class={css({ h: '8', w: '8' })}>
-              <Avatar.Fallback name="Sam Rivera" />
-            </Avatar.Root>
-            <span class={css({ minW: '0', flex: '1' })}>
-              <span class={css({ display: 'block', fontSize: 'sm', fontWeight: '600', truncate: true })}>Sam Rivera</span>
-              <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.subtle' })}>Director</span>
-            </span>
-          </div>
+
+          <Show when={sessionUser()} fallback={<Show when={session().status === 'local' || session().status === 'offline'}>
+            <Button variant="subtle" justifyContent="flex-start" onClick={() => setSignInOpen(true)} class={css({ w: 'full', gap: '2' })}>
+              <LogIn class={css({ w: '4', h: '4' })} /> Sign in
+            </Button>
+          </Show>}>
+            {(user) => (
+              <>
+                <div class={css({ display: 'flex', alignItems: 'center', gap: '2.5' })}>
+                  <Avatar.Root class={css({ h: '8', w: '8', flexShrink: '0' })}>
+                    <Avatar.Fallback name={user().display_name}>{initials(user().display_name)}</Avatar.Fallback>
+                  </Avatar.Root>
+                  <span class={css({ minW: '0', flex: '1' })}>
+                    <span class={css({ display: 'block', fontSize: 'sm', fontWeight: '600', truncate: true })}>{user().display_name}</span>
+                    <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.subtle', truncate: true })}>{user().email}</span>
+                  </span>
+                </div>
+                {/* Retry migration for companies that failed last time (§7.3). */}
+                <Show when={companies().length > 0}>
+                  <Button
+                    variant="plain"
+                    size="sm"
+                    disabled={retrying()}
+                    loading={retrying()}
+                    onClick={() => void retryMigration()}
+                    class={css({ w: 'full', justifyContent: 'flex-start', fontSize: 'xs', color: 'fg.muted' })}
+                  >
+                    Retry migration ({companies().length})
+                  </Button>
+                </Show>
+                <Button variant="plain" size="sm" onClick={() => void signOut()} class={css({ w: 'full', justifyContent: 'flex-start', fontSize: 'xs', color: 'fg.muted' })}>
+                  <LogOut class={css({ w: '3.5', h: '3.5' })} /> Sign out
+                </Button>
+              </>
+            )}
+          </Show>
         </div>
       </aside>
 
       {/* ---------- Main ---------- */}
       <main class={css({ flex: '1', minW: '0', overflowY: 'auto' })}>
         {/* Full-width banner: bleeds to the edges of the main column. */}
+        <Show when={session().status === 'offline'}>
+          <div
+            class={css({
+              display: 'flex',
+              alignItems: 'center',
+              gap: '2.5',
+              px: '4',
+              py: '2',
+              bg: 'amber.solid.bg',
+              color: 'amber.solid.fg',
+              fontSize: 'sm',
+              fontWeight: '500',
+            })}
+          >
+            <WifiOff class={css({ w: '4', h: '4', flexShrink: '0' })} />
+            <span class={css({ flex: '1' })}>API unreachable — is the API running?</span>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => void restoreSession()}
+              class={css({ bg: 'transparent', _hover: { bg: 'white.a8' } })}
+            >
+              Retry
+            </Button>
+          </div>
+        </Show>
         <Show when={bannerVisible()}>
           <SampleBanner onAddCompany={() => setAddOpen(true)} onDismiss={dismissBanner} />
         </Show>
@@ -461,8 +543,13 @@ export function App() {
         onAdd={addCompany}
       />
 
-      {/* ---------- Save progress (simulated account) ---------- */}
-      <SaveProgressDialog open={accountOpen()} onOpenChange={setAccountOpen} onSave={saveAccount} />
+      {/* ---------- Sign in / create account ---------- */}
+      <SignInDialog
+        open={signInOpen()}
+        onOpenChange={setSignInOpen}
+        localCompanies={companies}
+        onMigrationComplete={onMigrationComplete}
+      />
 
       <Toaster />
     </div>

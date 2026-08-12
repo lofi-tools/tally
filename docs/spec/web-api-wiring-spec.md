@@ -78,9 +78,11 @@ browser (vite dev on :5173)                     Rust API (:8080)
 - **Vite dev proxy** forwards `/api/*` to `http://127.0.0.1:8080` (dev only;
   the API's CORS is already permissive for `localhost:5173`).
 - **Hard requirement in dev**: Postgres + the API must be running
-  (`nix develop -c dev-db` then `nix develop -c api`). The README(s) and a
-  `scripts/` note document this. API-backed views show a clear error state
-  when the API is unreachable — no silent mock fallback for signed-in views.
+  (`nix develop -c dev` runs the whole stack — db + api + web — in a zellij
+  session, or bring the pieces up individually with `nix develop -c dev-db`
+  and `nix develop -c api`). The README(s) and a `scripts/` note document
+  this. API-backed views show a clear error state when the API is
+  unreachable — no silent mock fallback for signed-in views.
 - Pre-login, the app needs no API except **CH search** (§7.2), which is
   deliberately unprotected.
 

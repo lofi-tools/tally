@@ -237,6 +237,7 @@ async fn load_inputs(
             post_datetime: chrono::DateTime::parse_from_rfc3339(&t.post_datetime)
                 .map(|dt| dt.naive_utc())
                 .unwrap_or_default(),
+            description: t.description.clone(),
         })
         .collect::<Vec<_>>();
     let raw_splits = splits

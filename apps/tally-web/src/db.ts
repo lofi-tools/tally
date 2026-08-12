@@ -4,20 +4,12 @@
 // loadDb/saveDb.
 import { dataSources, SAMPLE_COMPANY_ID, type Company, type DataSource } from './mock_data'
 
-export interface AccountInfo {
-  saved: true
-  name: string
-  email: string
-}
-
 export interface Db {
   version: 1
   /** User-added companies (never includes the sample). */
   companies: Company[]
   /** Data sources per company id; the sample company is pre-seeded. */
   sources: Record<string, DataSource[]>
-  /** Simulated "create account to save progress" state. */
-  account: AccountInfo | null
 }
 
 export const DB_KEY = 'tally.db.v1'
@@ -27,7 +19,6 @@ function defaults(): Db {
     version: 1,
     companies: [],
     sources: { [SAMPLE_COMPANY_ID]: [...dataSources] },
-    account: null,
   }
 }
 

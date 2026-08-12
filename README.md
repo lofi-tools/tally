@@ -138,11 +138,21 @@ pnpm dev:web     # run the blank Tally web app (http://localhost:5173)
 pnpm typecheck   # typecheck the whole JS workspace
 ```
 
-Inside the Nix dev shell, one command does it all (node + pnpm are in the
-shell; it runs `pnpm install` and starts the showcase dev server):
+Inside the Nix dev shell, one command runs the whole stack — Postgres, the
+Rust API and the web app — with one zellij tab per process so you can follow
+the logs (detach with the default zellij keybind; quitting the session stops
+Postgres, whose data persists in the named volume — note that starting `dev`
+also stops any dev database that's already running):
 
 ```bash
 nix develop -c dev
+```
+
+For just the web app (Vite + Solid on :5173, when the API is already
+running):
+
+```bash
+nix develop -c web
 ```
 
 The design system is built on **design tokens** (brand/neutral scales, fonts,

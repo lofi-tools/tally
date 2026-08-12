@@ -205,6 +205,8 @@ pub struct Transaction {
     pub guid: String,
     /// RFC 3339 UTC (converted from the book's `chrono::NaiveDateTime`).
     pub post_datetime: String,
+    /// GnuCash transaction description/memo ("" when the book has none).
+    pub description: String,
 }
 
 #[derive(Debug, Serialize, Model)]

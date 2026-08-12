@@ -13,9 +13,10 @@ Stack: **Astro** + **SolidJS** (one `client:only="solid-js"` island) +
 ```bash
 pnpm install                                   # from the repo root (pnpm workspace)
 pnpm --filter @tally/design-system-showcase dev   # http://localhost:4321
-# or, in the Nix dev shell:
-nix develop -c dev
 ```
+
+(Note: the flake's `nix develop -c dev`/`-c web` scripts run the Tally app
+stack, not this showcase — use the `pnpm --filter` command above.)
 
 `predev`/`prebuild` run Panda codegen automatically (the generated
 `styled-system/`, `.astro/` and `dist/` are gitignored). For typechecking:

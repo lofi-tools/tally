@@ -1089,6 +1089,7 @@ mod tests {
         let raw_txns = vec![ixbrl::RawTransaction {
             guid: "txn-loss".into(),
             post_datetime: date.and_hms_opt(12, 0, 0).unwrap(),
+            description: String::new(),
         }];
         let raw_splits = vec![
             ixbrl::RawSplit {

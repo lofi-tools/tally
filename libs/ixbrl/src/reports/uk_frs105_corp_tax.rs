@@ -3161,6 +3161,7 @@ mod tests {
         let raw_txns = vec![crate::RawTransaction {
             guid: "txn-sales".into(),
             post_datetime: date.and_hms_opt(12, 0, 0).unwrap(),
+            description: String::new(),
         }];
         let raw_splits = vec![
             crate::RawSplit {
@@ -3216,6 +3217,7 @@ mod tests {
         let raw_txns = vec![crate::RawTransaction {
             guid: "txn-loss".into(),
             post_datetime: date.and_hms_opt(12, 0, 0).unwrap(),
+            description: String::new(),
         }];
         let raw_splits = vec![
             crate::RawSplit {

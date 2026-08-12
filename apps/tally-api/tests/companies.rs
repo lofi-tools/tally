@@ -168,6 +168,33 @@ async fn search_without_key_is_a_clear_400() {
     assert_error(resp, StatusCode::BAD_REQUEST, "companies_house_key_missing").await;
 }
 
+/// §7.2: search is deliberately unprotected — the web app queries it
+/// pre-login. No bearer token → still a 422/400, never 401 auth_missing.
+#[tokio::test]
+async fn search_is_unprotected() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+
+    // No token at all: missing q → 422 validation_failed (auth is not the
+    // gate), and a real query with no CH key → 400, not 401.
+    let resp = app
+        .send(request(Method::GET, "/api/v1/companies/search", None, None))
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
+
+    let resp = app
+        .send(request(
+            Method::GET,
+            "/api/v1/companies/search?q=acme",
+            None,
+            None,
+        ))
+        .await;
+    assert_error(resp, StatusCode::BAD_REQUEST, "companies_house_key_missing").await;
+}
+
 #[tokio::test]
 async fn create_rejects_malformed_json() {
     let Some(app) = TestApp::setup().await else {

@@ -308,14 +308,15 @@
         scripts = with bash; mapAttrs pkgs.writeShellScriptBin {
           run = ''cargo run -- "$@" '';
 
-          # Install the JS workspace deps and start the Tally web app
-          # (Vite + Solid).  pnpm/node are referenced from the flake, so this
-          # works both in the devShell (`nix develop -c dev`) and standalone
-          # (`nix run .#dev`).  Vite runs directly (via exec) rather than
-          # through `pnpm dev`, so stopping the server with Ctrl+C shuts down
-          # cleanly instead of pnpm reporting the signal as a failed run
-          # (exit 143 / "Command failed with signal").
-          dev = ''
+          # The Tally web app only (Vite + Solid): install the JS workspace
+          # deps, run Panda codegen, start Vite on :5173.  pnpm/node are
+          # referenced from the flake, so this works both in the devShell
+          # (`nix develop -c web`) and standalone (`nix run .#web`).  Vite
+          # runs directly (via exec) rather than through `pnpm dev`, so
+          # stopping the server with Ctrl+C shuts down cleanly instead of
+          # pnpm reporting the signal as a failed run (exit 143 / "Command
+          # failed with signal").
+          web = ''
             set -e
             cd "${wd}"
             "${pkgs.pnpm}/bin/pnpm" install
@@ -323,6 +324,34 @@
             ./node_modules/.bin/panda codegen
             ./node_modules/.bin/panda cssgen
             exec "${pkgs.nodejs}/bin/node" node_modules/vite/bin/vite.js
+          '';
+
+          # The full dev stack in one zellij session (via l.mkZmux): postgres
+          # (db tab), the tally-api (api tab), and the Vite web app (web tab)
+          # — one tab per process so each one's logs stay visible.  The api
+          # tab waits for the db healthcheck before `cargo run`; the db tab's
+          # cleanup stops the container before starting (any stale instance)
+          # and again when the session ends (data persists in the named
+          # volume, so the db survives restarts).  Run from the devShell — the
+          # api tab needs cargo: `nix develop -c dev` (or
+          # `nix develop -c nix run .#dev`).
+          dev = ''
+            cd "${wd}"
+            ${l.mkZmux [
+              {
+                name = "db";
+                command = "docker compose up db";
+                cleanup = "docker compose stop db 2>/dev/null || true";
+              }
+              {
+                name = "api";
+                command = ''
+                  ${bin.dev-db} 2>/dev/null || echo "warning: docker db unavailable"
+                  cargo run -p tally-api
+                '';
+              }
+              { name = "web"; command = "${bin.web}"; }
+            ]}
           '';
 
           # Run our Rust tally CLI over the basic-1 data (config + GnuCash
