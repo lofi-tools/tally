@@ -155,6 +155,13 @@ running):
 nix develop -c web
 ```
 
+To wipe the dev database (container, data volume and uploaded ledgers) back
+to a clean slate — stop a running `dev` session first:
+
+```bash
+nix develop -c reset
+```
+
 The design system is built on **design tokens** (brand/neutral scales, fonts,
 semantic color roles with dark-mode variants, recipes) configured in
 `packages/design-system/src/theme` — components are wired to the tokens, so

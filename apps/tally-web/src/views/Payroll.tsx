@@ -2,8 +2,8 @@ import { For, Show } from 'solid-js'
 import { Avatar, Button, Card, Table, toaster } from '@tally/design-system'
 import { CalendarDays, Play } from 'lucide-solid'
 import { css } from 'styled-system/css'
-import { fmtDate, fmtMoney, type Company, type CompanyData } from '../mock_data'
-import { EmptyState, numCell, PageHeader, StatCard, StatusBadge } from '../components/Shared'
+import { fmtDate, fmtMoney, SAMPLE_COMPANY_ID, type Company, type CompanyData } from '../mock_data'
+import { EmptyState, numCell, PageHeader, SampleBadge, StatCard, StatusBadge } from '../components/Shared'
 
 export function PayrollView(props: { company: Company; data: CompanyData }) {
   const employees = () => props.data.employees
@@ -15,6 +15,7 @@ export function PayrollView(props: { company: Company; data: CompanyData }) {
       <PageHeader
         title="Payroll"
         description={`Employee payroll for ${props.company.name}. RTI submissions land with the backend.`}
+        badge={props.company.id === SAMPLE_COMPANY_ID ? <SampleBadge /> : undefined}
         actions={
           <Button
             onClick={() => toaster.create({ title: 'Run payroll (mock)', description: 'Submitting RTI to HMRC lands with the backend.', type: 'info' })}

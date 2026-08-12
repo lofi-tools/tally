@@ -4,8 +4,12 @@ import { FileSpreadsheet, Landmark, PenLine, RefreshCw } from 'lucide-solid'
 import { css } from 'styled-system/css'
 import { type DataSource } from '../mock_data'
 
-/** View header: title + description on the left, action buttons on the right. */
-export function PageHeader(props: { title: string; description?: string; actions?: JSX.Element }) {
+/**
+ * View header: title (+ optional badge) and description on the left, action
+ * buttons on the right. `badge` renders inline after the title — views pass
+ * a <SampleBadge/> whenever the sample company is on screen.
+ */
+export function PageHeader(props: { title: string; description?: string; badge?: JSX.Element; actions?: JSX.Element }) {
   return (
     <div
       class={css({
@@ -17,14 +21,26 @@ export function PageHeader(props: { title: string; description?: string; actions
         mb: '6',
       })}
     >
-      <div>
-        <h1 class={css({ textStyle: '2xl', fontWeight: '800', letterSpacing: '-0.02em' })}>{props.title}</h1>
+      <div class={css({ minW: '0' })}>
+        <div class={css({ display: 'flex', alignItems: 'baseline', gap: '2' })}>
+          <h1 class={css({ textStyle: '2xl', fontWeight: '800', letterSpacing: '-0.02em' })}>{props.title}</h1>
+          {props.badge}
+        </div>
         {props.description && (
           <p class={css({ textStyle: 'sm', color: 'fg.muted', mt: '1', maxW: '40rem' })}>{props.description}</p>
         )}
       </div>
       {props.actions && <div class={css({ display: 'flex', gap: '2', alignItems: 'center', flexWrap: 'wrap' })}>{props.actions}</div>}
     </div>
+  )
+}
+
+/** "Sample" marker — labels the demo company wherever its data is visible (spec §6.1). */
+export function SampleBadge() {
+  return (
+    <Badge variant="outline" class={css({ fontSize: 'xs', flexShrink: '0' })}>
+      Sample
+    </Badge>
   )
 }
 

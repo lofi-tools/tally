@@ -13,7 +13,7 @@ import { IntegrationsView } from './views/Integrations'
 import { SettingsView } from './views/Settings'
 import { AddCompanyDialog, type NewCompanyInput } from './components/AddCompanyDialog'
 import { migrateCompanies, SignInDialog, toastMigration } from './components/SignInDialog'
-import { SampleBanner } from './components/SampleBanner'
+import { SampleBanner, type SampleBannerVariant } from './components/SampleBanner'
 import { DevtoolsBanner } from './components/DevtoolsBanner'
 
 type ViewKey = 'accounts' | 'filings' | 'payroll' | 'integrations' | 'settings'
@@ -139,9 +139,6 @@ export function App() {
   const [addOpen, setAddOpen] = createSignal(false)
   const [signInOpen, setSignInOpen] = createSignal(false)
   const [retrying, setRetrying] = createSignal(false)
-  // Transient banner dismissal: closing it only hides it for the current
-  // screen — switching views brings it back until a real company exists.
-  const [bannerDismissed, setBannerDismissed] = createSignal(false)
 
   const companies = () => db().companies
   const sources = () => db().sources
@@ -157,22 +154,34 @@ export function App() {
     return s.status === 'signed-in' ? s.user : null
   })
 
-  // The sample company retires once ANY user company has a data source.
-  const sampleRetired = createMemo(() => companies().some((c) => (sources()[c.id] ?? []).length > 0))
-  const allCompanies = createMemo(() => (sampleRetired() ? companies() : [sampleCompany, ...companies()]))
+  // The sample company never retires: it stays in the picker (badged) and is
+  // always the first item, so demo data remains explorable (spec §6.2).
+  const allCompanies = createMemo(() => [sampleCompany, ...companies()])
   const currentCompany = createMemo(() => allCompanies().find((c) => c.id === companyId()) ?? allCompanies()[0])
-  const hasRealCompany = () => companies().length > 0
-  const bannerVisible = () => !hasRealCompany() && !bannerDismissed()
+
+  // Sample banner state machine (spec §4). Precedence A > B > C; once ANY
+  // user company has a data source, no variant renders in any selection.
+  const anyDataConnected = createMemo(() => companies().some((c) => (sources()[c.id] ?? []).length > 0))
+  // Not dismissible: the banner renders on every view while the applicable
+  // state holds, so it always "re-appears" when switching screens/tabs.
+  const banner = createMemo<SampleBannerVariant | null>(() => {
+    if (anyDataConnected()) return null
+    // Key off what is actually displayed: currentCompany() falls back to the
+    // sample when companyId dangles (e.g. the selected company was migrated).
+    if (currentCompany()?.id === SAMPLE_COMPANY_ID) {
+      return companies().length > 0 ? 'viewing-sample' : 'onboarding'
+    }
+    return 'empty-data'
+  })
 
   const switchView = (v: ViewKey) => {
     if (v === 'payroll') return // disabled until payroll endpoints exist
-    setBannerDismissed(false)
     setView(v)
   }
 
-  // Company picker items: sample (until retired) + user companies + "Add company".
+  // Company picker items: sample (always first) + user companies + "Add company".
   const pickerItems = createMemo(() => [
-    ...(sampleRetired() ? [] : [{ label: sampleCompany.name, value: SAMPLE_COMPANY_ID, sample: true as const }]),
+    { label: sampleCompany.name, value: SAMPLE_COMPANY_ID, sample: true as const },
     ...companies().map((c) => ({ label: c.name, value: c.id })),
     { label: 'Add company…', value: '__add__' },
   ])
@@ -240,8 +249,6 @@ export function App() {
       accountCount: 0,
     }
     updateDb((d) => ({ ...d, sources: { ...d.sources, [cid]: [...(d.sources[cid] ?? []), src] } }))
-    // If connecting retires the sample while it is selected, move to the user's company.
-    if (companyId() === SAMPLE_COMPANY_ID) setCompanyId(cid)
     toaster.create({
       title: `Connected ${bank.name}`,
       description: 'Mock — real Open Banking consent lands with the backend.',
@@ -253,6 +260,9 @@ export function App() {
   const onMigrationComplete = (migratedIds: string[]) => {
     if (migratedIds.length === 0) return
     updateDb((d) => ({ ...d, companies: d.companies.filter((c) => !migratedIds.includes(c.id)) }))
+    // If the migrated company was selected, fall back to the sample so the
+    // picker and banner stay consistent with what is on screen.
+    if (migratedIds.includes(companyId())) setCompanyId(SAMPLE_COMPANY_ID)
   }
 
   /** Sidebar "Retry migration": re-runs §7.3 with the token already set. */
@@ -264,8 +274,6 @@ export function App() {
     setRetrying(false)
     toastMigration(result)
   }
-
-  const dismissBanner = () => setBannerDismissed(true)
 
   // Safety net: zero companies of any kind (sample retired + none added).
   if (!currentCompany()) {
@@ -513,8 +521,16 @@ export function App() {
             </Button>
           </div>
         </Show>
-        <Show when={bannerVisible()}>
-          <SampleBanner onAddCompany={() => setAddOpen(true)} onDismiss={dismissBanner} />
+        <Show when={banner()}>
+          {(variant) => (
+            <SampleBanner
+              variant={variant()}
+              viewCompanyName={companies()[0]?.name}
+              onAddCompany={() => setAddOpen(true)}
+              onViewCompany={() => companies()[0] && setCompanyId(companies()[0].id)}
+              onConnectBank={() => switchView('integrations')}
+            />
+          )}
         </Show>
         <div class={css({ maxW: '60rem', mx: 'auto', p: { base: '5', md: '8' } })}>
           <SolidSwitch>

@@ -328,11 +328,13 @@
 
           # The full dev stack in one zellij session (via l.mkZmux): postgres
           # (db tab), the tally-api (api tab), and the Vite web app (web tab)
-          # — one tab per process so each one's logs stay visible.  The api
-          # tab waits for the db healthcheck before `cargo run`; the db tab's
-          # cleanup stops the container before starting (any stale instance)
-          # and again when the session ends (data persists in the named
-          # volume, so the db survives restarts).  Run from the devShell — the
+          # — one tab per process so each one's logs stay visible.  Only the
+          # db tab runs `docker compose up` (it owns the container); the api
+          # tab waits for the healthcheck via db-wait (read-only, no race)
+          # before `cargo run`.  The db tab's cleanup stops the container
+          # before starting (any stale instance) and again when the session
+          # ends (data persists in the named volume, so the db survives
+          # restarts).  Run from the devShell — the
           # api tab needs cargo: `nix develop -c dev` (or
           # `nix develop -c nix run .#dev`).
           dev = ''
@@ -346,7 +348,7 @@
               {
                 name = "api";
                 command = ''
-                  ${bin.dev-db} 2>/dev/null || echo "warning: docker db unavailable"
+                  ${bin.db-wait}
                   cargo run -p tally-api
                 '';
               }
@@ -580,17 +582,47 @@
           hmrc-lts-stop = ''${bin.rip} LTSStandalone'';
 
           # The tally-api dev database: start the compose postgres and wait
-          # for its healthcheck (`--wait` needs docker compose v2).
-          dev-db = ''docker compose up -d --wait db'';
-          db-down = ''docker compose down'';
+          # for its healthcheck (`--wait` needs docker compose v2).  Standalone
+          # use, or from `apitest`.
+          dev-db = ''cd "${wd}"; docker compose up -d --wait db'';
+          db-down = ''cd "${wd}"; docker compose down'';
+
+          # Wait until the compose postgres reports healthy — used by the `dev`
+          # api tab so `cargo run` starts only once the db is ready.  Read-only
+          # (`docker compose ps` + `docker inspect`, never `up`): unlike
+          # dev-db it cannot create a container, so it can't race the db tab's
+          # foreground `docker compose up db` over the container name.
+          db-wait = ''
+            cd "${wd}"
+            command -v docker >/dev/null 2>&1 || {
+              echo "db-wait: docker not available; the api will fail to reach the db" >&2
+              exit 0
+            }
+            UP=0
+            for i in $(seq 1 90); do
+              CID=$(docker compose ps -q db 2>/dev/null | head -1)
+              if [ -n "$CID" ] && [ "$(docker inspect -f '{{.State.Health.Status}}' "$CID" 2>/dev/null)" = healthy ]; then
+                UP=1; break
+              fi
+              sleep 1
+            done
+            [ "$UP" = 1 ] || { echo "db-wait: db not healthy after 90s; starting the api anyway" >&2; }
+          '';
 
           # Wipe the dev database (compose container + named volume) and any
           # uploaded ledger files — a clean slate.  The next `nix develop -c
           # dev` recreates the db and its schema from scratch.  The web app's
           # localStorage is browser-side and untouched; clear it in devtools
-          # to also reset the UI to the empty onboarding state.
+          # to also reset the UI to the empty onboarding state.  (Stop a
+          # running `dev` session first — its db tab holds the container.)
           reset = ''
-            docker compose down -v
+            cd "${wd}"
+            docker compose down -v --remove-orphans
+            # Belt-and-braces: force-remove any leftover container/volume that
+            # compose couldn't clean up (e.g. a stale instance mid-race), so a
+            # later `dev` can't hit a "container name already in use" conflict.
+            docker rm -f accounting-db-1 2>/dev/null || true
+            docker volume rm tally-pg 2>/dev/null || true
             rm -rf "${wd}/.cache/tally-api/uploads"
           '';
 
@@ -604,6 +636,7 @@
           # available the pg-gated tests print a notice and skip rather than
           # failing; `test-api-offline` is the first-clone / DB-less variant.
           apitest = ''
+            cd "${wd}"
             docker compose up -d --wait db 2>/dev/null \
               || echo "warning: docker db not available; pg-gated tests will skip"
             cargo test -p tally-api

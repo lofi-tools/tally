@@ -11,13 +11,14 @@ import {
   fmtMoney,
   fmtSignedMoney,
   groupBalance,
+  SAMPLE_COMPANY_ID,
   transactionsFor,
   type AccountGroup,
   type Company,
   type CompanyData,
   type DataSource,
 } from '../mock_data'
-import { DataSourceRows, EmptyState, numCell, PageHeader, StatCard, StatusBadge } from '../components/Shared'
+import { DataSourceRows, EmptyState, numCell, PageHeader, SampleBadge, StatCard, StatusBadge } from '../components/Shared'
 
 // Filter dropdown derived from the chart of accounts (kept in sync with the tree).
 const accountOptions = createListCollection({
@@ -81,6 +82,7 @@ export function AccountsView(props: {
       <PageHeader
         title="Accounts"
         description={`Transactions and summaries for ${props.company.name}.`}
+        badge={props.company.id === SAMPLE_COMPANY_ID ? <SampleBadge /> : undefined}
         actions={
           <>
             <Button

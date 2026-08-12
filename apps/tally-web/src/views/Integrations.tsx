@@ -3,8 +3,8 @@ import { Button, Card, Dialog, toaster } from '@tally/design-system'
 import { FileUp, Landmark, Plus, X } from 'lucide-solid'
 import { css } from 'styled-system/css'
 import { button } from 'styled-system/recipes'
-import { bankOptions, type Company, type DataSource } from '../mock_data'
-import { DataSourceRows, EmptyState, PageHeader, StatusBadge } from '../components/Shared'
+import { bankOptions, SAMPLE_COMPANY_ID, type Company, type DataSource } from '../mock_data'
+import { DataSourceRows, EmptyState, PageHeader, SampleBadge, StatusBadge } from '../components/Shared'
 
 export function IntegrationsView(props: {
   company: Company
@@ -18,6 +18,7 @@ export function IntegrationsView(props: {
       <PageHeader
         title="Integrations"
         description={`Data sources feeding ${props.company.name}'s books.`}
+        badge={props.company.id === SAMPLE_COMPANY_ID ? <SampleBadge /> : undefined}
         actions={
           <Button onClick={() => setAddOpen(true)}>
             <Plus class={css({ w: '3.5', h: '3.5' })} /> Add bank account
