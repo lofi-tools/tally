@@ -157,17 +157,21 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
             </div>
 
             {/* Chart of accounts + account register: an in-flow drawer. The
-                register column collapses to 0fr until an account is selected,
-                then unrolls from the right (ease-in-out so it eases in and
-                out of the collapsed state). Grid stretch (default align)
-                keeps both cards the same height. */}
+                register column collapses to a 0-width track until an account
+                is selected, then unrolls from the right (ease-in-out). Grid
+                stretch (default align) keeps both cards the same height. */}
             <div
               class={cx(
                 css({ display: "grid", mb: "6" }),
                 // Closed: no gap (chart spans full width); open: 50/50 split.
+                // The register track animates concrete lengths (0px ↔ 28rem) —
+                // the drawer width is pre-computed — so the interpolation is
+                // always smooth. Animating fr tracks (0fr ↔ 1fr) is not
+                // spec-interpolable and browsers fall back to a discrete flip
+                // halfway through the transition (the visible "pause").
                 selected()
-                  ? css({ gap: "4", lg: { gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", transition: "grid-template-columns 300ms ease-in-out, gap 300ms ease-in-out" } })
-                  : css({ lg: { gridTemplateColumns: "minmax(0, 1fr) 0fr", transition: "grid-template-columns 300ms ease-in-out, gap 300ms ease-in-out" } }),
+                  ? css({ gap: "4", lg: { gridTemplateColumns: "minmax(0, 1fr) minmax(0, 28rem)", transition: "grid-template-columns 300ms ease-in-out, gap 300ms ease-in-out" } })
+                  : css({ lg: { gridTemplateColumns: "minmax(0, 1fr) minmax(0, 0px)", transition: "grid-template-columns 300ms ease-in-out, gap 300ms ease-in-out" } }),
               )}
             >
               {/* Chart of accounts tree */}
@@ -183,22 +187,23 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
               </Card.Root>
 
               {/* Account register — in-flow drawer, hidden by default, unrolls
-                  from the right when an account is selected. The card stays
-                  mounted (only the track animates — no DOM/layout pop on
-                  open). Fixed table layout guarantees the rows fit the half
-                  width (or any width): the description column absorbs the
-                  slack and truncates instead of pushing the Balance column
-                  off the edge. */}
+                  from the right when an account is selected. The card only
+                  mounts once an account is selected, so there is never an
+                  empty placeholder to flash while the track animates open or
+                  closed. It is pinned to the pre-computed drawer width
+                  (28rem at lg+, full width when stacked below lg) so its
+                  content lays out exactly once at final size — the opening
+                  animation only moves the clip window, never re-styles the
+                  register. Fixed table layout guarantees the rows fit: the
+                  description column absorbs the slack and truncates instead
+                  of pushing the Balance column off the edge. */}
               <div
                 ref={registerRef}
                 class={cx(css({ minW: "0", overflow: "hidden" }), selected() ? css({ display: "block" }) : css({ display: "none", lg: { display: "block" } }))}
               >
-                <Card.Root class={css({ h: "full", minW: "0" })}>
-                  <div class={css({ px: "4", pt: "4", pb: "1" })}>
-                    <Show
-                      when={selected()}
-                      fallback={<div class={css({ fontSize: "sm", fontWeight: "600" })}>Account register</div>}
-                    >
+                <Show when={selected()}>
+                  <Card.Root class={css({ w: { base: "full", lg: "28rem" }, h: "full" })}>
+                    <div class={css({ px: "4", pt: "4", pb: "1" })}>
                       <div class={css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "3" })}>
                         <div class={css({ display: "flex", alignItems: "baseline", gap: "3", minW: "0" })}>
                           <div class={css({ fontSize: "sm", fontWeight: "600", truncate: true })}>{accountLabel(selected()!)}</div>
@@ -209,18 +214,8 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
                         </IconButton>
                       </div>
                       <div class={css({ fontSize: "xs", color: "fg.subtle", mt: "0.5" })}>{accountBreadcrumb(selected()!)}</div>
-                    </Show>
-                  </div>
-                  <div class={css({ px: "2", pb: "2" })}>
-                    <Show
-                      when={selected()}
-                      fallback={
-                        <EmptyState
-                          title="Select an account"
-                          description="Pick a row in the chart of accounts to see its transactions and how each one moved the balance."
-                        />
-                      }
-                    >
+                    </div>
+                    <div class={css({ px: "2", pb: "2" })}>
                       <Show when={register().length > 0} fallback={<EmptyState title="No transactions" description="This account has no activity yet." />}>
                         <Table.Root class={css({ tableLayout: "fixed" })}>
                           <Table.Head>
@@ -266,9 +261,9 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
                           </Table.Body>
                         </Table.Root>
                       </Show>
-                    </Show>
-                  </div>
-                </Card.Root>
+                    </div>
+                  </Card.Root>
+                </Show>
               </div>
             </div>
 
