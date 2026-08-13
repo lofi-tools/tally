@@ -1,21 +1,20 @@
-import { Button, Card, Collapsible, createListCollection, IconButton, Input, Select, Table, Tabs, toaster } from "@tally/design-system";
+import { Button, Card, Collapsible, createListCollection, IconButton, Input, SegmentGroup, Select, Table, Tabs, toaster } from "@tally/design-system";
 import { ArrowRight, ChevronDown, Download, Landmark, Plus, Search, X } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { css, cx } from "styled-system/css";
 import { DataSourceRows, EmptyState, numCell, PageHeader, SampleBadge, StatCard, StatusBadge } from "../components/Shared";
 import {
-  accountBalance,
   accountBreadcrumb,
   accountLabel,
   accountPathOf,
   chartAccountNames,
   chartOfAccounts,
+  CURRENT_FY_LABEL,
   fmtDate,
   fmtMoney,
   fmtSignedMoney,
-  groupBalance,
+  inCurrentFy,
   SAMPLE_COMPANY_ID,
-  transactionsFor,
   type AccountNode,
   type Company,
   type CompanyData,
@@ -32,21 +31,14 @@ const balanceFg = (n: number) => (n > 0 ? "green.plain.fg" : n < 0 ? "red.plain.
 /** Zero renders unsigned; everything else signed (e.g. +£45,000.00 / −£1,850.00). */
 const balanceText = (n: number) => (n === 0 ? fmtMoney(n) : fmtSignedMoney(n));
 
-/**
- * Zero-balance accounts are hidden from the tree: a leaf when its balance is
- * £0.00; a group when it has no non-zero descendants (a group whose children
- * net to zero, e.g. R&D relief vs spend, stays visible because its children
- * are meaningful). Threshold matches what fmtMoney displays as £0.00.
- */
-const isVisibleAccount = (node: AccountNode): boolean =>
-  node.children.length === 0 ? Math.abs(accountBalance(accountPathOf(node))) >= 0.005 : node.children.some(isVisibleAccount);
-
 export function AccountsView(props: { company: Company; data: CompanyData; sources: DataSource[]; onGoToIntegrations: () => void }) {
   const [tab, setTab] = createSignal("balances");
   const [query, setQuery] = createSignal("");
   const [account, setAccount] = createSignal("all");
   // Leaf account whose register is shown in the inline side panel; null = none.
   const [selected, setSelected] = createSignal<string | null>(null);
+  // Balance period for the accounts section: current FY or all-time.
+  const [period, setPeriod] = createSignal<"fy" | "all">("fy");
 
   // Drawer conventions: Escape closes the register; on small screens the
   // register stacks below the chart, so bring it into view when it opens.
@@ -75,22 +67,61 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
 
   const recent = createMemo(() => [...props.data.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5));
 
+  // Period-aware data: the tree, the register and the footer all derive from
+  // the same filtered transactions, so they always agree with the selector.
+  const periodTx = createMemo(() => props.data.transactions.filter((t) => period() === "all" || inCurrentFy(t)));
+  const balanceMap = createMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of periodTx()) m.set(t.account, (m.get(t.account) ?? 0) + t.amount);
+    return m;
+  });
+
+  /**
+   * Zero-balance accounts are hidden from the tree: a leaf when its balance
+   * in the selected period is £0.00; a group when it has no non-zero
+   * descendants (a group whose children net to zero, e.g. R&D relief vs
+   * spend, stays visible because its children are meaningful). Threshold
+   * matches what fmtMoney displays as £0.00.
+   */
+  const isVisibleAccount = (node: AccountNode): boolean =>
+    node.children.length === 0 ? Math.abs(balanceMap().get(accountPathOf(node)) ?? 0) >= 0.005 : node.children.some(isVisibleAccount);
+
+  /** Rolled-up total of a tree node within the selected period. */
+  const groupBalance = (node: AccountNode): number =>
+    node.children.length === 0
+      ? balanceMap().get(accountPathOf(node)) ?? 0
+      : node.children.reduce((s, child) => s + groupBalance(child), 0);
+
+  /** Net (income − expenses) within the selected period — drives the footer. */
+  const net = createMemo(() => {
+    let income = 0;
+    let expenses = 0;
+    for (const t of periodTx()) {
+      if (t.account.startsWith("Income/")) income += t.amount;
+      if (t.account.startsWith("Expenses/")) expenses += t.amount;
+    }
+    return income - expenses;
+  });
+
   /**
    * Register of the selected account: transactions oldest → newest with the
    * running balance after each one, so the user can follow where amounts come
-   * from. The final running total equals the account's current balance.
+   * from. The final running total equals the account's balance in the
+   * selected period.
    */
   const register = createMemo(() => {
     const path = selected();
     if (!path) return [];
-    const rows = transactionsFor(path).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    const rows = periodTx()
+      .filter((t) => t.account === path)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
     let running = 0;
     return rows.map((t) => {
       running += t.amount;
       return { t, running };
     });
   });
-  const registerBalance = () => (selected() ? accountBalance(selected()!) : 0);
+  const registerBalance = () => (selected() ? balanceMap().get(selected()!) ?? 0 : 0);
 
   const yearIncome = props.data.summaries.reduce((s, m) => s + m.income, 0);
   const yearExpenses = props.data.summaries.reduce((s, m) => s + m.expenses, 0);
@@ -156,6 +187,31 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
               <StatCard label="Net (YTD)" value={fmtMoney(yearIncome - yearExpenses)} hint="Before corporation tax" />
             </div>
 
+            {/* Accounts — title outside the card, with the balance-period
+                selector (current FY / all-time) beside it. */}
+            <div class={css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "3", flexWrap: "wrap", mb: "3" })}>
+              <h2 class={css({ textStyle: "lg", fontWeight: "600" })}>Accounts</h2>
+              <SegmentGroup.Root
+                value={period()}
+                onValueChange={(d) => setPeriod(d.value as "fy" | "all")}
+                size="xs"
+                class={css({ bg: "brown.surface.bg" })}
+              >
+                {/* Unselected items sit on the subtle brown; the selected one
+                    (and the sliding pill behind it) use the banner's stronger
+                    brown. */}
+                <SegmentGroup.Indicator class={css({ bg: "brown.subtle.bg" })} />
+                <SegmentGroup.Item value="fy" class={css({ _checked: { bg: "brown.subtle.bg" } })}>
+                  <SegmentGroup.ItemText>{CURRENT_FY_LABEL}</SegmentGroup.ItemText>
+                  <SegmentGroup.ItemHiddenInput />
+                </SegmentGroup.Item>
+                <SegmentGroup.Item value="all" class={css({ _checked: { bg: "brown.subtle.bg" } })}>
+                  <SegmentGroup.ItemText>All-time</SegmentGroup.ItemText>
+                  <SegmentGroup.ItemHiddenInput />
+                </SegmentGroup.Item>
+              </SegmentGroup.Root>
+            </div>
+
             {/* Chart of accounts + account register: an in-flow drawer. The
                 register column collapses to a 0-width track until an account
                 is selected, then unrolls from the right (ease-in-out). Grid
@@ -174,15 +230,26 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
                   : css({ lg: { gridTemplateColumns: "minmax(0, 1fr) minmax(0, 0px)", transition: "grid-template-columns 300ms ease-in-out, gap 300ms ease-in-out" } }),
               )}
             >
-              {/* Chart of accounts tree */}
+              {/* Chart of accounts tree + net footer */}
               <Card.Root class={css({ minW: "0" })}>
-                <div class={css({ px: "4", pt: "4", pb: "1" })}>
-                  <div class={css({ fontSize: "sm", fontWeight: "600" })}>Chart of accounts</div>
-                </div>
-                <div class={css({ px: "2", pb: "2" })}>
+                <div class={css({ px: "2", py: "2" })}>
                   <For each={chartOfAccounts.filter(isVisibleAccount)}>
-                    {(node) => <AccountTreeGroup node={node} depth={0} selected={selected()} onSelect={setSelected} />}
+                    {(node) => (
+                      <AccountTreeGroup
+                        node={node}
+                        depth={0}
+                        selected={selected()}
+                        balances={balanceMap}
+                        isVisible={isVisibleAccount}
+                        groupBalance={groupBalance}
+                        onSelect={setSelected}
+                      />
+                    )}
                   </For>
+                </div>
+                <div class={css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "3", px: "4", py: "3", borderTop: "1px solid {colors.border}", bg: "brown.surface.bg" })}>
+                  <span class={css({ fontSize: "sm", fontWeight: "600" })}>Net</span>
+                  <span class={cx(numCell, css({ fontSize: "sm", color: balanceFg(net()) }))}>{balanceText(net())}</span>
                 </div>
               </Card.Root>
 
@@ -545,7 +612,15 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
  * that select the account for the register panel. Top-level groups start
  * expanded so the first sub-level is visible; deeper levels start collapsed.
  */
-function AccountTreeGroup(props: { node: AccountNode; depth: number; selected: string | null; onSelect: (path: string | null) => void }) {
+function AccountTreeGroup(props: {
+  node: AccountNode;
+  depth: number;
+  selected: string | null;
+  balances: () => Map<string, number>;
+  isVisible: (node: AccountNode) => boolean;
+  groupBalance: (node: AccountNode) => number;
+  onSelect: (path: string | null) => void;
+}) {
   const [open, setOpen] = createSignal(props.depth === 0);
   const path = () => accountPathOf(props.node);
   const isLeaf = () => props.node.children.length === 0;
@@ -579,13 +654,13 @@ function AccountTreeGroup(props: { node: AccountNode; depth: number; selected: s
         })}
       >
         <span class={css({ flex: "1", minW: "0", truncate: true })}>{props.node.name}</span>
-        <span class={cx(numCell, css({ color: balanceFg(accountBalance(path())) }))}>{balanceText(accountBalance(path()))}</span>
+        <span class={cx(numCell, css({ color: balanceFg(props.balances().get(path()) ?? 0) }))}>{balanceText(props.balances().get(path()) ?? 0)}</span>
       </button>
     );
   }
 
   // Group row: collapsible, rolled-up total.
-  const total = () => groupBalance(props.node);
+  const total = () => props.groupBalance(props.node);
   return (
     <Collapsible.Root open={open()} onOpenChange={(d) => setOpen(d.open)}>
       <Collapsible.Trigger
@@ -624,8 +699,18 @@ function AccountTreeGroup(props: { node: AccountNode; depth: number; selected: s
       {/* Static padding per nesting level: each Collapsible.Content adds one
           indent step, so the recursion itself produces the indentation. */}
       <Collapsible.Content class={css({ pl: "5" })}>
-        <For each={props.node.children.filter(isVisibleAccount)}>
-          {(child) => <AccountTreeGroup node={child} depth={props.depth + 1} selected={props.selected} onSelect={props.onSelect} />}
+        <For each={props.node.children.filter(props.isVisible)}>
+          {(child) => (
+            <AccountTreeGroup
+              node={child}
+              depth={props.depth + 1}
+              selected={props.selected}
+              balances={props.balances}
+              isVisible={props.isVisible}
+              groupBalance={props.groupBalance}
+              onSelect={props.onSelect}
+            />
+          )}
         </For>
       </Collapsible.Content>
     </Collapsible.Root>

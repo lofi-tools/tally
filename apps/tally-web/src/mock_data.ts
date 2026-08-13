@@ -17,6 +17,18 @@ export const fmtDate = (iso: string) =>
 export const fmtMonth = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
 
+// ---------- fiscal year ----------
+// The current FY window (FY2025/26 — the sample book's period). The chart of
+// accounts can show balances for the current FY or all-time.
+export const CURRENT_FY_LABEL = 'FY2025/26'
+export const FY_START = '2025-04-01'
+export const FY_END = '2026-03-31'
+
+/** True when a transaction falls inside the current fiscal year. */
+export function inCurrentFy(t: { date: string }): boolean {
+  return t.date >= FY_START && t.date <= FY_END
+}
+
 // ---------- companies ----------
 export interface Company {
   id: string
