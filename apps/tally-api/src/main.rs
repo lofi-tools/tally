@@ -1,5 +1,5 @@
 //! `tally-api` binary (spec §4, §13): env config → tracing → DB connect +
-//! schema → serve.  The router and handlers live in the lib target.
+//! migrations → serve.  The router and handlers live in the lib target.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -44,12 +44,17 @@ async fn main() -> Result<()> {
         .with_context(|| format!("parse DATABASE_URL '{db_url}'"))?;
     let mut builder = toasty::Db::builder();
     builder.models(toasty::models!(User, Session, Company, Ledger, Account, Transaction, Split));
-    let db = builder
+    let mut db = builder
         .build(connect)
         .await
         .with_context(|| format!("connect to '{db_url}'"))?;
-    db.push_schema().await.context("push schema (create tables)")?;
-    tracing::info!(db_url = %db_url, "connected to postgres; schema pushed");
+    // Idempotent: plays only the committed SQL migrations that are missing
+    // (see src/migrations.rs), so restarting against an existing schema is
+    // safe — unlike the previous startup `push_schema()`.
+    tally_api::migrations::apply_pending(&mut db)
+        .await
+        .context("apply schema migrations")?;
+    tracing::info!(db_url = %db_url, "connected to postgres; migrations applied");
 
     // --- state + serve --------------------------------------------------------
     let state = Arc::new(AppState {

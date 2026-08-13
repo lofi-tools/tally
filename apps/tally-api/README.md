@@ -64,11 +64,31 @@ cargo test -p tally-api --no-default-features
 Without docker/Postgres the pg-gated tests print a notice and skip (pass)
 rather than failing, so plain `cargo test -p tally-api` is safe either way.
 
+## Schema migrations
+
+Schema changes live as committed SQL files in `migrations/` (e.g.
+`0001_init.sql`), embedded into the binary at compile time. Every startup
+plays the migrations that are missing and records each in a
+`_migrations_history` table (name + sha256 checksum), so restarts against an
+existing schema are no-ops — this replaced the old startup `push_schema()`,
+which re-issued `CREATE TABLE` on every boot and failed on an existing DB.
+
+To add a migration: add `NNNN_description.sql` in `migrations/` (zero-padded
+number, applied in filename order) and restart the API; the new file is
+applied automatically. Editing an already-applied migration is rejected at
+startup (checksum mismatch) — write a new migration instead.
+
+> **One-time note:** a dev DB created by the old `push_schema` already has the
+> tables but no `_migrations_history` row, so the initial migration would fail
+> (`relation already exists`). Reset the dev database once:
+> `nix develop -c reset`.
+
 ## Layout
 
 - `src/models.rs` — toasty models (users, sessions, companies, ledgers, accounts, transactions, splits)
 - `src/auth.rs` — register/login/logout/me + the bearer `AuthUser` extractor (argon2, sha256 tokens)
 - `src/companies.rs` — company CRUD + ownership helpers (+ CH enrichment)
+- `src/migrations.rs` — committed SQL migrations, auto-applied on startup
 - `src/ledgers.rs` — upload (stream to temp file, sha256, parse, persist) + JSON views
 - `src/reports.rs` — the four report endpoints (rebuild the book from stored rows)
 - `src/period.rs` — accounting-period resolution chain

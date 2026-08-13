@@ -11,6 +11,7 @@ pub mod companies_house;
 pub mod error;
 pub mod extract;
 pub mod ledgers;
+pub mod migrations;
 pub mod models;
 pub mod period;
 pub mod reports;

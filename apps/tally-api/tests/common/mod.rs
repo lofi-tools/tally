@@ -73,8 +73,10 @@ impl TestApp {
         let connect = toasty::db::Connect::new(&test_url).await.ok()?;
         let mut builder = toasty::Db::builder();
         builder.models(toasty::models!(User, Session, Company, Ledger, Account, Transaction, Split));
-        let db = builder.build(connect).await.ok()?;
-        db.push_schema().await.ok()?;
+        let mut db = builder.build(connect).await.ok()?;
+        // Same path as production startup: play the committed SQL migrations
+        // (the initial one creates the schema that `push_schema` used to).
+        tally_api::migrations::apply_pending(&mut db).await.ok()?;
 
         let upload_dir = TempDir::new().ok()?;
         let state = Arc::new(AppState {
