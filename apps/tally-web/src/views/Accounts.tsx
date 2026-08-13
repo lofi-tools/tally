@@ -36,6 +36,17 @@ const balanceFg = (n: number) => (n > 0 ? 'green.plain.fg' : n < 0 ? 'red.plain.
 /** Zero renders unsigned; everything else signed (e.g. +£45,000.00 / −£1,850.00). */
 const balanceText = (n: number) => (n === 0 ? fmtMoney(n) : fmtSignedMoney(n))
 
+/**
+ * Zero-balance accounts are hidden from the tree: a leaf when its balance is
+ * £0.00; a group when it has no non-zero descendants (a group whose children
+ * net to zero, e.g. R&D relief vs spend, stays visible because its children
+ * are meaningful). Threshold matches what fmtMoney displays as £0.00.
+ */
+const isVisibleAccount = (node: AccountNode): boolean =>
+  node.children.length === 0
+    ? Math.abs(accountBalance(accountPathOf(node))) >= 0.005
+    : node.children.some(isVisibleAccount)
+
 export function AccountsView(props: {
   company: Company
   data: CompanyData
@@ -161,7 +172,7 @@ export function AccountsView(props: {
                   <div class={css({ fontSize: 'sm', fontWeight: '600' })}>Chart of accounts</div>
                 </div>
                 <div class={css({ px: '2', pb: '2' })}>
-                  <For each={chartOfAccounts}>
+                  <For each={chartOfAccounts.filter(isVisibleAccount)}>
                     {(node) => (
                       <AccountTreeGroup node={node} depth={0} selected={selected()} onSelect={setSelected} />
                     )}
@@ -624,7 +635,7 @@ function AccountTreeGroup(props: {
       {/* Static padding per nesting level: each Collapsible.Content adds one
           indent step, so the recursion itself produces the indentation. */}
       <Collapsible.Content class={css({ pl: '5' })}>
-        <For each={props.node.children}>
+        <For each={props.node.children.filter(isVisibleAccount)}>
           {(child) => <AccountTreeGroup node={child} depth={props.depth + 1} selected={props.selected} onSelect={props.onSelect} />}
         </For>
       </Collapsible.Content>
