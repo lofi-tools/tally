@@ -27,7 +27,7 @@ use ixbrl::{GnucashBook, RawAccount, RawSplit, RawTransaction};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::app::AppState;
+use crate::AppState;
 use crate::auth::AuthUser;
 use crate::companies::{
     owned_company, DEFAULT_ACCOUNTING_STANDARDS_DIMENSION,

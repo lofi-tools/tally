@@ -14,7 +14,7 @@ use axum::http::{header, HeaderValue, Method, Request, StatusCode};
 use axum::response::Response;
 use axum::Router;
 use serde_json::Value;
-use tally_api::app::{router, AppState};
+use tally_api::{router, AppState};
 use tally_api::models::{Account, Company, Ledger, Session, Split, Transaction, User};
 use tempfile::TempDir;
 use tokio_postgres::NoTls;

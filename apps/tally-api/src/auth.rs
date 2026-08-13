@@ -18,7 +18,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::app::AppState;
+use crate::AppState;
 use crate::error::{AppError, FieldIssue};
 use crate::extract::AppJson;
 use crate::models::{Session, User};

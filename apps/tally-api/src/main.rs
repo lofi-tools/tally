@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tally_api::app::{router, AppState};
+use tally_api::{router, AppState};
 use tally_api::companies_house::ChApi;
 use tally_api::models::{Account, Company, Ledger, Session, Split, Transaction, User};
 use toasty::db::Connect;

@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::Json;
 use serde::Deserialize;
 
-use crate::app::AppState;
+use crate::AppState;
 use crate::auth::AuthUser;
 use crate::companies_house::key_missing_hint;
 use crate::error::{AppError, FieldIssue};

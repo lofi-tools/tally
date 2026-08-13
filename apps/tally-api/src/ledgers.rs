@@ -17,7 +17,7 @@ use ixbrl::{AccountType, GnucashBook};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::app::AppState;
+use crate::AppState;
 use crate::auth::AuthUser;
 use crate::companies::owned_company;
 use crate::error::{AppError, FieldIssue};
