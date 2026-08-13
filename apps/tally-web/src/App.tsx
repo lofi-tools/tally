@@ -6,6 +6,7 @@ import { css } from 'styled-system/css'
 import { bankOptions, getCompanyData, DEMO_COMPANY_ID, demoCompany, type Company, type DataSource } from './mock_data'
 import { loadDb, saveDb, type Db } from './db'
 import { restoreSession, session, signOut } from './session'
+import { createCompany, type Company as ApiCompany } from './api'
 import { AccountsView } from './views/Accounts'
 import { FilingsView } from './views/Filings'
 import { PayrollView } from './views/Payroll'
@@ -215,14 +216,30 @@ export function App() {
     onCleanup(() => window.removeEventListener('keydown', handler))
   })
 
-  const addCompany = (input: NewCompanyInput) => {
+  const addCompany = async (input: NewCompanyInput): Promise<void> => {
+    // Signed in: save the company into the user's account (spec §7.1) — the
+    // backend holds the CH key and enriches the profile (address, SIC,
+    // directors…) from the company number.  Local mode keeps today's
+    // localStorage add; registering later migrates it up (SignInDialog).
+    let saved: ApiCompany | null = null
+    if (session().status === 'signed-in') {
+      saved = await createCompany({
+        name: input.name,
+        company_number: input.companyNumber,
+        tax_reference: input.utr,
+      })
+    }
+    // The picker/views are still local-driven, so mirror the company (the
+    // API's id when it exists, so the copy stays stable across sessions).
     const company: Company = {
-      id: input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'company',
-      name: input.name,
-      companyNumber: input.companyNumber,
+      id:
+        saved?.id ??
+        (input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'company'),
+      name: saved?.name ?? input.name,
+      companyNumber: saved?.company_number ?? input.companyNumber,
       utr: input.utr,
-      sic: input.sic,
-      address: input.address,
+      sic: saved?.sic_codes?.[0] ?? '',
+      address: saved?.address_lines?.[0] ?? input.address,
       standard: input.standard,
     }
     updateDb((d) => ({ ...d, companies: [...d.companies, company] }))

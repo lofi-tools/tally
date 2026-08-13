@@ -62,10 +62,12 @@ pnpm --filter @tally/web typecheck
 1. App opens on `Demo Co Ltd` with seeded data; a banner says "Demo data —
    add your company to get started". Closing it only hides it for the current
    screen — it returns when you switch screens.
-2. Adding a company runs a **simulated Companies House search** (per
-   [`docs/spec/first-run-onboarding-spec.md`](../../docs/spec/first-run-onboarding-spec.md))
-   → pick a result → fill only fields a search can't infer (UTR, standard,
-   period) → the new company is auto-selected.
+2. Adding a company searches **real Companies House data** via the API's
+   `GET /companies/search` endpoint (search-as-you-type; the backend holds
+   the CH key) → pick a result → fill only fields a search can't infer
+   (UTR, standard, period) → the new company is auto-selected. When signed
+   in it is saved to the user's account (`POST /companies`); in local mode
+   it stays in localStorage and migrates on register.
 3. The user's company starts empty; guided empty states point to "Connect a
    bank".
 4. Once any company has ≥1 connected data source, the demo leaves the

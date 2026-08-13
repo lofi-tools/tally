@@ -144,12 +144,45 @@ struct SearchResponse {
     items: Vec<SearchItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The CH search endpoint puts the company name in `title` (not
+    /// `company_name`) — a regression test so decoding a real response
+    /// can't silently break again (the whole search then 502s).
+    #[test]
+    fn search_item_decodes_from_real_ch_shape() {
+        let json = r#"{
+            "items": [{
+                "company_number": "00445790",
+                "company_status": "active",
+                "company_type": "plc",
+                "date_of_creation": "1947-11-27",
+                "address_snippet": "Tesco House, Shire Park, Kestrel Way, Welwyn Garden City",
+                "title": "TESCO PLC",
+                "description": "00445790 - Incorporated on 27 November 1947"
+            }]
+        }"#;
+        let parsed: SearchResponse = serde_json::from_str(json).expect("real CH search response decodes");
+        assert_eq!(parsed.items.len(), 1);
+        let item = &parsed.items[0];
+        assert_eq!(item.company_name, "TESCO PLC");
+        assert_eq!(item.company_number, "00445790");
+    }
+}
+
 /// A CH search result.
+///
+/// Note: the search endpoint puts the company name in `title` (not
+/// `company_name`), so `company_name` maps to it.
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct SearchItem {
     #[serde(rename = "company_number")]
     pub company_number: String,
-    #[serde(rename = "company_name")]
+    /// CH's search endpoint calls the name `title`; the API contract
+    /// serializes it as `company_name` (alias only affects decoding).
+    #[serde(alias = "title")]
     pub company_name: String,
     #[serde(default, rename = "company_status")]
     pub company_status: Option<String>,
