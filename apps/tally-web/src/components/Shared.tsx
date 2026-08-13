@@ -22,7 +22,7 @@ export function PageHeader(props: { title: string; description?: string; badge?:
       })}
     >
       <div class={css({ minW: '0' })}>
-        <div class={css({ display: 'flex', alignItems: 'baseline', gap: '2' })}>
+        <div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
           <h1 class={css({ textStyle: '2xl', fontWeight: '800', letterSpacing: '-0.02em' })}>{props.title}</h1>
           {props.badge}
         </div>
