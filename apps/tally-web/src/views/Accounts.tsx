@@ -531,7 +531,6 @@ function AccountTreeGroup(props: {
   const path = () => accountPathOf(props.node)
   const isLeaf = () => props.node.children.length === 0
   const isSelected = () => path() === props.selected
-  const indent = () => ({ pl: `${0.75 + props.depth * 1.25}rem` }) as const
 
   // Leaf row: selectable, shows the bronze indicator when selected.
   if (isLeaf()) {
@@ -556,7 +555,6 @@ function AccountTreeGroup(props: {
           color: isSelected() ? 'fg.default' : 'fg.muted',
           _hover: { bg: isSelected() ? 'brown.a3' : 'bg.subtle', color: 'fg.default' },
           transition: 'background-color 120ms ease, color 120ms ease',
-          ...indent(),
         })}
       >
         <Show when={isSelected()}>
@@ -608,7 +606,6 @@ function AccountTreeGroup(props: {
           color: 'fg.default',
           _hover: { bg: 'bg.subtle' },
           transition: 'background-color 120ms ease',
-          ...indent(),
         })}
       >
         <ChevronDown
@@ -624,7 +621,9 @@ function AccountTreeGroup(props: {
         <span class={css({ flex: '1', minW: '0', truncate: true })}>{props.node.name}</span>
         <span class={cx(numCell, css({ color: balanceFg(total()) }))}>{balanceText(total())}</span>
       </Collapsible.Trigger>
-      <Collapsible.Content>
+      {/* Static padding per nesting level: each Collapsible.Content adds one
+          indent step, so the recursion itself produces the indentation. */}
+      <Collapsible.Content class={css({ pl: '5' })}>
         <For each={props.node.children}>
           {(child) => <AccountTreeGroup node={child} depth={props.depth + 1} selected={props.selected} onSelect={props.onSelect} />}
         </For>
