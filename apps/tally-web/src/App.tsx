@@ -554,30 +554,35 @@ export function App() {
             </Button>
           </div>
         </Show>
-        <div class={css({ maxW: '60rem', mx: 'auto', p: { base: '5', md: '8' } })}>
-          <SolidSwitch>
-            <Match when={view() === 'accounts'}>
-              <AccountsView
-                company={cd()}
-                data={getCompanyData(cd().id)}
-                sources={sources()[cd().id] ?? []}
-                onGoToIntegrations={() => switchView('integrations')}
-              />
-            </Match>
-            <Match when={view() === 'filings'}>
-              <FilingsView company={cd()} data={getCompanyData(cd().id)} />
-            </Match>
-            <Match when={view() === 'payroll'}>
-              <PayrollView company={cd()} data={getCompanyData(cd().id)} />
-            </Match>
-            <Match when={view() === 'integrations'}>
-              <IntegrationsView company={cd()} sources={sources()[cd().id] ?? []} onConnect={(bank) => connectSource(cd().id, bank)} />
-            </Match>
-            <Match when={view() === 'settings'}>
-              <SettingsView company={cd()} />
-            </Match>
-          </SolidSwitch>
-        </div>
+        {/* The Filings view is full-bleed (its own sub-nav column sits flush
+            against the main sidebar); the other views share the centred
+            max-width container. */}
+        <Show when={view() === 'filings'}>
+          <FilingsView company={cd()} data={getCompanyData(cd().id)} />
+        </Show>
+        <Show when={view() !== 'filings'}>
+          <div class={css({ maxW: '60rem', mx: 'auto', p: { base: '5', md: '8' } })}>
+            <SolidSwitch>
+              <Match when={view() === 'accounts'}>
+                <AccountsView
+                  company={cd()}
+                  data={getCompanyData(cd().id)}
+                  sources={sources()[cd().id] ?? []}
+                  onGoToIntegrations={() => switchView('integrations')}
+                />
+              </Match>
+              <Match when={view() === 'payroll'}>
+                <PayrollView company={cd()} data={getCompanyData(cd().id)} />
+              </Match>
+              <Match when={view() === 'integrations'}>
+                <IntegrationsView company={cd()} sources={sources()[cd().id] ?? []} onConnect={(bank) => connectSource(cd().id, bank)} />
+              </Match>
+              <Match when={view() === 'settings'}>
+                <SettingsView company={cd()} />
+              </Match>
+            </SolidSwitch>
+          </div>
+        </Show>
       </main>
       </div>
 

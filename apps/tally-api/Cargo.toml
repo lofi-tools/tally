@@ -43,6 +43,10 @@ uuid.workspace = true
 include_dir = "0.7"
 # web client (Companies House search adapter)
 reqwest.workspace = true
+# durable job worker: CancellationToken for graceful shutdown (src/jobs.rs)
+tokio-util = { workspace = true, features = ["rt"] }
+# CH iXBRL documents arrive zipped (src/filings.rs)
+zip.workspace = true
 # internal
 ixbrl = { path = "../../libs/ixbrl" }
 # default-features = false: ct600's only feature is `api_tests` (live

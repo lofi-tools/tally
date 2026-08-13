@@ -74,6 +74,28 @@ impl ChApi {
             .map_err(|e| map_ch_error(e, company_number, self.base_url.clone()))
     }
 
+    /// Fetch a company's complete filing history (all pages merged, newest
+    /// first). Unused cache — the filings sync persists its own copy.
+    pub async fn filing_history_all(
+        &self,
+        company_number: &str,
+    ) -> Result<ct600::companies_house::FilingHistory, AppError> {
+        self.client
+            .get_filing_history_all(company_number)
+            .await
+            .map_err(|e| map_ch_error(e, company_number, self.base_url.clone()))
+    }
+
+    /// Download a filed document (resolving the metadata link to its
+    /// content URL on the document API host). Returns the raw bytes; the
+    /// caller interprets them (HTML iXBRL, zipped iXBRL, PDF, ...).
+    pub async fn filing_document(&self, document_metadata_url: &str) -> Result<Vec<u8>, AppError> {
+        self.client
+            .get_filing_document(document_metadata_url)
+            .await
+            .map_err(|e| map_ch_error(e, "", self.base_url.clone()))
+    }
+
     /// Search companies by name/number. The lib has no search method, so
     /// this calls `GET {base}/search/companies?q=…` directly.
     pub async fn search(&self, query: &str) -> Result<Vec<SearchItem>, AppError> {

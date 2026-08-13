@@ -142,7 +142,20 @@ pub async fn create(
         input.enrich_from_ch(&profile, officers.as_ref());
     }
 
+    let backfill = !company_number.is_empty() && state.ch.is_some();
     let company = create_row(&mut db, user.id, input, company_number).await?;
+
+    // Fire-and-forget: enqueue the filings backfill without blocking the
+    // request. Only when there is a number AND a key — otherwise the
+    // refresh endpoint can be used once configured.
+    if backfill {
+        let mut db = state.db.clone();
+        let id = company.id;
+        tokio::spawn(async move {
+            let _ = crate::jobs::enqueue(&mut db, "fetch_filings", id).await;
+        });
+    }
+
     Ok(Json(company))
 }
 
@@ -184,6 +197,11 @@ pub async fn delete(
 
     let ledgers = Ledger::filter_by_company_id(company.id).exec(&mut db).await?;
     let mut tx = db.transaction().await?;
+    // The filings sync tables (jobs / filings / balance sheets) cascade
+    // with the company, like the ledgers.
+    crate::models::Job::filter_by_company_id(company.id).delete().exec(&mut tx).await?;
+    crate::models::Filing::filter_by_company_id(company.id).delete().exec(&mut tx).await?;
+    crate::models::BalanceSheet::filter_by_company_id(company.id).delete().exec(&mut tx).await?;
     for ledger in &ledgers {
         Split::filter_by_ledger_id(ledger.id).delete().exec(&mut tx).await?;
         Transaction::filter_by_ledger_id(ledger.id).delete().exec(&mut tx).await?;

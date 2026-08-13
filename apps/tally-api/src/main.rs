@@ -7,8 +7,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tally_api::{router, AppState};
 use tally_api::companies_house::ChApi;
-use tally_api::models::{Account, Company, Ledger, Session, Split, Transaction, User};
+use tally_api::models::{Account, BalanceSheet, Company, Filing, Job, Ledger, Session, Split, Transaction, User};
 use toasty::db::Connect;
+use tokio_util::sync::CancellationToken;
 
 /// Default bind (spec §13: LTS owns 8081, so the API defaults to 8080).
 const DEFAULT_ADDR: &str = "127.0.0.1:8080";
@@ -43,7 +44,9 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("parse DATABASE_URL '{db_url}'"))?;
     let mut builder = toasty::Db::builder();
-    builder.models(toasty::models!(User, Session, Company, Ledger, Account, Transaction, Split));
+    builder.models(toasty::models!(
+        User, Session, Company, Ledger, Account, Transaction, Split, Job, Filing, BalanceSheet
+    ));
     let mut db = builder
         .build(connect)
         .await
@@ -64,11 +67,24 @@ async fn main() -> Result<()> {
         max_upload_bytes,
     });
 
+    // --- background worker --------------------------------------------------
+    // One ctrl-c cancels both the HTTP server (axum drains in-flight
+    // requests) and the job worker (its JoinSet drains via the token).
+    let shutdown = CancellationToken::new();
+    let worker = tokio::spawn(tally_api::jobs::run_worker(state.clone(), shutdown.child_token()));
+
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .with_context(|| format!("bind {addr}"))?;
     tracing::info!(%addr, "tally-api listening");
-    axum::serve(listener, router(state)).await.context("serve")?;
+    axum::serve(listener, router(state))
+        .with_graceful_shutdown(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            shutdown.cancel();
+        })
+        .await
+        .context("serve")?;
+    let _ = worker.await; // already draining via the token
     Ok(())
 }
 

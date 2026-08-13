@@ -106,7 +106,12 @@ pub async fn accounts(
     AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Html<String>, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
+    let mut db = state.db.clone();
     let accounts = Frs105Accounts::new(&inputs.book, &inputs.company, &inputs.profile, &inputs.meta);
+    let accounts = match crate::filings::previous_year_figures(&mut db, company_id).await? {
+        Some(prev) => accounts.with_previous_year(prev),
+        None => accounts, // no CH balance sheet on file → ledger-derived comparatives
+    };
     Ok(Html(accounts.to_ixbrl()))
 }
 
@@ -179,7 +184,12 @@ pub async fn ct600(
 ) -> Result<Response, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
     require_utr(&inputs.company)?;
+    let mut db = state.db.clone();
     let accounts = Frs105Accounts::new(&inputs.book, &inputs.company, &inputs.profile, &inputs.meta);
+    let accounts = match crate::filings::previous_year_figures(&mut db, company_id).await? {
+        Some(prev) => accounts.with_previous_year(prev),
+        None => accounts, // no CH balance sheet on file → ledger-derived comparatives
+    };
     let corp_tax = Frs105CorpTax::builder(&inputs.book, &inputs.company, &inputs.meta).build();
 
     let mut filing = ct600::Ct600Return::from_inputs(&accounts, &corp_tax);

@@ -31,7 +31,8 @@ rand = "0.9"
 sha2 = "0.10"
 hex = "0.4"
 mime = "0.3"
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["rt"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 rust_decimal = "1.36"
 tempfile = "3.27"
 

@@ -63,6 +63,25 @@ for (const Ctor of ['ResizeObserver', 'IntersectionObserver']) {
   globalThis[Ctor] = stub
 }
 
+// jsdom lacks localStorage; the app (api.ts token, db.ts) reads it on boot.
+// Fresh per run, so scripts start from the first-run onboarding state.
+const lsStore = new Map()
+const localStorageStub = {
+  getItem: (k) => (lsStore.has(k) ? lsStore.get(k) : null),
+  setItem: (k, v) => { lsStore.set(k, String(v)) },
+  removeItem: (k) => { lsStore.delete(k) },
+  clear: () => lsStore.clear(),
+  key: (i) => [...lsStore.keys()][i] ?? null,
+  get length() { return lsStore.size },
+}
+globalThis.localStorage = localStorageStub
+try {
+  window.localStorage = localStorageStub
+} catch {
+  // jsdom's window.localStorage is getter-only; replace it via defineProperty.
+  Object.defineProperty(window, 'localStorage', { value: localStorageStub, writable: true, configurable: true })
+}
+
 const errors = []
 window.addEventListener('error', (e) => errors.push(e.error ?? e))
 
@@ -99,7 +118,7 @@ const text = root.textContent
 const checks = [
   ['demo company selected', text.includes('Demo Co Ltd')],
   ['demo banner', text.includes('Demo data') && text.includes('Add your company')],
-  ['demo dataset (transactions)', text.includes('Stripe payout') || text.includes('Northwind Trading')],
+  ['demo dataset (transactions)', text.includes('Shareholders initial stock purchase')],
   ['workspace nav', text.includes('Accounts') && text.includes('Filings') && text.includes('Payroll')],
 ]
 const failed = checks.filter(([, ok]) => !ok)

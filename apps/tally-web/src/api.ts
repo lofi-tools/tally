@@ -294,6 +294,64 @@ export interface TransactionsPage {
   offset: number
 }
 
+// ---- filings (ch-filings-sync-spec §5) ----
+/** The 11 balance-sheet line items, in the `Frs105Accounts` field names. */
+export interface PreviousYearFigures {
+  fixed_assets: number
+  current_assets: number
+  prepayments_and_accrued_income: number
+  creditors_within_1_year: number
+  net_current_assets: number
+  total_assets_less_liabilities: number
+  creditors_after_1_year: number
+  provisions_for_liabilities: number
+  accruals_and_deferred_income: number
+  net_assets: number
+  capital_and_reserves: number
+}
+
+export interface PeriodDue {
+  /** CT600 deadline (HMRC): 12 months after the period end. */
+  hmrc: string
+  /** Accounts deadline (Companies House): 9 months after the period end. */
+  ch: string
+}
+
+export interface PeriodFiling {
+  kind: 'accounts' | 'confirmation-statement' | 'corporation-tax' | 'other'
+  state: 'confirmed' | 'not-sent'
+  filed_on?: string | null
+  form_type?: string | null
+  description?: string | null
+  document_metadata_url?: string | null
+}
+
+export interface Period {
+  start: string
+  end: string
+  status: 'filed' | 'pending' | 'ongoing'
+  due: PeriodDue | null
+  filings: PeriodFiling[]
+}
+
+export interface BalanceSheet {
+  period_end: string
+  filed_on: string | null
+  figures: PreviousYearFigures
+}
+
+export interface FetchStatus {
+  state: 'none' | 'pending' | 'running' | 'done' | 'failed'
+  fetched_at: string | null
+  last_error: string | null
+}
+
+export interface FilingsViewData {
+  periods: Period[]
+  balance_sheets: BalanceSheet[]
+  status: FetchStatus
+}
+
 // ---- reports ----
 export interface ReportRequest {
   ledger_id: string
@@ -337,6 +395,18 @@ export const searchCompanies = (q: string): Promise<SearchItem[]> =>
 
 export const enrichCompany = (id: string): Promise<Company> =>
   api<Company>(`/companies/${id}/enrich`, { method: 'POST' })
+
+// ---- filings ----
+/** The company's financial periods + balance sheets + fetch status (§5). */
+export const listFilings = (companyId: string): Promise<FilingsViewData> =>
+  api<FilingsViewData>(`/companies/${companyId}/filings`)
+
+/**
+ * Re-enqueue the filing-history backfill. Resolves with `{ job_id }` on
+ * both 202 (new job) and 200 (a job is already pending/running).
+ */
+export const refreshFilings = (companyId: string): Promise<{ job_id: string | null }> =>
+  api<{ job_id: string | null }>(`/companies/${companyId}/filings/refresh`, { method: 'POST' })
 
 // ---- ledgers ----
 export const listLedgers = (companyId: string): Promise<Ledger[]> =>

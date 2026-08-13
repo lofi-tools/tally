@@ -15,7 +15,7 @@ use axum::response::Response;
 use axum::Router;
 use serde_json::Value;
 use tally_api::{router, AppState};
-use tally_api::models::{Account, Company, Ledger, Session, Split, Transaction, User};
+use tally_api::models::{Account, BalanceSheet, Company, Filing, Job, Ledger, Session, Split, Transaction, User};
 use tempfile::TempDir;
 use tokio_postgres::NoTls;
 use tower::ServiceExt;
@@ -72,7 +72,9 @@ impl TestApp {
         let test_url = swap_dbname(&db_url, &db_name);
         let connect = toasty::db::Connect::new(&test_url).await.ok()?;
         let mut builder = toasty::Db::builder();
-        builder.models(toasty::models!(User, Session, Company, Ledger, Account, Transaction, Split));
+        builder.models(toasty::models!(
+            User, Session, Company, Ledger, Account, Transaction, Split, Job, Filing, BalanceSheet
+        ));
         let mut db = builder.build(connect).await.ok()?;
         // Same path as production startup: play the committed SQL migrations
         // (the initial one creates the schema that `push_schema` used to).

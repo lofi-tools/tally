@@ -88,7 +88,7 @@ pub enum AppError {
     Storage { source: std::io::Error },
 
     // -- internal ------------------------------------------------------------
-    #[snafu(display("database error"))]
+    #[snafu(display("database error: {source}"))]
     Db { source: toasty::Error },
     #[snafu(display("{message}"))]
     Internal { message: String },

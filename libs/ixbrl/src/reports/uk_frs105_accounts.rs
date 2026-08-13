@@ -24,6 +24,7 @@
 use std::collections::HashMap;
 
 use chrono::Datelike;
+use serde::{Deserialize, Serialize};
 
 use crate::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use crate::ixbrl_fmt::*;
@@ -33,6 +34,38 @@ use crate::GnucashBook;
 /// the hidden `uk-bus:ReportTitle` fact).  Auto-generated here — the config
 /// file no longer carries a `report_title`.
 const REPORT_TITLE: &str = "Unaudited Micro-Entity Accounts";
+
+/// Previous-period balance-sheet figures — the comparative column of the
+/// statement of financial position when the ledger doesn't cover the
+/// previous period (e.g. sourced from the company's last filed accounts at
+/// Companies House). Mirrors the `Frs105Accounts` balance-sheet fields;
+/// values in whole pounds with the iXBRL sign convention (creditor lines
+/// negative).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PreviousYearFigures {
+    /// Tangible / fixed assets.
+    pub fixed_assets: f64,
+    /// Current assets (debtors + VAT refund due + bank).
+    pub current_assets: f64,
+    /// Prepayments and accrued income.
+    pub prepayments_and_accrued_income: f64,
+    /// Creditors: amounts falling due within one year.
+    pub creditors_within_1_year: f64,
+    /// Net current assets / (liabilities).
+    pub net_current_assets: f64,
+    /// Total assets less current liabilities.
+    pub total_assets_less_liabilities: f64,
+    /// Creditors: amounts falling due after one year.
+    pub creditors_after_1_year: f64,
+    /// Provisions for liabilities.
+    pub provisions_for_liabilities: f64,
+    /// Accrued liabilities and deferred income.
+    pub accruals_and_deferred_income: f64,
+    /// Net assets.
+    pub net_assets: f64,
+    /// Capital and reserves.
+    pub capital_and_reserves: f64,
+}
 
 /// The unaudited micro-entity accounts (FRS 105) statement of financial
 /// position.
@@ -934,6 +967,24 @@ impl Frs105Accounts {
                 fact("uk-core:Equity", "ctxt-16"),
             ],
         }
+    }
+
+    /// Replace the previous-period (comparative) column with externally
+    /// sourced figures (e.g. the last filed accounts at Companies House).
+    /// The current-period column is left as computed from the ledger.
+    pub fn with_previous_year(mut self, prev: PreviousYearFigures) -> Self {
+        self.fixed_assets[1] = prev.fixed_assets;
+        self.current_assets[1] = prev.current_assets;
+        self.prepayments_and_accrued_income[1] = prev.prepayments_and_accrued_income;
+        self.creditors_within_1_year[1] = prev.creditors_within_1_year;
+        self.net_current_assets[1] = prev.net_current_assets;
+        self.total_assets_less_liabilities[1] = prev.total_assets_less_liabilities;
+        self.creditors_after_1_year[1] = prev.creditors_after_1_year;
+        self.provisions_for_liabilities[1] = prev.provisions_for_liabilities;
+        self.accruals_and_deferred_income[1] = prev.accruals_and_deferred_income;
+        self.net_assets[1] = prev.net_assets;
+        self.capital_and_reserves[1] = prev.capital_and_reserves;
+        self
     }
 
     /// Deserialise a [`Frs105Accounts`] from its serialised iXBRL HTML, in
@@ -2173,6 +2224,62 @@ mod tests {
         assert_eq!(format_f64_0(933.0), "933");
         assert_eq!(format_f64_0(0.0), "0");
         assert_eq!(format_f64_0(12144.08), "12,144");
+    }
+
+    #[test]
+    fn test_with_previous_year_replaces_only_the_comparative_column() {
+        // Build a report with known figures (both columns from the ledger).
+        let company = example_company();
+        let profile = example_profile();
+        let accounts = example_accounts_meta();
+        let base = Frs105Accounts {
+            company,
+            profile,
+            accounts,
+            fixed_assets: [100.0, 200.0],
+            current_assets: [300.0, 400.0],
+            prepayments_and_accrued_income: [0.0, 1.0],
+            creditors_within_1_year: [-50.0, -60.0],
+            net_current_assets: [250.0, 340.0],
+            total_assets_less_liabilities: [350.0, 540.0],
+            creditors_after_1_year: [0.0, 2.0],
+            provisions_for_liabilities: [0.0, 3.0],
+            accruals_and_deferred_income: [0.0, 4.0],
+            net_assets: [350.0, 549.0],
+            capital_and_reserves: [350.0, 549.0],
+        };
+
+        // Externally sourced comparative figures (e.g. from CH).
+        let prev = PreviousYearFigures {
+            fixed_assets: 1111.0,
+            current_assets: 2222.0,
+            prepayments_and_accrued_income: 0.0,
+            creditors_within_1_year: -333.0,
+            net_current_assets: 1889.0,
+            total_assets_less_liabilities: 3000.0,
+            creditors_after_1_year: 0.0,
+            provisions_for_liabilities: 0.0,
+            accruals_and_deferred_income: 0.0,
+            net_assets: 3000.0,
+            capital_and_reserves: 3000.0,
+        };
+        let out = base.clone().with_previous_year(prev);
+
+        // Previous column replaced, current column untouched.
+        assert_eq!(out.fixed_assets, [100.0, 1111.0]);
+        assert_eq!(out.current_assets, [300.0, 2222.0]);
+        assert_eq!(out.creditors_within_1_year, [-50.0, -333.0]);
+        assert_eq!(out.net_current_assets, [250.0, 1889.0]);
+        assert_eq!(out.total_assets_less_liabilities, [350.0, 3000.0]);
+        assert_eq!(out.net_assets, [350.0, 3000.0]);
+        assert_eq!(out.capital_and_reserves, [350.0, 3000.0]);
+        assert_eq!(out.prepayments_and_accrued_income, [0.0, 0.0]);
+        assert_eq!(out.creditors_after_1_year, [0.0, 0.0]);
+        assert_eq!(out.provisions_for_liabilities, [0.0, 0.0]);
+        assert_eq!(out.accruals_and_deferred_income, [0.0, 0.0]);
+        // Identity fields survive.
+        assert_eq!(out.company.name, base.company.name);
+        assert_eq!(out.company.company_number, base.company.company_number);
     }
 
     #[test]

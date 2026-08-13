@@ -47,6 +47,10 @@ pub enum CompaniesHouseError {
     /// supplied, so the company cannot be resolved.
     #[snafu(display("no company number configured and no full company override provided"))]
     MissingCompanyNumber,
+
+    /// A filing-history item carries no downloadable document.
+    #[snafu(display("filing has no downloadable document"))]
+    NoDocument,
 }
 
 pub type ApiResult<T> = Result<T, CompaniesHouseError>;
@@ -322,6 +326,59 @@ impl CompaniesHouseClient {
         Ok(history)
     }
 
+    /// Fetch a company's **complete** filing history, following the
+    /// pagination until every filing is collected.
+    ///
+    /// `GET /company/{companyNumber}/filing-history?items_per_page=100&page=N`
+    ///
+    /// Unlike [`Self::get_filing_history`], this merges every page into one
+    /// [`FilingHistory`] (newest first) and skips the disk cache — callers
+    /// that persist the result (e.g. the tally-api filings sync) own their
+    /// own storage. Stops early at an empty page, and caps at a sane number
+    /// of pages so a malformed response can't spin forever.
+    pub async fn get_filing_history_all(&self, company_number: &str) -> ApiResult<FilingHistory> {
+        const ITEMS_PER_PAGE: usize = 100;
+        const MAX_PAGES: usize = 20; // 2,000 filings is well beyond any real company
+
+        let mut items = Vec::new();
+        let mut total_count: Option<usize> = None;
+        for page in 1..=MAX_PAGES {
+            let history: FilingHistory = self
+                .get_json(&format!(
+                    "/company/{company_number}/filing-history?items_per_page={ITEMS_PER_PAGE}&page={page}"
+                ))
+                .await?;
+            total_count = history.total_count.or(total_count);
+            let fetched = history.items.len();
+            items.extend(history.items);
+            if fetched == 0 {
+                break;
+            }
+            if total_count.is_some_and(|total| items.len() >= total) {
+                break;
+            }
+        }
+        Ok(FilingHistory { total_count, items })
+    }
+
+    /// Download a filed document from the document API, resolving the
+    /// metadata link carried by a filing-history item to its content URL.
+    ///
+    /// The document API is a separate host from the main API (live
+    /// `https://document-api.companieshouse.gov.uk`); the same API key is
+    /// used as the basic-auth username. Returns the raw document bytes; the
+    /// caller decides how to interpret them (HTML iXBRL, zipped iXBRL, PDF,
+    /// ...).
+    pub async fn get_filing_document(&self, document_metadata_url: &str) -> ApiResult<Vec<u8>> {
+        let metadata: DocumentMetadata = self.get_url_json(document_metadata_url).await?;
+        let content_path = metadata
+            .links
+            .document
+            .ok_or(CompaniesHouseError::NoDocument)?;
+        let content_url = resolve_absolute(document_metadata_url, &content_path);
+        self.get_url_bytes(&content_url).await
+    }
+
     /// Fetch a company's officers.
     ///
     /// `GET /company/{companyNumber}/officers`
@@ -385,9 +442,15 @@ impl CompaniesHouseClient {
     /// key as the basic-auth username, decoding the body as JSON.
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
         let url = format!("{}{}", self.config.base_url(), path);
+        self.get_url_json(&url).await
+    }
+
+    /// `GET` an absolute URL (the document API is a separate host from the
+    /// main API), authenticated the same way, decoding the body as JSON.
+    async fn get_url_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> ApiResult<T> {
         let response = self
             .http
-            .get(&url)
+            .get(url)
             .basic_auth(self.config.api_key().unwrap_or_default(), Some("")) //  Companies House API takes the username as the API key
             .send()
             .await
@@ -395,13 +458,42 @@ impl CompaniesHouseClient {
 
         let status = response.status();
         if !status.is_success() {
-            return Err(CompaniesHouseError::HttpStatus { url, status });
+            return Err(CompaniesHouseError::HttpStatus {
+                url: url.to_string(),
+                status,
+            });
         }
 
         response
             .json::<T>()
             .await
             .map_err(|source| CompaniesHouseError::DecodeFailed { source })
+    }
+
+    /// `GET` an absolute URL, returning the raw response bytes (document
+    /// downloads).
+    async fn get_url_bytes(&self, url: &str) -> ApiResult<Vec<u8>> {
+        let response = self
+            .http
+            .get(url)
+            .basic_auth(self.config.api_key().unwrap_or_default(), Some("")) //  Companies House API takes the username as the API key
+            .send()
+            .await
+            .map_err(|source| CompaniesHouseError::RequestFailed { source })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(CompaniesHouseError::HttpStatus {
+                url: url.to_string(),
+                status,
+            });
+        }
+
+        response
+            .bytes()
+            .await
+            .map(|bytes| bytes.to_vec())
+            .map_err(|source| CompaniesHouseError::RequestFailed { source })
     }
 
     /// Point this client's response cache at a specific directory, overriding
@@ -847,6 +939,37 @@ impl FilingHistory {
             .iter()
             .filter(|item| item.category.as_deref() == Some("accounts"))
     }
+}
+
+/// The metadata of a filed document (`GET` on the document API).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentMetadata {
+    #[serde(default)]
+    pub links: DocumentLinks,
+}
+
+/// Resource links carried by a document's metadata.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DocumentLinks {
+    /// Link to the document's content — relative to the document API host
+    /// (e.g. `/document/{id}/content`).
+    #[serde(rename = "document", default)]
+    pub document: Option<String>,
+}
+
+/// Resolve a possibly-relative link against an absolute base URL (the
+/// metadata URL the link came from), so live and sandbox document API hosts
+/// both work. Absolute links pass through unchanged.
+fn resolve_absolute(base: &str, path_or_url: &str) -> String {
+    if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
+        return path_or_url.to_string();
+    }
+    let origin = base
+        .split('/')
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("{origin}{path_or_url}")
 }
 
 /// A single company officer (`GET /company/{number}/officers`).

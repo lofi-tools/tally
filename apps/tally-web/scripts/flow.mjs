@@ -1,6 +1,6 @@
 // End-to-end onboarding test (`pnpm flow`) — mounts the built bundle in jsdom
-// and drives the flows: add company via search -> banner hides -> connect bank
-// -> demo retires -> save account.
+// and drives the flows: add company via search -> demo banner resolves ->
+// connect bank -> sign-in dialog opens.
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,6 +26,48 @@ for (const Ctor of ['ResizeObserver', 'IntersectionObserver']) {
   const stub = class { observe() {} unobserve() {} disconnect() {} }
   window[Ctor] = stub
   globalThis[Ctor] = stub
+}
+
+// jsdom lacks localStorage; the app (api.ts token, db.ts) reads it on boot.
+// Fresh per run, so scripts start from the first-run onboarding state.
+const lsStore = new Map()
+const localStorageStub = {
+  getItem: (k) => (lsStore.has(k) ? lsStore.get(k) : null),
+  setItem: (k, v) => { lsStore.set(k, String(v)) },
+  removeItem: (k) => { lsStore.delete(k) },
+  clear: () => lsStore.clear(),
+  key: (i) => [...lsStore.keys()][i] ?? null,
+  get length() { return lsStore.size },
+}
+globalThis.localStorage = localStorageStub
+try {
+  window.localStorage = localStorageStub
+} catch {
+  // jsdom's window.localStorage is getter-only; replace it via defineProperty.
+  Object.defineProperty(window, 'localStorage', { value: localStorageStub, writable: true, configurable: true })
+}
+
+// The add-company dialog searches real Companies House through the backend
+// (GET /api/v1/companies/search). There's no server in jsdom, so serve a
+// canned result deterministically; any other request behaves offline.
+const northwindSearch = [{
+  company_number: '01234567',
+  company_name: 'Northwind Trading Ltd',
+  company_status: 'active',
+  date_of_creation: '2020-04-01',
+  address_snippet: '1 Northwind Way, London',
+  company_type: 'ltd',
+  description: 'Trading company',
+}]
+globalThis.fetch = async (input) => {
+  const url = String(input)
+  if (url.startsWith('/api/v1/companies/search?')) {
+    return new Response(JSON.stringify(northwindSearch), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  throw new TypeError('offline in jsdom: ' + url)
 }
 const errors = []
 window.addEventListener('error', (e) => errors.push(e.error ?? e))
@@ -55,15 +97,11 @@ const type = (el, value) => {
 if (errors.length) fail('render threw: ' + errors[0])
 if (!text().includes('Demo data')) fail('banner missing at start')
 
-// 0. Dismissing hides it; switching screens brings it back
-const dismissBtn = document.querySelector('button[aria-label="Dismiss"]')
-if (!dismissBtn) fail('banner dismiss button missing')
-click(dismissBtn)
-await sleep(50)
-if (text().includes('Demo data')) fail('banner still visible after dismiss')
+// 0. The demo banner is persistent (not dismissible): it shows on every
+// screen while the onboarding/demo state holds (DemoBanner, spec §5.2).
 click(findByText('button', 'Filings'))
 await sleep(50)
-if (!text().includes('Demo data')) fail('banner did not re-appear after switching screens')
+if (!text().includes('Demo data')) fail('banner missing on the Filings screen')
 click(findByText('button', 'Accounts'))
 await sleep(50)
 if (!text().includes('Demo data')) fail('banner missing after switching back')
@@ -85,10 +123,8 @@ click(result)
 await sleep(50)
 if (!text().includes('Confirm company details')) fail('review step did not open')
 
-// 3. Fill UTR and submit (the dialog footer button is the LAST 'Add company')
-const utrInput = document.querySelector('input[placeholder="10-digit tax reference"]')
-if (!utrInput) fail('UTR input missing')
-type(utrInput, '1234567890')
+// 3. Submit (the dialog footer button is the LAST 'Add company'). UTR is no
+// longer collected at add time — it's entered in Settings when filing.
 const submitBtn = [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Add company').at(-1)
 if (!submitBtn) fail('dialog submit button missing')
 click(submitBtn)
@@ -103,33 +139,32 @@ if (!text().includes('No transactions yet')) {
   console.error(text().slice(0, 700))
   fail('empty accounts state missing for user company')
 }
-// 5. Connect a bank -> demo retires from picker
-// (Accounts empty-state 'Connect a bank' navigates to Integrations)
-click(findByText('button', 'Connect a bank'))
+// 5. Connect a bank -> the demo banner resolves. Both the accounts
+// empty-state and the banner carry a 'Connect a bank' CTA, so scope to
+// <main> to click the view's own button (banner CTA only navigates).
+click(findByText('main button', 'Connect a bank'))
 await sleep(80)
 // Integrations empty-state 'Connect a bank' opens the add-bank dialog
-click(findByText('button', 'Connect a bank'))
+click(findByText('main button', 'Connect a bank'))
 await sleep(80)
 const starlingConnect = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Connect' && b.parentElement.textContent.includes('Starling'))
 if (!starlingConnect) fail('Starling row Connect button missing')
 click(starlingConnect)
 await sleep(150)
+// Once any company has a data source the demo banner resolves entirely
+// (spec §4). The demo company itself stays in the picker, badged (§6.2).
+if (text().includes('Demo data')) fail('demo banner still visible after connecting a source')
 const pickerText = document.querySelector('aside').textContent
-if (pickerText.includes('Demo Co Ltd')) fail('demo still in picker after connecting a source')
+if (!pickerText.includes('Demo Co Ltd')) fail('demo should stay in the picker (badged) per spec §6.2')
 
-// 6. Save progress (simulated account)
-const saveBtn = findByText('button', 'Save your progress')
-if (!saveBtn) fail('save-progress affordance missing')
-click(saveBtn)
-await sleep(50)
-const nameInput = [...document.querySelectorAll('input')].find((i) => i.placeholder === 'Sam Rivera')
-if (!nameInput) fail('account dialog did not open')
-type(nameInput, 'Sam')
-const emailInput = [...document.querySelectorAll('input')].find((i) => i.placeholder === 'you@company.co.uk')
-type(emailInput, 'sam@northwind.co.uk')
-click(findByText('button', 'Create account'))
-await sleep(100)
-if (!text().includes('Saved · Sam')) fail('account-saved state missing')
+// 6. The signed-in surface is now the real auth dialog (the old simulated
+// "Save your progress" account was replaced by SignInDialog): verify the
+// sidebar affordance opens it.
+const signInBtn = findByText('button', 'Sign in')
+if (!signInBtn) fail('sign-in affordance missing')
+click(signInBtn)
+await sleep(80)
+if (!text().includes('Sign in to Tally')) fail('sign-in dialog did not open')
 
-console.log('INTERACT OK: search→add→connect→retire→account flow verified')
+console.log('INTERACT OK: search→add→connect→banner-resolve→sign-in flow verified')
 process.exit(0)

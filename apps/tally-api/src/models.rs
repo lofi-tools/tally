@@ -142,6 +142,97 @@ pub struct Company {
     pub ledgers: toasty::Deferred<Vec<Ledger>>,
 }
 
+/// A durable background job (spec: ch-filings-sync-spec.md §3). The worker
+/// claims `pending` rows (`SELECT … FOR UPDATE SKIP LOCKED`), flips them to
+/// `running` for their execution, and records `done`/`failed` + `last_error`.
+/// `attempts` / `next_retry_at` are written but unused today (fail-fast
+/// policy; reserved for a future backoff).
+#[derive(Debug, Serialize, Model)]
+pub struct Job {
+    #[key]
+    #[auto]
+    pub id: uuid::Uuid,
+    /// Job kind, e.g. `fetch_filings`.
+    pub kind: String,
+    #[index]
+    pub company_id: uuid::Uuid,
+    #[serde(skip)]
+    #[belongs_to(key = company_id, references = id)]
+    pub company: toasty::Deferred<Company>,
+    /// `pending` | `running` | `done` | `failed`.
+    pub status: String,
+    pub attempts: i32,
+    pub last_error: Option<String>,
+    /// RFC 3339 UTC (reserved for the future retry policy).
+    pub next_retry_at: Option<String>,
+    /// RFC 3339 UTC.
+    pub created_at: String,
+    /// RFC 3339 UTC.
+    pub updated_at: String,
+}
+
+/// A single Companies House filing-history item, persisted for the company
+/// (spec: ch-filings-sync-spec.md §1). Idempotent re-fetch upserts on
+/// `(company_id, ch_transaction_id)`.
+#[derive(Debug, Serialize, Model)]
+pub struct Filing {
+    #[key]
+    #[auto]
+    pub id: uuid::Uuid,
+    #[index]
+    pub company_id: uuid::Uuid,
+    #[serde(skip)]
+    #[belongs_to(key = company_id, references = id)]
+    pub company: toasty::Deferred<Company>,
+    /// The CH transaction id (parsed from the item's `links.self`).
+    pub ch_transaction_id: String,
+    /// Filing category, e.g. `accounts`, `confirmation-statement`.
+    pub category: String,
+    /// Form type code, e.g. `AA`, `CS01`.
+    pub form_type: String,
+    /// CH's human-readable description.
+    pub description: String,
+    /// ISO-8601 date (`YYYY-MM-DD`); optional.
+    pub filed_on: Option<String>,
+    /// Link to the filed document's metadata (when a document exists).
+    pub document_metadata_url: String,
+    /// The full original CH item.
+    #[column(type = json)]
+    pub raw: toasty::Json<serde_json::Value>,
+    /// RFC 3339 UTC — when this row was last written by a fetch.
+    pub fetched_at: String,
+}
+
+/// A filed accounts balance sheet parsed from Companies House (spec:
+/// ch-filings-sync-spec.md §1, §6a). One row per `(company_id, period_end)`;
+/// the `figures` column is the single filed period's line items in the
+/// `PreviousYearFigures` shape.
+#[derive(Debug, Serialize, Model)]
+pub struct BalanceSheet {
+    #[key]
+    #[auto]
+    pub id: uuid::Uuid,
+    #[index]
+    pub company_id: uuid::Uuid,
+    #[serde(skip)]
+    #[belongs_to(key = company_id, references = id)]
+    pub company: toasty::Deferred<Company>,
+    /// ISO-8601 date (`YYYY-MM-DD`) — the period end of the filed accounts.
+    pub period_end: String,
+    /// ISO-8601 date (`YYYY-MM-DD`); optional.
+    pub filed_on: Option<String>,
+    /// The `filings` row this balance sheet was parsed from.
+    pub source_filing_id: Option<uuid::Uuid>,
+    #[column(type = json)]
+    pub figures: toasty::Json<ixbrl::reports::uk_frs105_accounts::PreviousYearFigures>,
+    /// The downloaded document, as received (zipped iXBRL, HTML, or PDF).
+    pub raw_document: Option<Vec<u8>>,
+    /// The parsed iXBRL document (the `.html` extracted from the download).
+    pub parsed_document: Option<String>,
+    /// RFC 3339 UTC.
+    pub created_at: String,
+}
+
 #[derive(Debug, Serialize, Model)]
 pub struct Ledger {
     #[key]

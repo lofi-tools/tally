@@ -9,6 +9,8 @@ pub mod companies;
 pub mod companies_house;
 pub mod error;
 pub mod extract;
+pub mod filings;
+pub mod jobs;
 pub mod ledgers;
 pub mod migrations;
 pub mod models;
@@ -115,6 +117,9 @@ fn api_v1() -> Router<Arc<AppState>> {
             get(companies::get).patch(companies::patch).delete(companies::delete),
         )
         .route("/companies/{id}/enrich", post(companies::enrich))
+        // filings
+        .route("/companies/{id}/filings", get(filings::list))
+        .route("/companies/{id}/filings/refresh", post(filings::refresh))
         // ledgers
         .route(
             "/companies/{id}/ledgers",
