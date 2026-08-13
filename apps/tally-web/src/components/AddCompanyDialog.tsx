@@ -9,12 +9,11 @@ import { ApiError, NetworkError, searchCompanies, type SearchItem } from '../api
 export interface NewCompanyInput {
   name: string
   companyNumber: string
-  utr: string
   sic: string
   address: string
   standard: 'FRS 105' | 'FRS 102'
-  periodStart: string
-  periodEnd: string
+  /** The CH search result's incorporation date — anchors the report-period guess. */
+  registrationDate?: string
 }
 
 const standardOptions = createListCollection({
@@ -25,10 +24,7 @@ const standardOptions = createListCollection({
 })
 
 const initialForm = () => ({
-  utr: '',
   standard: 'FRS 105' as 'FRS 105' | 'FRS 102',
-  periodStart: '',
-  periodEnd: '',
 })
 
 /** Debounce so typing doesn't fire a Companies House request per keystroke. */
@@ -73,10 +69,6 @@ export function AddCompanyDialog(props: {
   // (slow earlier query beating a fast later one) is discarded.
   let debounceTimer: number | undefined
   let searchSeq = 0
-
-  const setField =
-    (key: keyof ReturnType<typeof form>) => (e: { currentTarget: { value: string } }) =>
-      setForm((f) => ({ ...f, [key]: e.currentTarget.value }))
 
   const reset = () => {
     window.clearTimeout(debounceTimer)
@@ -136,10 +128,6 @@ export function AddCompanyDialog(props: {
   const submit = async () => {
     const s = sel()
     if (!s) return
-    if (!form().utr.trim()) {
-      toaster.create({ title: 'UTR required', description: 'The CT600 needs a 10-digit tax reference.', type: 'error' })
-      return
-    }
     if (props.existingNumbers.includes(s.company_number)) {
       toaster.create({ title: 'Company already added', description: `${s.company_name} is already in your workspace.`, type: 'error' })
       return
@@ -149,12 +137,10 @@ export function AddCompanyDialog(props: {
       await props.onAdd({
         name: s.company_name,
         companyNumber: s.company_number,
-        utr: form().utr.trim(),
         sic: '',
         address: s.address_snippet ?? '',
         standard: form().standard,
-        periodStart: form().periodStart,
-        periodEnd: form().periodEnd,
+        registrationDate: s.date_of_creation ?? undefined,
       })
       props.onOpenChange(false)
     } catch (e) {
@@ -224,19 +210,6 @@ export function AddCompanyDialog(props: {
                         </Show>
                       </div>
 
-                      <Field.Root required>
-                        <Field.Label>
-                          Unique Taxpayer Reference <Field.RequiredIndicator />
-                        </Field.Label>
-                        <Input
-                          placeholder="10-digit tax reference"
-                          class={css({ fontFamily: 'mono' })}
-                          value={form().utr}
-                          onInput={setField('utr')}
-                        />
-                        <Field.HelperText>Not held by Companies House — used for the CT600.</Field.HelperText>
-                      </Field.Root>
-
                       <Field.Root>
                         <Field.Label>Accounting standard</Field.Label>
                         <Select.Root
@@ -266,16 +239,6 @@ export function AddCompanyDialog(props: {
                         </Select.Root>
                       </Field.Root>
 
-                      <div class={css({ display: 'grid', gap: '4', sm: { gridTemplateColumns: 'repeat(2, 1fr)' } })}>
-                        <Field.Root>
-                          <Field.Label>Period start</Field.Label>
-                          <Input type="date" value={form().periodStart} onInput={setField('periodStart')} class={css({ fontFamily: 'mono' })} />
-                        </Field.Root>
-                        <Field.Root>
-                          <Field.Label>Period end</Field.Label>
-                          <Input type="date" value={form().periodEnd} onInput={setField('periodEnd')} class={css({ fontFamily: 'mono' })} />
-                        </Field.Root>
-                      </div>
                     </div>
                   )}
                 </Show>

@@ -70,6 +70,30 @@ impl PeriodRequest for ReportRequest {
     }
 }
 
+/// The UTR (tax reference) is the company's HMRC identity: it must be set —
+/// and be exactly 10 digits — to generate the corp-tax and CT600 returns.
+/// The accounts report carries no UTR and is not gated.
+fn require_utr(company: &LibCompany) -> Result<(), AppError> {
+    let utr = company.tax_reference.trim();
+    if utr.is_empty() {
+        return Err(AppError::Validation {
+            fields: vec![FieldIssue {
+                field: "tax_reference".into(),
+                reason: "required to generate this report".into(),
+            }],
+        });
+    }
+    if utr.len() != 10 || !utr.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(AppError::Validation {
+            fields: vec![FieldIssue {
+                field: "tax_reference".into(),
+                reason: "must be a 10-digit number".into(),
+            }],
+        });
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -94,6 +118,7 @@ pub async fn corp_tax(
     AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Html<String>, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
+    require_utr(&inputs.company)?;
     let corp_tax = Frs105CorpTax::builder(&inputs.book, &inputs.company, &inputs.meta).build();
     Ok(Html(corp_tax.to_ixbrl()))
 }
@@ -107,6 +132,7 @@ pub async fn corp_tax_json(
     AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
+    require_utr(&inputs.company)?;
     let tax = Frs105CorpTax::builder(&inputs.book, &inputs.company, &inputs.meta).build();
     Ok(Json(json!({
         "company_name": tax.company_name(),
@@ -152,6 +178,7 @@ pub async fn ct600(
     AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Response, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
+    require_utr(&inputs.company)?;
     let accounts = Frs105Accounts::new(&inputs.book, &inputs.company, &inputs.profile, &inputs.meta);
     let corp_tax = Frs105CorpTax::builder(&inputs.book, &inputs.company, &inputs.meta).build();
 

@@ -2,8 +2,9 @@
 //! (on by default); skipped gracefully when Postgres is unreachable.
 //!
 //! Reports need a company with the required dates (`report_date`,
-//! `authorised_date`) and an explicit `period` (the CH period branch needs a
-//! key, which the tests never configure).
+//! `authorised_date`). The period resolves from the company's registration
+//! date when no explicit `period` is given (the tests never configure a CH
+//! key, so they exercise the registration-date branch).
 #![cfg(feature = "pg-tests")]
 
 mod common;
@@ -15,22 +16,41 @@ use serde_json::json;
 /// Seed a report-ready company (with dates) + an uploaded ledger.
 /// Returns (token, company_id, ledger_id).
 async fn seed(app: &TestApp, email: &str) -> (String, String, String) {
+    seed_with(app, email, &json!({})).await
+}
+
+/// Like [`seed`], with extra fields merged over the defaults (e.g. to blank
+/// out the UTR or registration date for the gate tests).
+async fn seed_with(
+    app: &TestApp,
+    email: &str,
+    extra: &serde_json::Value,
+) -> (String, String, String) {
     let token = app.register(email).await;
+    let mut company = json!({
+        "name": "Report Co Ltd",
+        "company_number": "01234567",
+        "tax_reference": "1234567890",
+        "report_date": "2020-05-30",
+        "authorised_date": "2020-06-01",
+        "incorporation_date": "2015-03-01",
+        "registration_date": "2015-03-01",
+        "signed_by": "Ada Lovelace",
+        "directors": ["Ada Lovelace"],
+    });
+    if let Some(extra_obj) = extra.as_object()
+        && let Some(obj) = company.as_object_mut()
+    {
+        for (k, v) in extra_obj {
+            obj.insert(k.clone(), v.clone());
+        }
+    }
     let resp = app
         .send(request(
             Method::POST,
             "/api/v1/companies",
             Some(&token),
-            Some(&json!({
-                "name": "Report Co Ltd",
-                "company_number": "01234567",
-                "tax_reference": "1234567890",
-                "report_date": "2020-05-30",
-                "authorised_date": "2020-06-01",
-                "incorporation_date": "2015-03-01",
-                "signed_by": "Ada Lovelace",
-                "directors": ["Ada Lovelace"],
-            })),
+            Some(&company),
         ))
         .await;
     assert_eq!(resp.status(), StatusCode::OK, "seed company");
@@ -201,14 +221,15 @@ async fn report_requires_dates_on_the_company() {
 }
 
 #[tokio::test]
-async fn report_without_period_needs_a_ch_key() {
+async fn report_without_period_resolves_from_registration_date() {
     let Some(app) = TestApp::setup().await else {
         eprintln!("skipping: no Postgres at DATABASE_URL");
         return;
     };
     let (token, company_id, ledger_id) = seed(&app, "noperiod@example.com").await;
 
-    // No explicit period and no CH key → companies_house_key_missing.
+    // No explicit period and no CH key → the period is guessed from the
+    // stored registration date (was companies_house_key_missing before).
     let resp = app
         .send(request(
             Method::POST,
@@ -217,7 +238,113 @@ async fn report_without_period_needs_a_ch_key() {
             Some(&json!({ "ledger_id": ledger_id })),
         ))
         .await;
-    assert_error(resp, StatusCode::BAD_REQUEST, "companies_house_key_missing").await;
+    assert_eq!(resp.status(), StatusCode::OK, "period from registration date");
+}
+
+#[tokio::test]
+async fn report_without_registration_date_needs_an_explicit_period() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let (token, company_id, ledger_id) =
+        seed_with(&app, "noregdate@example.com", &json!({ "registration_date": null })).await;
+
+    // No explicit period, no CH key, and no registration date → a
+    // validation error telling the caller to set it (or pass a period).
+    let resp = app
+        .send(request(
+            Method::POST,
+            &format!("/api/v1/companies/{company_id}/reports/accounts"),
+            Some(&token),
+            Some(&json!({ "ledger_id": ledger_id })),
+        ))
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
+}
+
+#[tokio::test]
+async fn corp_tax_and_ct600_require_utr() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let (token, company_id, ledger_id) =
+        seed_with(&app, "noutr@example.com", &json!({ "tax_reference": null })).await;
+
+    // corp-tax.json → 422 validation_failed (UTR missing).
+    let resp = app
+        .send(request(
+            Method::POST,
+            &format!("/api/v1/companies/{company_id}/reports/corp-tax.json"),
+            Some(&token),
+            Some(&report_body(&ledger_id)),
+        ))
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
+
+    // ct600 → 422 too.
+    let resp = app
+        .send(request(
+            Method::POST,
+            &format!("/api/v1/companies/{company_id}/reports/ct600"),
+            Some(&token),
+            Some(&report_body(&ledger_id)),
+        ))
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
+
+    // The accounts report carries no UTR → not gated.
+    let resp = app
+        .send(request(
+            Method::POST,
+            &format!("/api/v1/companies/{company_id}/reports/accounts"),
+            Some(&token),
+            Some(&report_body(&ledger_id)),
+        ))
+        .await;
+    assert_eq!(resp.status(), StatusCode::OK, "accounts not gated on UTR");
+
+    // Setting a valid UTR unblocks corp-tax.
+    let resp = app
+        .send(request(
+            Method::PATCH,
+            &format!("/api/v1/companies/{company_id}"),
+            Some(&token),
+            Some(&json!({ "tax_reference": "0987654321" })),
+        ))
+        .await;
+    assert_eq!(resp.status(), StatusCode::OK, "patch UTR");
+    let resp = app
+        .send(request(
+            Method::POST,
+            &format!("/api/v1/companies/{company_id}/reports/corp-tax.json"),
+            Some(&token),
+            Some(&report_body(&ledger_id)),
+        ))
+        .await;
+    assert_eq!(resp.status(), StatusCode::OK, "corp-tax after UTR set");
+}
+
+#[tokio::test]
+async fn corp_tax_rejects_malformed_utr() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    // A short, non-10-digit reference.
+    let (token, company_id, ledger_id) =
+        seed_with(&app, "badutr@example.com", &json!({ "tax_reference": "12345" })).await;
+
+    let resp = app
+        .send(request(
+            Method::POST,
+            &format!("/api/v1/companies/{company_id}/reports/corp-tax.json"),
+            Some(&token),
+            Some(&report_body(&ledger_id)),
+        ))
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
 }
 
 #[tokio::test]

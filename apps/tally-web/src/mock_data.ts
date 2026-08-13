@@ -34,10 +34,13 @@ export interface Company {
   id: string
   name: string
   companyNumber: string
+  /** HMRC UTR — not collected at add time; entered in Settings when filing. */
   utr: string
   sic: string
   address: string
   standard: 'FRS 105' | 'FRS 102'
+  /** Incorporation date from the CH search result — anchors the period guess. */
+  registrationDate?: string
 }
 
 // The demo entity shown to users before they add their own company. It is

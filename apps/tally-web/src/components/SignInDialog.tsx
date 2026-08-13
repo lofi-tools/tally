@@ -38,6 +38,7 @@ export async function migrateCompanies(companies: Company[]): Promise<MigrationR
         name: c.name,
         company_number: c.companyNumber,
         tax_reference: c.utr,
+        registration_date: c.registrationDate,
         sic_codes: c.sic && c.sic !== '—' ? [c.sic] : undefined,
         address_lines: c.address && c.address !== '—' ? [c.address] : undefined,
       })

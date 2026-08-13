@@ -223,10 +223,13 @@ export function App() {
     // localStorage add; registering later migrates it up (SignInDialog).
     let saved: ApiCompany | null = null
     if (session().status === 'signed-in') {
+      // UTR is no longer collected at add time — it's entered in Settings
+      // when a return is filed. The registration date anchors the period
+      // guess even when the backend has no CH key.
       saved = await createCompany({
         name: input.name,
         company_number: input.companyNumber,
-        tax_reference: input.utr,
+        registration_date: input.registrationDate,
       })
     }
     // The picker/views are still local-driven, so mirror the company (the
@@ -237,10 +240,11 @@ export function App() {
         (input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'company'),
       name: saved?.name ?? input.name,
       companyNumber: saved?.company_number ?? input.companyNumber,
-      utr: input.utr,
+      utr: '', // set later in Settings, only needed to file with HMRC
       sic: saved?.sic_codes?.[0] ?? '',
       address: saved?.address_lines?.[0] ?? input.address,
       standard: input.standard,
+      registrationDate: saved?.registration_date ?? input.registrationDate,
     }
     updateDb((d) => ({ ...d, companies: [...d.companies, company] }))
     setCompanyId(company.id)
