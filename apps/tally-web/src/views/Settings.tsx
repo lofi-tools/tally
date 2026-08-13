@@ -4,8 +4,8 @@ import { createListCollection } from '@tally/design-system'
 import { AlertTriangle, Save, X } from 'lucide-solid'
 import { css } from 'styled-system/css'
 import { button } from 'styled-system/recipes'
-import { preferences, DEMO_COMPANY_ID, type Company } from '../mock_data'
-import { PageHeader, DemoBadge } from '../components/Shared'
+import { preferences, type Company } from '../mock_data'
+import { PageHeader } from '../components/layout'
 
 const standardOptions = createListCollection({
   items: [
@@ -57,7 +57,7 @@ export function SettingsView(props: { company: Company }) {
       <PageHeader
         title="Settings"
         description={`Workspace preferences and ${props.company.name}'s profile.`}
-        badge={props.company.id === DEMO_COMPANY_ID ? <DemoBadge /> : undefined}
+        company={props.company}
       />
 
       <div class={css({ maxW: '42rem' })}>

@@ -4,46 +4,6 @@ import { FileSpreadsheet, Landmark, PenLine, RefreshCw } from 'lucide-solid'
 import { css } from 'styled-system/css'
 import { type DataSource } from '../mock_data'
 
-/**
- * View header: title (+ optional badge) and description on the left, action
- * buttons on the right. `badge` renders inline after the title — views pass
- * a <DemoBadge/> whenever the demo company is on screen.
- */
-export function PageHeader(props: { title: string; description?: string; badge?: JSX.Element; actions?: JSX.Element }) {
-  return (
-    <div
-      class={css({
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: '4',
-        flexWrap: 'wrap',
-        mb: '6',
-      })}
-    >
-      <div class={css({ minW: '0' })}>
-        <div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-          <h1 class={css({ textStyle: '2xl', fontWeight: '800', letterSpacing: '-0.02em' })}>{props.title}</h1>
-          {props.badge}
-        </div>
-        {props.description && (
-          <p class={css({ textStyle: 'sm', color: 'fg.muted', mt: '1', maxW: '40rem' })}>{props.description}</p>
-        )}
-      </div>
-      {props.actions && <div class={css({ display: 'flex', gap: '2', alignItems: 'center', flexWrap: 'wrap' })}>{props.actions}</div>}
-    </div>
-  )
-}
-
-/** "Demo" marker — labels the demo company wherever its data is visible (spec §6.1). */
-export function DemoBadge() {
-  return (
-    <Badge variant="outline" class={css({ fontSize: 'xs', flexShrink: '0' })}>
-      Demo
-    </Badge>
-  )
-}
-
 /** Small stat card for dashboard-style headers. */
 export function StatCard(props: { label: string; value: string; hint?: string; tone?: 'default' | 'good' | 'bad' }) {
   return (
