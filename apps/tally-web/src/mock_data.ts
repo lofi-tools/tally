@@ -18,7 +18,7 @@ export const fmtMonth = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
 
 // ---------- fiscal year ----------
-// The current FY window (FY2025/26 — the sample book's period). The chart of
+// The current FY window (FY2025/26 — the demo book's period). The chart of
 // accounts can show balances for the current FY or all-time.
 export const CURRENT_FY_LABEL = 'FY2025/26'
 export const FY_START = '2025-04-01'
@@ -41,12 +41,12 @@ export interface Company {
 }
 
 // The demo entity shown to users before they add their own company. It is
-// never persisted and carries the full seeded dataset (see sampleCompanyData).
-export const SAMPLE_COMPANY_ID = 'sample'
+// never persisted and carries the full seeded dataset (see demoCompanyData).
+export const DEMO_COMPANY_ID = 'demo'
 
-export const sampleCompany: Company = {
-  id: SAMPLE_COMPANY_ID,
-  name: 'Sample Co Ltd',
+export const demoCompany: Company = {
+  id: DEMO_COMPANY_ID,
+  name: 'Demo Co Ltd',
   companyNumber: '00000000',
   utr: '—',
   sic: '—',
@@ -146,7 +146,7 @@ export function searchCompanies(query: string): CompanySearchResult[] {
 // One row per split of the basic-1 GnuCash book (see the chart of accounts
 // below). Amounts follow the app sign convention (income and expenses
 // positive, liabilities and equity negative); dates are shifted into
-// FY2025/26 so the sample looks current.
+// FY2025/26 so the demo looks current.
 export interface Transaction {
   id: string
   date: string // ISO
@@ -542,7 +542,7 @@ export const payrollHistory: PayrollRun[] = [
 
 // ---------- per-company datasets ----------
 // Static content a company has (transactions, filings, payroll…). Only the
-// sample company is pre-seeded; user companies start empty until a backend
+// demo company is pre-seeded; user companies start empty until a backend
 // exists. Data sources live separately in the DB (see src/db.ts) because they
 // are mutable per company.
 export interface NextFiling {
@@ -573,7 +573,7 @@ export interface CompanyData {
   payrollHistory: PayrollRun[]
 }
 
-export const sampleCompanyData: CompanyData = {
+export const demoCompanyData: CompanyData = {
   transactions,
   summaries,
   nextFiling,
@@ -594,7 +594,7 @@ export const emptyCompanyData: CompanyData = {
 }
 
 export function getCompanyData(companyId: string): CompanyData {
-  return companyId === SAMPLE_COMPANY_ID ? sampleCompanyData : emptyCompanyData
+  return companyId === DEMO_COMPANY_ID ? demoCompanyData : emptyCompanyData
 }
 
 // ---------- preferences ----------

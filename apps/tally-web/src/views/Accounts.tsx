@@ -2,7 +2,7 @@ import { Button, Card, Collapsible, createListCollection, IconButton, Input, Seg
 import { ArrowRight, ChevronDown, Download, Landmark, Plus, Search, X } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { css, cx } from "styled-system/css";
-import { DataSourceRows, EmptyState, numCell, PageHeader, SampleBadge, StatCard, StatusBadge } from "../components/Shared";
+import { DataSourceRows, EmptyState, numCell, PageHeader, DemoBadge, StatCard, StatusBadge } from "../components/Shared";
 import {
   accountBreadcrumb,
   accountLabel,
@@ -14,7 +14,7 @@ import {
   fmtMoney,
   fmtSignedMoney,
   inCurrentFy,
-  SAMPLE_COMPANY_ID,
+  DEMO_COMPANY_ID,
   type AccountNode,
   type Company,
   type CompanyData,
@@ -141,7 +141,7 @@ export function AccountsView(props: { company: Company; data: CompanyData; sourc
       <PageHeader
         title="Accounts"
         description={`Transactions and summaries for ${props.company.name}.`}
-        badge={props.company.id === SAMPLE_COMPANY_ID ? <SampleBadge /> : undefined}
+        badge={props.company.id === DEMO_COMPANY_ID ? <DemoBadge /> : undefined}
         actions={
           <>
             <Button

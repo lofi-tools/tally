@@ -25,7 +25,7 @@ export interface MigrationResult {
 
 /**
  * Migrate real local companies to the API (§7.3). Only user-added companies
- * are passed in — never the sample's demo data. Runs in name order; stops at
+ * are passed in — never the demo company's data. Runs in name order; stops at
  * the first hard failure (network / 5xx / validation), keeping the local
  * copy so nothing is lost.
  */
@@ -89,7 +89,7 @@ interface FieldErrors {
 export function SignInDialog(props: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Real local companies to migrate on register (never the sample). */
+  /** Real local companies to migrate on register (never the demo). */
   localCompanies: () => Company[]
   onMigrationComplete: (migratedIds: string[]) => void
 }) {

@@ -3,8 +3,8 @@ import { Badge, Button, Card, Select, Table, toaster } from '@tally/design-syste
 import { createListCollection } from '@tally/design-system'
 import { ArrowUpRight, CalendarDays, Download, FileCheck2 } from 'lucide-solid'
 import { css } from 'styled-system/css'
-import { financialYears, fmtDate, SAMPLE_COMPANY_ID, type Company, type CompanyData } from '../mock_data'
-import { EmptyState, numCell, PageHeader, SampleBadge, StatusBadge } from '../components/Shared'
+import { financialYears, fmtDate, DEMO_COMPANY_ID, type Company, type CompanyData } from '../mock_data'
+import { EmptyState, numCell, PageHeader, DemoBadge, StatusBadge } from '../components/Shared'
 
 const fyOptions = createListCollection({
   items: financialYears.map((fy) => ({ label: fy, value: fy })),
@@ -27,7 +27,7 @@ export function FilingsView(props: { company: Company; data: CompanyData }) {
       <PageHeader
         title="Filings"
         description={`Companies House and HMRC deadlines for ${props.company.name}.`}
-        badge={props.company.id === SAMPLE_COMPANY_ID ? <SampleBadge /> : undefined}
+        badge={props.company.id === DEMO_COMPANY_ID ? <DemoBadge /> : undefined}
         actions={
           <Select.Root collection={fyOptions} defaultValue={['FY2025/26']} onValueChange={(d) => setFy(d.value[0])}>
             <Select.Control>

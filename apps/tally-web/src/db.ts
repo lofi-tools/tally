@@ -2,13 +2,13 @@
 // yet, so everything the user creates persists here instead. Swap this module
 // for real API calls later — the rest of the app only reads/writes via
 // loadDb/saveDb.
-import { dataSources, SAMPLE_COMPANY_ID, type Company, type DataSource } from './mock_data'
+import { dataSources, DEMO_COMPANY_ID, type Company, type DataSource } from './mock_data'
 
 export interface Db {
   version: 1
-  /** User-added companies (never includes the sample). */
+  /** User-added companies (never includes the demo). */
   companies: Company[]
-  /** Data sources per company id; the sample company is pre-seeded. */
+  /** Data sources per company id; the demo company is pre-seeded. */
   sources: Record<string, DataSource[]>
 }
 
@@ -18,7 +18,7 @@ function defaults(): Db {
   return {
     version: 1,
     companies: [],
-    sources: { [SAMPLE_COMPANY_ID]: [...dataSources] },
+    sources: { [DEMO_COMPANY_ID]: [...dataSources] },
   }
 }
 

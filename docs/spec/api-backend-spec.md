@@ -29,7 +29,7 @@ contract for implementation.
   `HmrcCorpTaxClient`'s submit/poll/delete lifecycle (matches the CLI today).
   The lib's client remains available for a later task.
 - **Wiring tally-web to the API** — separate follow-up. The web keeps its
-  localStorage sample-company model until then.
+  localStorage demo-company model until then.
 - **Standalone P&L report** — the libs produce the FRS 105 statement of
   financial position (balance sheet) and corp-tax profit figures, but no
   standalone P&L document. The API exposes exactly what the libs produce; a
@@ -392,9 +392,9 @@ catch-panic middleware and become `500 internal` with a `request_id`.
 ## 14. Follow-up (explicitly deferred)
 
 - **tally-web integration**: rewire real-data paths (company CRUD via CH
-  search, ledger upload as a data source, accounts/filings views from ledger
+  search,  ledger upload as a data source, accounts/filings views from ledger
   JSON + report endpoints) to this API; the web's localStorage stays for the
-  sample company. The API's resource design above anticipates exactly that.
+  demo company. The API's resource design above anticipates exactly that.
 - **HMRC submission** endpoints (`HmrcCorpTaxClient` lifecycle).
 - **Standalone P&L** (lib-side work, then an API endpoint).
 

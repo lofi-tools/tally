@@ -93,13 +93,13 @@ if (!root || children === 0) {
   process.exit(1)
 }
 
-// First-run onboarding state: fresh localStorage -> sample company selected,
-// sample banner visible, sample dataset rendered.
+// First-run onboarding state: fresh localStorage -> demo company selected,
+// demo banner visible, demo dataset rendered.
 const text = root.textContent
 const checks = [
-  ['sample company selected', text.includes('Sample Co Ltd')],
-  ['sample banner', text.includes('Sample data') && text.includes('add your company')],
-  ['sample dataset (transactions)', text.includes('Stripe payout') || text.includes('Northwind Trading')],
+  ['demo company selected', text.includes('Demo Co Ltd')],
+  ['demo banner', text.includes('Demo data') && text.includes('Add your company')],
+  ['demo dataset (transactions)', text.includes('Stripe payout') || text.includes('Northwind Trading')],
   ['workspace nav', text.includes('Accounts') && text.includes('Filings') && text.includes('Payroll')],
 ]
 const failed = checks.filter(([, ok]) => !ok)

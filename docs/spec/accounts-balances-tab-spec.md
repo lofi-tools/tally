@@ -46,7 +46,7 @@ Final sub-tab order: **Balances** (default) → **Transactions** → **Data sour
 
 Shared pieces: `PageHeader`, `StatCard`, `EmptyState`, `StatusBadge`,
 `DataSourceRows`, `numCell` in `components/Shared.tsx`. Data comes from
-`getCompanyData(companyId)` in `mock_data.ts` (sample company seeded,
+`getCompanyData(companyId)` in `mock_data.ts` (demo company seeded,
 user companies return `emptyCompanyData`).
 
 ## 4. New sub-tab structure
@@ -70,7 +70,7 @@ tax").
 
 ### 5.2 Chart of accounts tree
 
-The sample data is now the **real GnuCash book** from
+The demo data is now the **real GnuCash book** from
 `libs/ixbrl/example_data/basic-1/input.gnucash` (a SQLite GnuCash file), ported
 by a one-off generator script into `mock_data.ts`:
 
@@ -83,7 +83,7 @@ by a one-off generator script into `mock_data.ts`:
 - **One row per split** of the book (95 splits, 27 accounts with activity),
   signed per the app convention (income and expenses positive — GnuCash's
   debit-normal direction — liabilities and equity negative) and with **dates
-  shifted into FY2025/26** (Apr 2025 → Mar 2026) so the sample looks current.
+  shifted into FY2025/26** (Apr 2025 → Mar 2026) so the demo looks current.
 - **Balances derive from the transactions list** (summed per full account
   path), so the tree, every account register and the YTD cards always agree.
   The Income card (£18,184.12) equals the `Income` group total and the
@@ -182,11 +182,11 @@ Plain inline content — no overlay to trap or dismiss:
 
 ### 6.4 Reachability
 
-- Only reachable from the Balances tree's leaf rows. Works for the sample
+- Only reachable from the Balances tree's leaf rows. Works for the demo
   company; for no-data companies the tree isn't rendered (§8), so the panel
   cannot be opened there.
 
-## 6.5 Plausibility of the sample data
+## 6.5 Plausibility of the demo data
 
 - The balances in the chart are the sums of the transactions **by
   construction** (both derive from the same `transactions` list), so the tree

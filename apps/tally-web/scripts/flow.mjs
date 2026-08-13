@@ -1,6 +1,6 @@
 // End-to-end onboarding test (`pnpm flow`) — mounts the built bundle in jsdom
 // and drives the flows: add company via search -> banner hides -> connect bank
-// -> sample retires -> save account.
+// -> demo retires -> save account.
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -53,20 +53,20 @@ const type = (el, value) => {
 }
 
 if (errors.length) fail('render threw: ' + errors[0])
-if (!text().includes('Sample data')) fail('banner missing at start')
+if (!text().includes('Demo data')) fail('banner missing at start')
 
 // 0. Dismissing hides it; switching screens brings it back
 const dismissBtn = document.querySelector('button[aria-label="Dismiss"]')
 if (!dismissBtn) fail('banner dismiss button missing')
 click(dismissBtn)
 await sleep(50)
-if (text().includes('Sample data')) fail('banner still visible after dismiss')
+if (text().includes('Demo data')) fail('banner still visible after dismiss')
 click(findByText('button', 'Filings'))
 await sleep(50)
-if (!text().includes('Sample data')) fail('banner did not re-appear after switching screens')
+if (!text().includes('Demo data')) fail('banner did not re-appear after switching screens')
 click(findByText('button', 'Accounts'))
 await sleep(50)
-if (!text().includes('Sample data')) fail('banner missing after switching back')
+if (!text().includes('Demo data')) fail('banner missing after switching back')
 
 // 1. Open the add-company dialog from the banner
 const addBtn = findByText('button', 'Add company')
@@ -96,14 +96,14 @@ await sleep(100)
 if (errors.length) console.error('RUNTIME ERRORS after submit:', errors.map((e) => String(e && e.message ? e.message : e).slice(0, 200)).join(' | '))
 
 // 4. Assertions after add
-if (text().includes('Sample data')) fail('banner still visible after adding a company')
+if (text().includes('Demo data')) fail('banner still visible after adding a company')
 if (!text().includes('Northwind Trading Ltd')) fail('new company not in UI')
 if (!text().includes('No transactions yet')) {
   console.error('--- root text after add (first 700 chars) ---')
   console.error(text().slice(0, 700))
   fail('empty accounts state missing for user company')
 }
-// 5. Connect a bank -> sample retires from picker
+// 5. Connect a bank -> demo retires from picker
 // (Accounts empty-state 'Connect a bank' navigates to Integrations)
 click(findByText('button', 'Connect a bank'))
 await sleep(80)
@@ -115,7 +115,7 @@ if (!starlingConnect) fail('Starling row Connect button missing')
 click(starlingConnect)
 await sleep(150)
 const pickerText = document.querySelector('aside').textContent
-if (pickerText.includes('Sample Co Ltd')) fail('sample still in picker after connecting a source')
+if (pickerText.includes('Demo Co Ltd')) fail('demo still in picker after connecting a source')
 
 // 6. Save progress (simulated account)
 const saveBtn = findByText('button', 'Save your progress')

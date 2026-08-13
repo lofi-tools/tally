@@ -4,7 +4,7 @@ Status: **Draft for review** · App: `apps/tally-web` (SolidJS + Panda + `@tally
 
 > Scope note: this spec is the result of an interview with the product owner.
 > It replaces the naive "blocked full-screen 'add your company'" reading of the
-> original request with a **sample-first, no-login** model (see §3 and §4).
+> original request with a **demo-first, no-login** model (see §3 and §4).
 
 ---
 
@@ -20,14 +20,14 @@ Two concrete problems to solve:
 
 1. **Cold start** — zero user companies and no onboarding guidance is a dead screen
    that teaches nothing.
-2. **Sample/real confusion** — if demo data ships, users must never mistake it for
+2. **Demo/real confusion** — if demo data ships, users must never mistake it for
    their own, and it must retire once real data exists.
 
 ## 2. Goals & non-goals
 
 ### Goals
 - The app is fully usable **without login** (no auth gate).
-- A **sample company with pre-seeded data** is present from the first visit so
+- A **demo company with pre-seeded data** is present from the first visit so
   every feature is explorable.
 - A **strong, persistent hint** drives the user to: add their own company → save
   progress (create account, any time) → add data sources.
@@ -44,7 +44,7 @@ Two concrete problems to solve:
 - GnuCash **file upload** UI (see §7.3 — guidance copy only for now, unless
   explicitly scoped in).
 - The blocked full-screen onboarding screen: it is reduced to a **safety net**
-  (§4.4) because the sample company is always present.
+  (§4.4) because the demo company is always present.
 - Multi-step "guided setup wizard" for banks/team — the funnel stops at "company
   added", then uses in-app nudges (§6).
 
@@ -77,20 +77,20 @@ patterns to validate, not fresh citations.
   *first action* to take, keep it to **one primary CTA**, and use progressive
   disclosure instead of dumping every setup step at once.
 
-**Conclusion for Tally:** the owner's model (sample-first, no gate) is closest to
+**Conclusion for Tally:** the owner's model (demo-first, no gate) is closest to
 **QuickBooks' sample company + Stripe's guided empty states + the Figma/Slack
 sample-workspace pattern** — with one hard rule borrowed from all demo-data
-products: *sample data must be unmistakably labeled and must retire as soon as
+products: *demo data must be unmistakably labeled and must retire as soon as
 real data arrives*.
 
 ## 4. Product model & user states
 
-### 4.1 No-login, sample-first
-- The app opens without auth. On first visit it shows the **sample company**
-  (`Sample Co Ltd` — name TBD) with the existing seeded dataset (transactions,
+### 4.1 No-login, demo-first
+- The app opens without auth. On first visit it shows the **demo company**
+  (`Demo Co Ltd`) with the existing seeded dataset (transactions,
   monthly summaries, data sources, filings, payroll) so every view has content.
 - **Zero user companies on startup.** The current `seedCompanies` seed is
-  removed; the sample company is a distinct, always-present entity, not part of
+  removed; the demo company is a distinct, always-present entity, not part of
   the user's company list.
 
 ### 4.2 The funnel (the "strong hint")
@@ -101,35 +101,35 @@ The user is guided through three steps, in order, at their own pace:
    company exists; simulated flow (§7.1).
 3. **Add data sources** — in-app nudges once a company exists (§6).
 
-### 4.3 Sample removal rule
-- The sample company **stays in the picker**, clearly badged, as long as no user
+### 4.3 Demo removal rule
+- The demo company **stays in the picker**, clearly badged, as long as no user
   company has any connected data source.
 - Once **any** user company has **≥1 connected data source** (bank, GnuCash/CSV,
-  or manual — any kind), the sample company is removed from the picker.
+  or manual — any kind), the demo company is removed from the picker.
 - If the user's only connected sources are later disconnected/removed and no
-  source remains, the sample does **not** return (one-way retirement, simplest
+  source remains, the demo does **not** return (one-way retirement, simplest
   rule; revisit if needed).
 
 ### 4.4 The blocked screen is a safety net
 - The original "whole screen dedicated to adding a company, menus inaccessible"
   requirement now applies **only** to the hypothetical state where **zero
-  companies of any kind exist** (e.g. sample removed by a future power-user
+  companies of any kind exist** (e.g. demo removed by a future power-user
   action, or fresh data wipe). It should be implemented as a minimal fallback
   ("Add your first company"), not the primary experience.
-- Because the sample is always present, this state should not occur in practice.
+- Because the demo is always present, this state should not occur in practice.
 
 ### 4.5 Company auto-selection
 - After the user adds their **first** company, it is **auto-selected** and the
   view switches to that company's Accounts. Subsequent adds keep the current
   selection unless the added company is chosen.
 
-## 5. Sample identity & first-run chrome
+## 5. Demo identity & first-run chrome
 
-### 5.1 Sample badge + banner (chosen option: "Tag + banner")
-- **Picker badge:** the sample company shows a small `Sample` tag in the company
+### 5.1 Demo badge + banner (chosen option: "Tag + banner")
+- **Picker badge:** the demo company shows a small `Demo` tag in the company
   picker (and in the picker's selected-company summary).
 - **Dismissible banner:** a banner at the top of the main content area:
-  `Sample data — add your company to get started.` with a primary action
+  `Demo data — add your company to get started.` with a primary action
   "Add company" and a dismiss (×) button. The banner stays until **a real
   company exists** (dismissal persists in localStorage; re-appears if the
   dismissal is reset with the data).
@@ -165,7 +165,7 @@ The user is guided through three steps, in order, at their own pace:
 2. **Pick a result** → a **review screen** prefilled with everything the search
    can infer (see 7.3), with the non-inferable fields empty/editable.
 3. **Fill the gaps** → submit → company created, auto-selected, toast nudge
-   (§6), sample still present until a data source connects (§4.3).
+   (§6), demo still present until a data source connects (§4.3).
 4. Search returning nothing → inline empty state ("No company found — check the
    name or number").
 
@@ -217,13 +217,13 @@ Chosen option: **"Everything local."** Treat localStorage as the mock DB:
   into storage).
 - **Settings** (existing `preferences` + any UI prefs).
 - **Account flag** (from §8) and **banner dismissal**.
-- The **sample company is never persisted** — always re-created in memory.
+- The **demo company is never persisted** — always re-created in memory.
 - Migration/schema: versioned key (e.g. `tally.db.v1`) with a light
   read/validate/reset on load; clear on "reset demo data" if one is added.
 
 ## 10. Copy drafts (minimal & direct)
 
-- Banner: `Sample data — add your company to get started.` · action: `Add company`
+- Banner: `Demo data — add your company to get started.` · action: `Add company`
 - Search title: `Add company` · helper: `Search Companies House` · empty:
   `No company found. Check the name or number.`
 - Review gaps: `Add what the search can't tell us.` · required notes:
@@ -242,8 +242,8 @@ Chosen option: **"Everything local."** Treat localStorage as the mock DB:
 - Banner: raised surface (`gray.surface.bg`), hairline border, `l3` radius;
   dismiss × as `IconButton`; content left, action right; stays out of the
   density (compact height).
-- Sample badge: `Badge` variant `subtle` with `colorPalette="amber"` or gray —
-  pick one; keep the same label everywhere (`Sample`).
+- Demo badge: `Badge` variant `subtle` with `colorPalette="amber"` or gray —
+  pick one; keep the same label everywhere (`Demo`).
 - Empty states: icon + one/two actions, per `EmptyState` component; mono `kbd`
   chips for shortcuts.
 - Keyboard-first: search auto-focuses; Enter submits; Esc closes dialogs; the
@@ -253,7 +253,7 @@ Chosen option: **"Everything local."** Treat localStorage as the mock DB:
 
 ## 12. Edge cases
 
-- Search yields the sample company's name → fine (user can re-add; dedupe only
+- Search yields the demo company's name → fine (user can re-add; dedupe only
   by exact company number within user companies — see next).
 - **Duplicate company number** among user companies → warn + block (toast:
   "Already added").
@@ -261,20 +261,20 @@ Chosen option: **"Everything local."** Treat localStorage as the mock DB:
   local", the company persists anyway; the account affordance remains. (Accept:
   the account is a save-progress *story*, not a hard gate.)
 - Banner dismissed but no company added → stays dismissed until data reset.
-- All data sources removed after sample retirement → sample stays retired (§4.3).
+- All data sources removed after demo retirement → demo stays retired (§4.3).
 - Deleting companies: **out of scope** (no delete UI yet). The safety-net screen
   (§4.4) covers the hypothetical zero-everything state.
 
 ## 13. Acceptance criteria
 
-1. Fresh load (no localStorage): app shows the sample company, all views populated,
-   `Sample` badge in the picker, dismissible banner present.
+1. Fresh load (no localStorage): app shows the demo company, all views populated,
+   `Demo` badge in the picker, dismissible banner present.
 2. Banner "Add company" opens the search flow; simulated results render; picking
    one prefills inferable fields; UTR + standard + period required; submit adds
    the company and **auto-selects** it.
-3. Post-add toast appears; banner hides once a real company exists; sample still
+3. Post-add toast appears; banner hides once a real company exists; demo still
    in picker (badged).
-4. Connecting any data source on any user company removes the sample from the
+4. Connecting any data source on any user company removes the demo from the
    picker.
 5. "Create an account" dialog → account-saved state persists across refresh;
    companies/data sources/settings all persist across refresh.
@@ -291,8 +291,8 @@ Chosen option: **"Everything local."** Treat localStorage as the mock DB:
 
 ## 15. Open questions
 
-- Exact name/identity of the sample company (e.g. `Sample Co Ltd`)?
+- Exact name/identity of the demo company (`Demo Co Ltd`) — resolved.
 - Should the "Save your progress" affordance live in the sidebar footer or in
   the banner?
 - Does the safety-net screen need to be built now, or just designed?
-- Should the search fixture include the sample company itself (yes/no)?
+- Should the search fixture include the demo company itself (yes/no)?

@@ -31,6 +31,16 @@ export const brown = defineSemanticTokens.colors({
       hover: { value: { _light: '{colors.brown.10}', _dark: '{colors.brown.10}' } },
     },
     fg: { DEFAULT: { value: { _light: 'white', _dark: 'white' } } },
+    // A step below brown.10, fixed across modes — a calmer brown.9 for
+    // full-bleed surfaces that still hold white content (e.g. the sample-data
+    // banner). brown.10 alone flips brighter in dark mode, so both values are
+    // pinned just under it.
+    dim: {
+      bg: {
+        DEFAULT: { value: { _light: '#976f4f', _dark: '#936c4b' } },
+        hover: { value: { _light: '#8e6648', _dark: '#8a6344' } },
+      },
+    },
   },
   subtle: {
     bg: {

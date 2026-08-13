@@ -4,7 +4,7 @@ The **Tally web app** — the product UI for UK company accounts & CT600 filing.
 Built with **SolidJS** + **Panda CSS** on the
 [`@tally/design-system`](../../packages/design-system/README.md) package.
 
-> **No backend yet.** The app is sample-first: a pre-seeded `Sample Co Ltd`
+> **No backend yet.** The app is demo-first: a pre-seeded `Demo Co Ltd`
 > company lets every feature demo itself, and user data persists to
 > `localStorage` via [`src/db.ts`](src/db.ts). Static fixtures live in
 > [`src/mock_data.ts`](src/mock_data.ts); views only consume exported types,
@@ -32,10 +32,10 @@ pnpm --filter @tally/web typecheck
   an "Add company" choice that opens a dialog), the Workspace nav group
   (Accounts, Filings, Payroll) and the bottom group (Integrations, Settings),
   plus the signed-in user row. Keyboard-first: `1`–`5` switch views.
-  First-run onboarding is layered on top: a persistent "Sample data" banner,
+  First-run onboarding is layered on top: a persistent "Demo data" banner,
   an add-company flow (simulated Companies House search), a "Save your
   progress" simulated-account dialog, and auto-selection of the user's
-  company (the sample retires from the picker once any company has a
+  company (the demo retires from the picker once any company has a
   connected data source).
 - **Accounts** (`src/views/Accounts.tsx`) — Transactions (search + account
   filter), Summaries (YTD stats, a net-by-month bar chart and a table), and
@@ -47,7 +47,7 @@ pnpm --filter @tally/web typecheck
   an "Add bank account" dialog.
 - **Settings** (`src/views/Settings.tsx`) — company profile, filing
   preferences, notifications and a danger zone.
-- **Mock data** (`src/mock_data.ts`) — the sample company, Companies House
+- **Mock data** (`src/mock_data.ts`) — the demo company, Companies House
   search fixture, transactions, summaries, data sources, filings, payroll and
   preferences.
 - **Local DB** (`src/db.ts`) — versioned `localStorage` persistence for
@@ -55,11 +55,11 @@ pnpm --filter @tally/web typecheck
   dismissal.
 - **Onboarding components** (`src/components/`) — `AddCompanyDialog`
   (search → review → fill remaining fields), `SaveProgressDialog` (simulated
-  account), `SampleBanner`.
+  account), `DemoBanner`.
 
 ## Onboarding flow (no login)
 
-1. App opens on `Sample Co Ltd` with seeded data; a banner says "Sample data —
+1. App opens on `Demo Co Ltd` with seeded data; a banner says "Demo data —
    add your company to get started". Closing it only hides it for the current
    screen — it returns when you switch screens.
 2. Adding a company runs a **simulated Companies House search** (per
@@ -68,7 +68,7 @@ pnpm --filter @tally/web typecheck
    period) → the new company is auto-selected.
 3. The user's company starts empty; guided empty states point to "Connect a
    bank".
-4. Once any company has ≥1 connected data source, the sample leaves the
+4. Once any company has ≥1 connected data source, the demo leaves the
    picker.
 5. "Save your progress" (anytime) opens the simulated-account dialog; the
    user row then shows "Saved · Name".

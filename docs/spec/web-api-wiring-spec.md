@@ -136,10 +136,10 @@ browser (vite dev on :5173)                     Rust API (:8080)
 - **Permanent switch**: after a successful register (and migration, §7.3),
   the app uses the API for everything. The migrated localStorage data is
   cleared (the DB copy is now authoritative). Logout returns to an empty
-  local workspace (sample company may reappear — see §13).
+  local workspace (demo company may reappear — see §13).
 - Login to an **existing** account: switch to API mode directly (no
   migration — the account already has its data server-side).
-- The sample company rules (§13) apply in both modes.
+- The demo company rules (§13) apply in both modes.
 
 ## 7. Companies
 
@@ -174,7 +174,7 @@ browser (vite dev on :5173)                     Rust API (:8080)
 
 ### 7.3 Migration on register
 
-Only **real** local data migrates (never the sample's demo data or mock bank
+Only **real** local data migrates (never the demo company's data or mock bank
 connections). If there is no local data, register lands directly in
 signed-in mode with the "no data" toast below.
 
@@ -374,12 +374,12 @@ Worked checks against the Balances mock (which uses the same convention):
   company confirm). Remove-company *action* wires to the API (§7.1); the rest
   keeps its "lands with the backend" toasts.
 
-## 13. Sample company
+## 13. Demo company
 
-- Same rule as today: the localStorage sample shows until **real data
+- Same rule as today: the localStorage demo shows until **real data
   exists** (signed-in: any company with a ledger; local mode: any local
   company with a source), then retires. In signed-in mode with zero migrated
-  companies, the sample still shows.
+  companies, the demo still shows.
 
 ## 14. API client layer (`src/api.ts` + `src/session.ts`)
 
@@ -564,7 +564,7 @@ unknown codes fall through to a generic toast that shows the envelope
   handle 401 themselves.
 - **Offline**: a `NetworkError` marks the session `offline` (token kept).
   `App` shows a persistent "API unreachable — is the API running?" banner
-  (same slot as the sample banner); API-backed views show their error cards
+  (same slot as the demo banner); API-backed views show their error cards
   (with retry — a successful call flips back to `signed-in`).
 - **Restoring**: on boot with a token, the app keeps rendering the local mode
   (or a light skeleton) until `me()` resolves; no flash of a login wall.

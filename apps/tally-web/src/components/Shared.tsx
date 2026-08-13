@@ -7,7 +7,7 @@ import { type DataSource } from '../mock_data'
 /**
  * View header: title (+ optional badge) and description on the left, action
  * buttons on the right. `badge` renders inline after the title — views pass
- * a <SampleBadge/> whenever the sample company is on screen.
+ * a <DemoBadge/> whenever the demo company is on screen.
  */
 export function PageHeader(props: { title: string; description?: string; badge?: JSX.Element; actions?: JSX.Element }) {
   return (
@@ -35,11 +35,11 @@ export function PageHeader(props: { title: string; description?: string; badge?:
   )
 }
 
-/** "Sample" marker — labels the demo company wherever its data is visible (spec §6.1). */
-export function SampleBadge() {
+/** "Demo" marker — labels the demo company wherever its data is visible (spec §6.1). */
+export function DemoBadge() {
   return (
     <Badge variant="outline" class={css({ fontSize: 'xs', flexShrink: '0' })}>
-      Sample
+      Demo
     </Badge>
   )
 }

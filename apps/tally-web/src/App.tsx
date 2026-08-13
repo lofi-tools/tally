@@ -3,7 +3,7 @@ import { Avatar, Badge, Button, Kbd, Select, Toaster, toaster } from '@tally/des
 import { createListCollection } from '@tally/design-system'
 import { Building2, ChevronDown, FileCheck2, LayoutGrid, LogIn, LogOut, Plug, Plus, Settings, Users, WifiOff } from 'lucide-solid'
 import { css } from 'styled-system/css'
-import { bankOptions, getCompanyData, SAMPLE_COMPANY_ID, sampleCompany, type Company, type DataSource } from './mock_data'
+import { bankOptions, getCompanyData, DEMO_COMPANY_ID, demoCompany, type Company, type DataSource } from './mock_data'
 import { loadDb, saveDb, type Db } from './db'
 import { restoreSession, session, signOut } from './session'
 import { AccountsView } from './views/Accounts'
@@ -13,7 +13,7 @@ import { IntegrationsView } from './views/Integrations'
 import { SettingsView } from './views/Settings'
 import { AddCompanyDialog, type NewCompanyInput } from './components/AddCompanyDialog'
 import { migrateCompanies, SignInDialog, toastMigration } from './components/SignInDialog'
-import { SampleBanner, type SampleBannerVariant } from './components/SampleBanner'
+import { DemoBanner, type DemoBannerVariant } from './components/DemoBanner'
 import { DevtoolsBanner } from './components/DevtoolsBanner'
 
 type ViewKey = 'accounts' | 'filings' | 'payroll' | 'integrations' | 'settings'
@@ -135,7 +135,7 @@ export function App() {
   }
 
   const [view, setView] = createSignal<ViewKey>('accounts')
-  const [companyId, setCompanyId] = createSignal<string>(SAMPLE_COMPANY_ID)
+  const [companyId, setCompanyId] = createSignal<string>(DEMO_COMPANY_ID)
   const [addOpen, setAddOpen] = createSignal(false)
   const [signInOpen, setSignInOpen] = createSignal(false)
   const [retrying, setRetrying] = createSignal(false)
@@ -154,22 +154,22 @@ export function App() {
     return s.status === 'signed-in' ? s.user : null
   })
 
-  // The sample company never retires: it stays in the picker (badged) and is
+  // The demo company never retires: it stays in the picker (badged) and is
   // always the first item, so demo data remains explorable (spec §6.2).
-  const allCompanies = createMemo(() => [sampleCompany, ...companies()])
+  const allCompanies = createMemo(() => [demoCompany, ...companies()])
   const currentCompany = createMemo(() => allCompanies().find((c) => c.id === companyId()) ?? allCompanies()[0])
 
-  // Sample banner state machine (spec §4). Precedence A > B > C; once ANY
+  // Demo banner state machine (spec §4). Precedence A > B > C; once ANY
   // user company has a data source, no variant renders in any selection.
   const anyDataConnected = createMemo(() => companies().some((c) => (sources()[c.id] ?? []).length > 0))
   // Not dismissible: the banner renders on every view while the applicable
   // state holds, so it always "re-appears" when switching screens/tabs.
-  const banner = createMemo<SampleBannerVariant | null>(() => {
+  const banner = createMemo<DemoBannerVariant | null>(() => {
     if (anyDataConnected()) return null
     // Key off what is actually displayed: currentCompany() falls back to the
-    // sample when companyId dangles (e.g. the selected company was migrated).
-    if (currentCompany()?.id === SAMPLE_COMPANY_ID) {
-      return companies().length > 0 ? 'viewing-sample' : 'onboarding'
+    // demo when companyId dangles (e.g. the selected company was migrated).
+    if (currentCompany()?.id === DEMO_COMPANY_ID) {
+      return companies().length > 0 ? 'viewing-demo' : 'onboarding'
     }
     return 'empty-data'
   })
@@ -179,9 +179,9 @@ export function App() {
     setView(v)
   }
 
-  // Company picker items: sample (always first) + user companies + "Add company".
+  // Company picker items: demo (always first) + user companies + "Add company".
   const pickerItems = createMemo(() => [
-    { label: sampleCompany.name, value: SAMPLE_COMPANY_ID, sample: true as const },
+    { label: demoCompany.name, value: DEMO_COMPANY_ID, demo: true as const },
     ...companies().map((c) => ({ label: c.name, value: c.id })),
     { label: 'Add company…', value: '__add__' },
   ])
@@ -260,9 +260,9 @@ export function App() {
   const onMigrationComplete = (migratedIds: string[]) => {
     if (migratedIds.length === 0) return
     updateDb((d) => ({ ...d, companies: d.companies.filter((c) => !migratedIds.includes(c.id)) }))
-    // If the migrated company was selected, fall back to the sample so the
+    // If the migrated company was selected, fall back to the demo so the
     // picker and banner stay consistent with what is on screen.
-    if (migratedIds.includes(companyId())) setCompanyId(SAMPLE_COMPANY_ID)
+    if (migratedIds.includes(companyId())) setCompanyId(DEMO_COMPANY_ID)
   }
 
   /** Sidebar "Retry migration": re-runs §7.3 with the token already set. */
@@ -275,7 +275,7 @@ export function App() {
     toastMigration(result)
   }
 
-  // Safety net: zero companies of any kind (sample retired + none added).
+  // Safety net: zero companies of any kind (demo retired + none added).
   if (!currentCompany()) {
     return (
       <div class={css({ h: '100dvh', display: 'flex', flexDirection: 'column', bg: 'canvas', color: 'fg.default', fontFamily: 'sans' })}>
@@ -324,6 +324,19 @@ export function App() {
 
   return (
     <div class={css({ h: '100dvh', display: 'flex', flexDirection: 'column', bg: 'canvas', color: 'fg.default', fontFamily: 'sans' })}>
+      {/* Full-width demo-data banner: spans the whole screen, above the
+          sidebar + main row (a top-of-app announcement bar). */}
+      <Show when={banner()}>
+        {(variant) => (
+          <DemoBanner
+            variant={variant()}
+            viewCompanyName={companies()[0]?.name}
+            onAddCompany={() => setAddOpen(true)}
+            onViewCompany={() => companies()[0] && setCompanyId(companies()[0].id)}
+            onConnectBank={() => switchView('integrations')}
+          />
+        )}
+      </Show>
       <div class={css({ flex: '1', minH: '0', display: 'flex' })}>
         {/* ---------- Sidebar ---------- */}
       <aside
@@ -373,12 +386,11 @@ export function App() {
                 <Building2 class={css({ w: '4', h: '4', color: 'fg.muted', flexShrink: '0' })} />
                 <span class={css({ minW: '0', flex: '1' })}>
                   <span class={css({ display: 'flex', alignItems: 'center', gap: '2', fontSize: 'sm', fontWeight: '600', minW: '0' })}>
-                    <span class={css({ truncate: true })}>{cd().name}</span>
-                    <Show when={cd().id === SAMPLE_COMPANY_ID}>
-                      <Badge variant="outline" class={css({ flexShrink: '0', fontSize: '10px', px: '1.5', py: '0' })}>
-                        Sample
-                      </Badge>
-                    </Show>
+                    <span class={css({ truncate: true })}>{cd().name}</span>                      <Show when={cd().id === DEMO_COMPANY_ID}>
+                        <Badge variant="solid" class={css({ flexShrink: '0', fontSize: '10px', px: '1.5', py: '0' })}>
+                          Demo
+                        </Badge>
+                      </Show>
                   </span>
                   <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.subtle', fontFamily: 'mono' })}>
                     {cd().companyNumber}
@@ -408,9 +420,9 @@ export function App() {
                           fallback={
                             <span class={css({ display: 'inline-flex', alignItems: 'center', gap: '2' })}>
                               {item.label}
-                              <Show when={'sample' in item && item.sample}>
-                                <Badge variant="outline" class={css({ fontSize: '10px', px: '1.5', py: '0' })}>
-                                  Sample
+                              <Show when={'demo' in item && item.demo}>
+                                <Badge variant="solid" class={css({ fontSize: '10px', px: '1.5', py: '0' })}>
+                                  Demo
                                 </Badge>
                               </Show>
                             </span>
@@ -520,17 +532,6 @@ export function App() {
               Retry
             </Button>
           </div>
-        </Show>
-        <Show when={banner()}>
-          {(variant) => (
-            <SampleBanner
-              variant={variant()}
-              viewCompanyName={companies()[0]?.name}
-              onAddCompany={() => setAddOpen(true)}
-              onViewCompany={() => companies()[0] && setCompanyId(companies()[0].id)}
-              onConnectBank={() => switchView('integrations')}
-            />
-          )}
         </Show>
         <div class={css({ maxW: '60rem', mx: 'auto', p: { base: '5', md: '8' } })}>
           <SolidSwitch>
