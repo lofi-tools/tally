@@ -1,10 +1,13 @@
 import { createMemo, createSignal, For, Show } from 'solid-js'
-import { Button, Card, Collapsible, Drawer, Input, Select, Tabs, Table, toaster } from '@tally/design-system'
+import { Button, Card, Collapsible, Input, Select, Table, Tabs, toaster } from '@tally/design-system'
 import { createListCollection } from '@tally/design-system'
-import { ArrowRight, ChevronDown, Download, Landmark, Plus, Search, X } from 'lucide-solid'
+import { ArrowRight, ChevronDown, Download, Landmark, Plus, Search } from 'lucide-solid'
 import { css, cx } from 'styled-system/css'
 import {
   accountBalance,
+  accountBreadcrumb,
+  accountLabel,
+  accountPathOf,
   chartAccountNames,
   chartOfAccounts,
   fmtDate,
@@ -13,7 +16,7 @@ import {
   groupBalance,
   SAMPLE_COMPANY_ID,
   transactionsFor,
-  type AccountGroup,
+  type AccountNode,
   type Company,
   type CompanyData,
   type DataSource,
@@ -42,8 +45,8 @@ export function AccountsView(props: {
   const [tab, setTab] = createSignal('balances')
   const [query, setQuery] = createSignal('')
   const [account, setAccount] = createSignal('all')
-  // Leaf account currently shown in the right-side drawer; null = closed.
-  const [openAccount, setOpenAccount] = createSignal<string | null>(null)
+  // Leaf account whose register is shown in the inline side panel; null = none.
+  const [selected, setSelected] = createSignal<string | null>(null)
 
   const filtered = createMemo(() => {
     const q = query().trim().toLowerCase()
@@ -61,8 +64,22 @@ export function AccountsView(props: {
     [...props.data.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5),
   )
 
-  const acctTxs = createMemo(() => (openAccount() ? transactionsFor(openAccount()!) : []))
-  const acctBalance = () => (openAccount() ? accountBalance(openAccount()!) : 0)
+  /**
+   * Register of the selected account: transactions oldest → newest with the
+   * running balance after each one, so the user can follow where amounts come
+   * from. The final running total equals the account's current balance.
+   */
+  const register = createMemo(() => {
+    const path = selected()
+    if (!path) return []
+    const rows = transactionsFor(path).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+    let running = 0
+    return rows.map((t) => {
+      running += t.amount
+      return { t, running }
+    })
+  })
+  const registerBalance = () => (selected() ? accountBalance(selected()!) : 0)
 
   const yearIncome = props.data.summaries.reduce((s, m) => s + m.income, 0)
   const yearExpenses = props.data.summaries.reduce((s, m) => s + m.expenses, 0)
@@ -123,22 +140,111 @@ export function AccountsView(props: {
           >
             {/* Income / expenses / net */}
             <div class={css({ display: 'grid', gap: '4', sm: { gridTemplateColumns: 'repeat(3, 1fr)' }, mb: '6' })}>
-              <StatCard label="Income (YTD)" value={fmtMoney(yearIncome)} hint="12 months to August" tone="good" />
-              <StatCard label="Expenses (YTD)" value={fmtMoney(yearExpenses)} hint="12 months to August" tone="bad" />
+              <StatCard label="Income (YTD)" value={fmtMoney(yearIncome)} hint="FY2025/26" tone="good" />
+              <StatCard label="Expenses (YTD)" value={fmtMoney(yearExpenses)} hint="FY2025/26" tone="bad" />
               <StatCard label="Net (YTD)" value={fmtMoney(yearIncome - yearExpenses)} hint="Before corporation tax" />
             </div>
 
-            {/* Chart of accounts tree */}
-            <Card.Root class={css({ mb: '6' })}>
-              <div class={css({ px: '4', pt: '4', pb: '1' })}>
-                <div class={css({ fontSize: 'sm', fontWeight: '600' })}>Chart of accounts</div>
-              </div>
-              <div class={css({ px: '2', pb: '2' })}>
-                <For each={chartOfAccounts}>
-                  {(group) => <AccountTreeGroup group={group} onOpenAccount={setOpenAccount} />}
-                </For>
-              </div>
-            </Card.Root>
+            {/* Chart of accounts + account register, side by side */}
+            <div
+              class={css({
+                display: 'grid',
+                gap: '4',
+                alignItems: 'start',
+                mb: '6',
+                lg: { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
+              })}
+            >
+              {/* Chart of accounts tree */}
+              <Card.Root>
+                <div class={css({ px: '4', pt: '4', pb: '1' })}>
+                  <div class={css({ fontSize: 'sm', fontWeight: '600' })}>Chart of accounts</div>
+                </div>
+                <div class={css({ px: '2', pb: '2' })}>
+                  <For each={chartOfAccounts}>
+                    {(node) => (
+                      <AccountTreeGroup node={node} depth={0} selected={selected()} onSelect={setSelected} />
+                    )}
+                  </For>
+                </div>
+              </Card.Root>
+
+              {/* Inline register panel — same elevation as the chart, no overlay */}
+              <Card.Root>
+                <div class={css({ px: '4', pt: '4', pb: '1' })}>
+                  <div class={css({ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '3' })}>
+                    <div class={css({ fontSize: 'sm', fontWeight: '600', truncate: true })}>
+                      {selected() ? accountLabel(selected()!) : 'Account register'}
+                    </div>
+                    <Show when={selected()}>
+                      <span class={cx(numCell, css({ fontSize: 'sm', color: balanceFg(registerBalance()) }))}>
+                        {balanceText(registerBalance())}
+                      </span>
+                    </Show>
+                  </div>
+                  {selected() && (
+                    <div class={css({ fontSize: 'xs', color: 'fg.subtle', mt: '0.5' })}>
+                      {accountBreadcrumb(selected()!)}
+                    </div>
+                  )}
+                </div>
+                <div class={css({ px: '2', pb: '2' })}>
+                  <Show
+                    when={selected()}
+                    fallback={
+                      <EmptyState
+                        title="Select an account"
+                        description="Pick a row in the chart of accounts to see its transactions and how each one moved the balance."
+                      />
+                    }
+                  >
+                    <Show
+                      when={register().length > 0}
+                      fallback={<EmptyState title="No transactions" description="This account has no activity yet." />}
+                    >
+                      <Table.Root>
+                        <Table.Head>
+                          <Table.Row>
+                            <Table.Header>Date</Table.Header>
+                            <Table.Header>Description</Table.Header>
+                            <Table.Header textAlign="right">Amount</Table.Header>
+                            <Table.Header textAlign="right">Balance</Table.Header>
+                          </Table.Row>
+                        </Table.Head>
+                        <Table.Body>
+                          <For each={register()}>
+                            {({ t, running }) => (
+                              <Table.Row>
+                                <Table.Cell class={numCell}>{fmtDate(t.date)}</Table.Cell>
+                                <Table.Cell class={css({ minW: '0', maxW: '14rem' })}>
+                                  <span class={css({ display: 'block', truncate: true })}>{t.description}</span>
+                                  <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.subtle', mt: '0.5' })}>
+                                    {t.source}
+                                  </span>
+                                </Table.Cell>
+                                <Table.Cell
+                                  textAlign="right"
+                                  class={cx(numCell, css(t.amount > 0 ? { color: 'green.plain.fg' } : { color: 'fg.default' }))}
+                                >
+                                  {fmtSignedMoney(t.amount)}
+                                </Table.Cell>
+                                <Table.Cell
+                                  textAlign="right"
+                                  class={cx(numCell, css({ color: balanceFg(running) }))}
+                                  title={`Balance after this transaction`}
+                                >
+                                  {balanceText(running)}
+                                </Table.Cell>
+                              </Table.Row>
+                            )}
+                          </For>
+                        </Table.Body>
+                      </Table.Root>
+                    </Show>
+                  </Show>
+                </div>
+              </Card.Root>
+            </div>
 
             {/* Recent transactions */}
             <Card.Root>
@@ -355,7 +461,9 @@ export function AccountsView(props: {
                         <Table.Row>
                           <Table.Cell class={numCell}>{fmtDate(t.date)}</Table.Cell>
                           <Table.Cell class={css({ maxW: 'md', truncate: true })}>{t.description}</Table.Cell>
-                          <Table.Cell class={css({ color: 'fg.muted', fontSize: 'sm' })}>{t.account}</Table.Cell>
+                          <Table.Cell class={css({ color: 'fg.muted', fontSize: 'sm', maxW: 'xs', truncate: true })} title={t.account}>
+                            {t.account}
+                          </Table.Cell>
                           <Table.Cell class={css({ color: 'fg.muted', fontSize: 'sm' })}>{t.source}</Table.Cell>
                           <Table.Cell
                             textAlign="right"
@@ -403,71 +511,83 @@ export function AccountsView(props: {
           </p>
         </Tabs.Content>
       </Tabs.Root>
-
-      {/* ---------- Account drill-down drawer (right side) ---------- */}
-      <Drawer.Root open={openAccount() !== null} onOpenChange={(d) => !d.open && setOpenAccount(null)} placement="end" size="lg">
-        <Drawer.Backdrop />
-        <Drawer.Positioner>
-          <Drawer.Content>
-            <Drawer.CloseTrigger aria-label="Close">
-              <X class={css({ w: '4', h: '4' })} />
-            </Drawer.CloseTrigger>
-            <Drawer.Header>
-              <Drawer.Title>{openAccount()}</Drawer.Title>
-              <Drawer.Description class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-                Balance
-                <span class={cx(numCell, css({ color: balanceFg(acctBalance()) }))}>{balanceText(acctBalance())}</span>
-              </Drawer.Description>
-            </Drawer.Header>
-            <Drawer.Body>
-              <Show
-                when={acctTxs().length > 0}
-                fallback={<EmptyState title="No transactions" description="This account has no activity yet." />}
-              >
-                <Table.Root>
-                  <Table.Head>
-                    <Table.Row>
-                      <Table.Header>Date</Table.Header>
-                      <Table.Header>Description</Table.Header>
-                      <Table.Header>Source</Table.Header>
-                      <Table.Header textAlign="right">Amount</Table.Header>
-                      <Table.Header>Status</Table.Header>
-                    </Table.Row>
-                  </Table.Head>
-                  <Table.Body>
-                    <For each={acctTxs()}>
-                      {(t) => (
-                        <Table.Row>
-                          <Table.Cell class={numCell}>{fmtDate(t.date)}</Table.Cell>
-                          <Table.Cell class={css({ maxW: 'md', truncate: true })}>{t.description}</Table.Cell>
-                          <Table.Cell class={css({ color: 'fg.muted', fontSize: 'sm' })}>{t.source}</Table.Cell>
-                          <Table.Cell
-                            textAlign="right"
-                            class={cx(numCell, css(t.amount > 0 ? { color: 'green.plain.fg' } : { color: 'fg.default' }))}
-                          >
-                            {fmtSignedMoney(t.amount)}
-                          </Table.Cell>
-                          <Table.Cell>
-                            <StatusBadge status={t.status} />
-                          </Table.Cell>
-                        </Table.Row>
-                      )}
-                    </For>
-                  </Table.Body>
-                </Table.Root>
-              </Show>
-            </Drawer.Body>
-          </Drawer.Content>
-        </Drawer.Positioner>
-      </Drawer.Root>
     </>
   )
 }
 
-/** One collapsible top-level group in the chart of accounts tree. */
-function AccountTreeGroup(props: { group: AccountGroup; onOpenAccount: (name: string) => void }) {
-  const [open, setOpen] = createSignal(true)
-  const total = () => groupBalance(props.group)
+/**
+ * One row of the recursive chart-of-accounts tree. Groups (nodes with
+ * children) are collapsible and show a rolled-up total; leaves are buttons
+ * that select the account for the register panel. Top-level groups start
+ * expanded so the first sub-level is visible; deeper levels start collapsed.
+ */
+function AccountTreeGroup(props: {
+  node: AccountNode
+  depth: number
+  selected: string | null
+  onSelect: (path: string) => void
+}) {
+  const [open, setOpen] = createSignal(props.depth === 0)
+  const path = () => accountPathOf(props.node)
+  const isLeaf = () => props.node.children.length === 0
+  const isSelected = () => path() === props.selected
+  const indent = () => ({ pl: `${0.75 + props.depth * 1.25}rem` }) as const
+
+  // Leaf row: selectable, shows the bronze indicator when selected.
+  if (isLeaf()) {
+    return (
+      <button
+        type="button"
+        onClick={() => props.onSelect(path())}
+        class={css({
+          w: 'full',
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '2',
+          py: '1.5',
+          pr: '2',
+          borderRadius: 'md',
+          bg: isSelected() ? 'brown.a3' : 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontSize: 'sm',
+          color: isSelected() ? 'fg.default' : 'fg.muted',
+          _hover: { bg: isSelected() ? 'brown.a3' : 'bg.subtle', color: 'fg.default' },
+          transition: 'background-color 120ms ease, color 120ms ease',
+          ...indent(),
+        })}
+      >
+        <Show when={isSelected()}>
+          {/* Bronze selected indicator, echoing the sidebar's active bar. */}
+          <span
+            aria-hidden="true"
+            class={css({
+              position: 'absolute',
+              left: '0',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              w: '0.5',
+              h: '3',
+              borderRadius: 'full',
+              bg: 'brown.9',
+              boxShadow: '0 0 6px {colors.brown.a6}',
+              animationName: 'fade-in',
+              animationDuration: 'fast',
+            })}
+          />
+        </Show>
+        <span class={css({ flex: '1', minW: '0', truncate: true })}>{props.node.name}</span>
+        <span class={cx(numCell, css({ color: balanceFg(accountBalance(path())) }))}>
+          {balanceText(accountBalance(path()))}
+        </span>
+      </button>
+    )
+  }
+
+  // Group row: collapsible, rolled-up total.
+  const total = () => groupBalance(props.node)
   return (
     <Collapsible.Root open={open()} onOpenChange={(d) => setOpen(d.open)}>
       <Collapsible.Trigger
@@ -476,8 +596,8 @@ function AccountTreeGroup(props: { group: AccountGroup; onOpenAccount: (name: st
           display: 'flex',
           alignItems: 'center',
           gap: '2',
-          px: '2',
           py: '2',
+          pr: '2',
           borderRadius: 'md',
           bg: 'transparent',
           border: 'none',
@@ -488,6 +608,7 @@ function AccountTreeGroup(props: { group: AccountGroup; onOpenAccount: (name: st
           color: 'fg.default',
           _hover: { bg: 'bg.subtle' },
           transition: 'background-color 120ms ease',
+          ...indent(),
         })}
       >
         <ChevronDown
@@ -500,41 +621,12 @@ function AccountTreeGroup(props: { group: AccountGroup; onOpenAccount: (name: st
             transform: open() ? 'rotate(0deg)' : 'rotate(-90deg)',
           })}
         />
-        <span class={css({ flex: '1', minW: '0', truncate: true })}>{props.group.name}</span>
+        <span class={css({ flex: '1', minW: '0', truncate: true })}>{props.node.name}</span>
         <span class={cx(numCell, css({ color: balanceFg(total()) }))}>{balanceText(total())}</span>
       </Collapsible.Trigger>
       <Collapsible.Content>
-        <For each={props.group.accounts}>
-          {(a) => {
-            const bal = accountBalance(a.name)
-            return (
-              <button
-                type="button"
-                onClick={() => props.onOpenAccount(a.name)}
-                class={css({
-                  w: 'full',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '2',
-                  pl: '9',
-                  pr: '2',
-                  py: '1.5',
-                  borderRadius: 'md',
-                  bg: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontSize: 'sm',
-                  color: 'fg.default',
-                  _hover: { bg: 'bg.subtle' },
-                  transition: 'background-color 120ms ease',
-                })}
-              >
-                <span class={css({ flex: '1', minW: '0', truncate: true })}>{a.name}</span>
-                <span class={cx(numCell, css({ color: balanceFg(bal) }))}>{balanceText(bal)}</span>
-              </button>
-            )
-          }}
+        <For each={props.node.children}>
+          {(child) => <AccountTreeGroup node={child} depth={props.depth + 1} selected={props.selected} onSelect={props.onSelect} />}
         </For>
       </Collapsible.Content>
     </Collapsible.Root>

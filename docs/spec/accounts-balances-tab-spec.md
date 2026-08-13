@@ -70,8 +70,28 @@ tax").
 
 ### 5.2 Chart of accounts tree
 
-GnuCash-style account tree, two levels deep, **all groups expanded by default**
-(collapsible via a chevron on group rows).
+The sample data is now the **real GnuCash book** from
+`libs/ixbrl/example_data/basic-1/input.gnucash` (a SQLite GnuCash file), ported
+by a one-off generator script into `mock_data.ts`:
+
+- The **whole tree is kept in memory** as a recursive `AccountNode { name,
+  type, children }` structure, re-rooted under the app's five top-level groups
+  (`Assets` / `Liabilities` / `Equity` / `Income` / `Expenses`) by account
+  type. Redundant same-name wrappers (the book's own `Assets/Assets`) are
+  spliced away; the two `Input`/`Output` VAT accounts are disambiguated by
+  parent wrapper (`Assets/VAT/Input`, `Liabilities/VAT/Output/Sales`).
+- **One row per split** of the book (95 splits, 27 accounts with activity),
+  signed per the app convention (income and expenses positive — GnuCash's
+  debit-normal direction — liabilities and equity negative) and with **dates
+  shifted into FY2025/26** (Apr 2025 → Mar 2026) so the sample looks current.
+- **Balances derive from the transactions list** (summed per full account
+  path), so the tree, every account register and the YTD cards always agree.
+  The Income card (£18,184.12) equals the `Income` group total and the
+  Expenses card (£12,135.97) the `Expenses` group total by construction.
+
+**Rendering:** recursive tree, collapsible via a chevron on group rows.
+**Expand one level by default** — top-level groups start open so the first
+sub-level is visible (as before); deeper levels start collapsed.
 
 **Columns:** Account name (indented by depth) + balance (right-aligned,
 tabular numbers). No type/description columns.
@@ -84,36 +104,15 @@ tabular numbers). No type/description columns.
 | Liabilities  | negative          | red     |
 | Equity       | negative          | red     |
 | Income       | positive          | green   |
-| Expenses     | negative          | red     |
+| Expenses     | positive          | green   |
 
 Zero balances render default/muted (no colour). Signed amounts formatted with
 `fmtSignedMoney`.
 
 **Group rows:** bold, show a rolled-up total of their children, have a chevron
-that toggles expansion. **Leaf rows:** normal weight, indented; clicking a leaf
-opens the right-side panel (§6).
-
-**Data model** (new, in `mock_data.ts`):
-
-- `AccountNode { name, group, parent? }` — a flat or nested structure describing
-  the chart of accounts. Existing transaction accounts map into it:
-  - **Income** → `Sales`
-  - **Expenses** → `Rent`, `Utilities`, `Software`, `Telecom`, `Insurance`,
-    `Office`, `Payroll`, `Tax`
-  - **Assets** → `Starling` (current), `Barclays` (current)
-  - **Liabilities** → `Loan` (e.g. "Loan — Lloyds")
-  - **Equity** → `Share capital`
-- **Balances are derived from the transactions list**, not static: each
-  transaction's `amount` is summed into its `account`'s balance; group totals
-  are the sum of children. The tree and the transactions table therefore always
-  agree.
-- To make Assets/Liabilities/Equity non-zero, **add a small set of mock
-  transactions** to the sample data (dated early, e.g. incorporation-era, so
-  they don't disturb the "most recent" list):
-  - Opening bank balance → account `Starling`, amount `+45 000`
-  - Share capital injection → account `Share capital`, amount `-15 000`
-  - Loan drawdown → account `Loan`, amount `-20 000`
-  (Signs follow the app convention above.)
+that toggles expansion. **Leaf rows:** normal weight, indented. Clicking a leaf
+**selects** it (bronze indicator, §6.1) and shows its register in the side
+panel (§6).
 
 ### 5.3 Recent transactions
 
@@ -124,76 +123,78 @@ opens the right-side panel (§6).
   **Transactions** sub-tab **and resets** the transactions tab's search box and
   account filter (so the full unfiltered list is visible).
 
-## 6. Right-side panel (account drill-down)
+## 6. Right-side register panel (account drill-down)
 
-Clicking a **leaf account** in the tree opens a **half-width panel from the
-right** showing that account's transactions. It is a **read-only** view — no
-footer actions, closing is the only exit.
+Clicking a **leaf account** in the tree **selects** it and shows its register
+in an **inline panel to the right of the chart** — a plain `Card.Root` at the
+**same elevation as the chart** (side-by-side grid, 50/50 on `lg+`, stacked on
+small screens). No overlay: there is **no backdrop, no dimming, no elevation
+above the chart**, and the panel lives inside the main content's padding box
+like any other card. It is a **read-only** view.
 
-### 6.1 Component & placement
+### 6.1 Selection & placement
 
-- Use the design-system `Drawer` (`packages/design-system/…/ui/drawer.tsx` — an
-  Ark UI `Dialog` variant; no Drawer is used in the app yet, this is the
-  first consumer).
-- `placement="end"` (right side — already the recipe default) with
-  `size="lg"` (`maxW: 32rem` ≈ half of the 60rem content column). The recipe
-  sets `width: '100%'` on the content, so it renders full-width on small
-  screens and caps at 32rem on desktop. `Root` already defaults to
-  `lazyMount` + `unmountOnExit`.
-- Controlled like the existing dialogs: `open` + `onOpenChange={(d) => …}`
-  (match `AddCompanyDialog`'s `d.open` pattern).
+- A single `selected` signal holds the selected leaf account's full path
+  (`null` = nothing selected).
+- The **selected leaf row** shows a bronze indicator echoing the sidebar's
+  active bar: a 2px `brown.9` vertical bar with a barely-there
+  `0 0 6px {colors.brown.a6}` glow, plus a `brown.a3` row background.
+- Layout: `display: grid; gap: 4; lg: { gridTemplateColumns: repeat(2,
+  minmax(0, 1fr)) }; alignItems: start` — chart card left, register card
+  right. Both cards scroll independently with the page (no sticky/fixed).
 
 ### 6.2 Anatomy (top to bottom)
 
 ```
-Drawer.Root open onOpenChange
-├─ Drawer.Backdrop          black.a7 scrim, fade-in/out
-├─ Drawer.Positioner        flex-end (right edge)
-│  └─ Drawer.Content        slide-from-right, bg gray.surface.bg, shadow lg
-│     ├─ Drawer.CloseTrigger   ✕  (recipe: absolute, top-end)
-│     ├─ Drawer.Header
-│     │  ├─ Drawer.Title          account name, textStyle xl, semibold
-│     │  └─ Drawer.Description    balance sub-line, fg.muted, textStyle sm
-│     └─ Drawer.Body           scrollable (recipe: overflow auto, flex 1)
-│        └─ compact table: Date · Description · Source · Amount · Status
-└─ (no Drawer.Footer — read-only)
+Card.Root (register, same elevation as the chart card)
+├─ header row:  account label (bold) … current balance (signed, coloured)
+├─ sub-line:    account breadcrumb (path minus the top-level group)
+└─ body:        register table: Date · Description · Amount · Balance
 ```
 
-- **Header title**: the leaf account's name (e.g. "Sales").
-- **Header description**: the account's current balance, signed and coloured
-  per the app convention (§5.2), e.g. `+£31,348.70` (green) for Sales,
-  `−£1,850.00` (red) for Rent. Zero → muted, no colour.
-- **Body**: the account's transactions as a table with **five columns** —
-  Date, Description, Source, Amount, Status. The **Account column is dropped**
-  (it is redundant in a per-account view). Amount and Status reuse the main
-  table's formatting (`fmtSignedMoney` + colour, `StatusBadge`). Rows are not
-  clickable.
-- **Empty account** (leaf exists but zero transactions, e.g. an unused
-  account): the body shows a compact `EmptyState` ("No transactions" /
-  "This account has no activity yet.") — no table chrome.
+- **Header**: the leaf account's label (e.g. "Current Account") plus its
+  current balance, signed and coloured per the app convention (§5.2), e.g.
+  `+£19,694.36` (green) for Current Account, `+£12,135.97` (green) for
+  Expenses (debit-normal).
+  Below: the breadcrumb path ("Bank Accounts › Current Account").
+- **Body — register table with four columns**:
+  - Date (tabular), Description (truncating, with the Source as a muted
+    sub-line), Amount (signed, coloured per row), **Balance**.
+  - **Balance = running balance after each transaction**: rows are ordered
+    oldest → newest and the running total accumulates each row's amount, so
+    the user can follow where amounts come from. The final row's Balance
+    equals the account's current balance. Zero → muted, no colour.
+- **Nothing selected**: the body shows a compact `EmptyState` ("Select an
+  account" / "Pick a row in the chart of accounts…").
+- **Empty account** (leaf exists but zero transactions): "No transactions" /
+  "This account has no activity yet."
 
-### 6.3 Keyboard, focus & backdrop behaviour
+### 6.3 Keyboard & accessibility
 
-Inherited from the Ark UI `Dialog` the drawer is built on (no custom wiring):
+Plain inline content — no overlay to trap or dismiss:
 
-- **ESC** closes the drawer.
-- **Backdrop click** closes the drawer.
-- **Focus trap**: while open, focus cycles within the drawer content; the
-  close button is reachable and `aria-label="Close"`-equivalent via the
-  design system's `CloseTrigger`.
-- **Focus return**: on close, focus returns to the tree row that opened the
-  drawer (leaf rows are focusable buttons).
-- **Scroll**: only the drawer body scrolls; the page behind stays put
-  (`overscrollBehaviorY: none` on the positioner).
+- Leaf rows and group chevrons are focusable buttons; Tab moves through the
+  tree and panel like any other page content.
+- Selecting a different leaf simply replaces the register content; clicking
+  the same leaf keeps it selected (no toggle-off).
+- The selected row's bronze bar is `aria-hidden`; the row itself is a button
+  with the account name as its accessible name.
 
 ### 6.4 Reachability
 
 - Only reachable from the Balances tree's leaf rows. Works for the sample
   company; for no-data companies the tree isn't rendered (§8), so the panel
   cannot be opened there.
-- Opening a new account's panel while one is open simply replaces the
-  content (single `openAccount` signal holding the account name); closing is
-  always available via ✕ / ESC / backdrop.
+
+## 6.5 Plausibility of the sample data
+
+- The balances in the chart are the sums of the transactions **by
+  construction** (both derive from the same `transactions` list), so the tree
+  never contradicts the register or the YTD cards.
+- The previous invented data did not reconcile (Sales showed £22,348.70 of
+  transactions against a £224,140 Income card). The ported basic-1 book is a
+  real, self-consistent ledger — every split has its counterpart, and the
+  group totals equal the YTD cards exactly.
 
 ## 7. Transactions sub-tab changes
 
@@ -229,20 +230,23 @@ recent list are not rendered separately):
   treatment (matching `DataSourceRows` / table rows).
 - Tree rows and the recent-transactions list use `numCell`/`fmtSignedMoney` for
   tabular, consistent numbers.
-- Keyboard: chevrons/rows are focusable buttons; the drawer is focus-trapped by
-  the design-system `Drawer`.
+- Keyboard: chevrons/rows are focusable buttons; the inline register panel is
+  plain page content (no focus trap needed — see §6.3).
 
 ## 10. Files touched (planned)
 
-- `src/mock_data.ts` — chart-of-accounts data (`AccountNode` or equivalent),
-  the three new mock transactions, a `getAccountBalance(account)`-style helper
-  and a derived `accountOptions` list; existing `Transaction`/`CompanyData`
-  types unchanged (extended, not broken).
+- `src/mock_data.ts` — the ported basic-1 book: recursive `AccountNode`
+  tree, per-split `transactions` (FY2025/26 dates), derived `summaries`,
+  and helpers (`accountPathOf`, `transactionsFor`, `accountBalance`,
+  `groupBalance`, `chartAccountNames`). The `Transaction`/`CompanyData`
+  interfaces are unchanged.
 - `src/views/Accounts.tsx` — tab reorder/rename, new Balances sections, moved
-  chart + monthly table, derived filter, drawer wiring, "All transactions →"
+  chart + monthly table, derived filter, inline register panel (§6) with
+  running balance, bronze selected-row indicator, "All transactions →"
   handler.
-- `src/components/Shared.tsx` — only if a small shared piece (e.g. compact
-  transaction row) is worth extracting; otherwise keep changes local.
+- The generator script that produced the ported book is a throwaway in
+  `/tmp` (not committed); the book itself is committed as data in
+  `mock_data.ts`.
 - No changes to `db.ts`, `App.tsx`, or other views.
 
 ## 11. Out of scope / future
@@ -252,5 +256,9 @@ recent list are not rendered separately):
 - Real balances will come from the ledger backend (`POST …/ledgers` +
   account views); the derived-from-transactions approach is a mock stand-in and
   should be replaced by API data with the tree kept as the UI shape.
-- Deep nesting (3+ levels), drag-to-reorder, account editing, and GnuCash
-  natural-sign toggle are future work.
+- Drag-to-reorder, account editing, and a GnuCash natural-sign toggle are
+  future work. A full-screen register (with search/filter per account) could
+  replace the inline panel later.
+- The old floating Drawer behaviour (backdrop, ESC-to-close) is intentionally
+  **not** used here — the panel is inline per the product decision that
+  selecting an account is a persistent, non-modal action.

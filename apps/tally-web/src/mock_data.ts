@@ -131,72 +131,262 @@ export function searchCompanies(query: string): CompanySearchResult[] {
 }
 
 // ---------- transactions ----------
+// One row per split of the basic-1 GnuCash book (see the chart of accounts
+// below). Amounts follow the app sign convention (income and expenses
+// positive, liabilities and equity negative); dates are shifted into
+// FY2025/26 so the sample looks current.
 export interface Transaction {
   id: string
   date: string // ISO
   description: string
   account: string
   source: 'Starling' | 'Barclays' | 'Manual'
-  amount: number // GBP; positive = income, negative = expense
+  amount: number // GBP; positive = income / expense (debit-normal), negative = liability / equity / contra
   status: 'cleared' | 'pending' | 'matched'
 }
 
 export const transactions: Transaction[] = [
-  { id: 't01', date: '2026-08-07', description: 'Sale — invoice #1042 (BrightBox Ltd)', account: 'Sales', source: 'Starling', amount: 4280.0, status: 'cleared' },
-  { id: 't02', date: '2026-08-05', description: 'Stripe payout — July online sales', account: 'Sales', source: 'Starling', amount: 9310.2, status: 'cleared' },
-  { id: 't03', date: '2026-08-04', description: 'Rent — Unit 3, Market Street', account: 'Rent', source: 'Barclays', amount: -1850.0, status: 'cleared' },
-  { id: 't04', date: '2026-08-01', description: 'HMRC — CT payment (FY2024/25)', account: 'Tax', source: 'Barclays', amount: -2874.55, status: 'cleared' },
-  { id: 't05', date: '2026-07-31', description: 'Salaries — July', account: 'Payroll', source: 'Barclays', amount: -12840.0, status: 'cleared' },
-  { id: 't06', date: '2026-07-29', description: 'Octopus Energy — July electricity', account: 'Utilities', source: 'Starling', amount: -412.18, status: 'pending' },
-  { id: 't07', date: '2026-07-27', description: 'Sale — invoice #1041 (Cobble & Pine)', account: 'Sales', source: 'Starling', amount: 3150.0, status: 'cleared' },
-  { id: 't08', date: '2026-07-24', description: 'AWS — hosting, July', account: 'Software', source: 'Barclays', amount: -96.42, status: 'matched' },
-  { id: 't09', date: '2026-07-20', description: 'BT Business — line rental', account: 'Telecom', source: 'Barclays', amount: -74.99, status: 'cleared' },
-  { id: 't10', date: '2026-07-15', description: 'VAT — payment to HMRC (Q2)', account: 'Tax', source: 'Barclays', amount: -2210.0, status: 'cleared' },
-  { id: 't11', date: '2026-07-12', description: 'Sale — invoice #1040 (Halewood Studio)', account: 'Sales', source: 'Starling', amount: 2048.5, status: 'cleared' },
-  { id: 't12', date: '2026-07-08', description: 'Google Workspace — 6 seats', account: 'Software', source: 'Starling', amount: -54.0, status: 'matched' },
-  { id: 't13', date: '2026-07-02', description: 'Insurance — annual policy premium', account: 'Insurance', source: 'Barclays', amount: -1285.0, status: 'cleared' },
-  { id: 't14', date: '2026-06-30', description: 'Salaries — June', account: 'Payroll', source: 'Barclays', amount: -12840.0, status: 'cleared' },
-  { id: 't15', date: '2026-06-27', description: 'Sale — invoice #1039 (BrightBox Ltd)', account: 'Sales', source: 'Starling', amount: 3560.0, status: 'cleared' },
-  { id: 't16', date: '2026-06-18', description: 'Office supplies — Printworks', account: 'Office', source: 'Starling', amount: -238.4, status: 'cleared' },
-  // Incorporation-era entries: they give Assets / Liabilities / Equity derived
-  // balances in the chart of accounts without disturbing the "recent" lists.
-  { id: 't17', date: '2024-04-02', description: 'Loan drawdown — Lloyds', account: 'Loan', source: 'Barclays', amount: -20000, status: 'cleared' },
-  { id: 't18', date: '2024-04-01', description: 'Share capital — incorporation', account: 'Share capital', source: 'Manual', amount: -15000, status: 'cleared' },
-  { id: 't19', date: '2024-04-01', description: 'Opening balance — bank transfer', account: 'Starling', source: 'Starling', amount: 45000, status: 'cleared' },
+  { id: 't01', date: "2025-04-01", description: "Shareholders initial stock purchase", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 1250.0, status: 'cleared' },
+  { id: 't02', date: "2025-04-01", description: "Shareholders initial stock purchase", account: "Equity/Shareholdings/Preference Shares", source: "Manual", amount: -1250.0, status: 'cleared' },
+  { id: 't03', date: "2025-08-01", description: "Internet", account: "Expenses/VAT Purchases/Telecoms", source: "Manual", amount: 136.71, status: 'cleared' },
+  { id: 't04', date: "2025-08-01", description: "Internet", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -136.71, status: 'cleared' },
+  { id: 't05', date: "2025-08-16", description: "Employee 1", account: "Expenses/Emoluments/Employees/Net Salaries", source: "Manual", amount: 1127.0, status: 'cleared' },
+  { id: 't06', date: "2025-08-16", description: "Employee 1", account: "Expenses/Emoluments/Employer Pension Contribution", source: "Manual", amount: 100.0, status: 'cleared' },
+  { id: 't07', date: "2025-08-16", description: "Employee 1", account: "Expenses/Emoluments/Employees/Income Tax", source: "Manual", amount: 120.0, status: 'cleared' },
+  { id: 't08', date: "2025-08-16", description: "Employee 1", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -1347.0, status: 'cleared' },
+  { id: 't09', date: "2025-08-20", description: "Stock purchase", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 3750.0, status: 'cleared' },
+  { id: 't10', date: "2025-08-20", description: "Stock purchase", account: "Equity/Shareholdings/Ordinary Shares", source: "Manual", amount: -3750.0, status: 'cleared' },
+  { id: 't11', date: "2025-08-20", description: "Bank charges", account: "Expenses/VAT Purchases/Bank Charges", source: "Manual", amount: 101.78, status: 'cleared' },
+  { id: 't12', date: "2025-08-20", description: "Bank charges", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -101.78, status: 'cleared' },
+  { id: 't13', date: "2025-08-20", description: "Printer cartridges", account: "Expenses/VAT Purchases/Office", source: "Manual", amount: 438.21, status: 'cleared' },
+  { id: 't14', date: "2025-08-20", description: "Printer cartridges", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -438.21, status: 'cleared' },
+  { id: 't15', date: "2025-08-20", description: "Travel/accom", account: "Expenses/VAT Purchases/Travel/Accom", source: "Manual", amount: 67.81, status: 'cleared' },
+  { id: 't16', date: "2025-08-20", description: "Travel/accom", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -67.81, status: 'cleared' },
+  { id: 't17', date: "2025-08-20", description: "Sundries", account: "Expenses/VAT Purchases/Sundries", source: "Manual", amount: 36.61, status: 'cleared' },
+  { id: 't18', date: "2025-08-20", description: "Sundries", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -36.61, status: 'cleared' },
+  { id: 't19', date: "2025-08-29", description: "Computer equipment", account: "Assets/Capital Equipment/Computer Equipment", source: "Manual", amount: 827.41, status: 'cleared' },
+  { id: 't20', date: "2025-08-29", description: "Computer equipment", account: "Assets/VAT/Input", source: "Manual", amount: 165.48, status: 'cleared' },
+  { id: 't21', date: "2025-08-29", description: "Computer equipment", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -992.89, status: 'cleared' },
+  { id: 't22', date: "2025-09-15", description: "Interest paid", account: "Expenses/Interest Paid", source: "Manual", amount: 42.0, status: 'cleared' },
+  { id: 't23', date: "2025-09-15", description: "Interest paid", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -42.0, status: 'cleared' },
+  { id: 't24', date: "2025-09-25", description: "Interest received", account: "Income/Interest", source: "Manual", amount: 142.0, status: 'cleared' },
+  { id: 't25', date: "2025-09-25", description: "Interest received", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 142.0, status: 'cleared' },
+  { id: 't26', date: "2025-09-30", description: "Contract 1b", account: "Assets/Owed To Us", source: "Manual", amount: 4094.4, status: 'cleared' },
+  { id: 't27', date: "2025-09-30", description: "Contract 1b", account: "Income/Sales/UK", source: "Manual", amount: 3412.0, status: 'cleared' },
+  { id: 't28', date: "2025-09-30", description: "Contract 1b", account: "Liabilities/VAT/Output/Sales", source: "Manual", amount: -682.4, status: 'cleared' },
+  { id: 't29', date: "2025-10-18", description: "Contract 1b payment", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 4094.4, status: 'cleared' },
+  { id: 't30', date: "2025-10-18", description: "Contract 1b payment", account: "Assets/Owed To Us", source: "Manual", amount: -4094.4, status: 'cleared' },
+  { id: 't31', date: "2025-10-20", description: "Contract 1c", account: "Assets/Owed To Us", source: "Manual", amount: 4094.4, status: 'cleared' },
+  { id: 't32', date: "2025-10-20", description: "Contract 1c", account: "Income/Sales/UK", source: "Manual", amount: 3412.0, status: 'cleared' },
+  { id: 't33', date: "2025-10-20", description: "Contract 1c", account: "Liabilities/VAT/Output/Sales", source: "Manual", amount: -682.4, status: 'cleared' },
+  { id: 't34', date: "2025-11-13", description: "Deprec", account: "Expenses/Depreciation", source: "Manual", amount: 194.31, status: 'cleared' },
+  { id: 't35', date: "2025-11-13", description: "Deprec", account: "Assets/Capital Equipment/Depreciation", source: "Manual", amount: -194.31, status: 'cleared' },
+  { id: 't36', date: "2025-11-13", description: "Corp tax", account: "Equity/Corporation Tax/Corporation Tax", source: "Manual", amount: 1655.57, status: 'cleared' },
+  { id: 't37', date: "2025-11-13", description: "Corp tax", account: "Liabilities/Owed Corporation Tax", source: "Manual", amount: -1655.57, status: 'cleared' },
+  { id: 't38', date: "2025-11-18", description: "Contract 1 payment", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 5054.4, status: 'cleared' },
+  { id: 't39', date: "2025-11-18", description: "Contract 1 payment", account: "Assets/Owed To Us", source: "Manual", amount: -5054.4, status: 'cleared' },
+  { id: 't40', date: "2025-11-27", description: "Internet", account: "Expenses/VAT Purchases/Telecoms", source: "Manual", amount: 958.0, status: 'cleared' },
+  { id: 't41', date: "2025-11-27", description: "Internet", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -958.0, status: 'cleared' },
+  { id: 't42', date: "2025-11-27", description: "Pay accountant", account: "Expenses/VAT Purchases/Accountant", source: "Manual", amount: 1487.0, status: 'cleared' },
+  { id: 't43', date: "2025-11-27", description: "Pay accountant", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -1487.0, status: 'cleared' },
+  { id: 't44', date: "2025-11-27", description: "Bank charges", account: "Expenses/VAT Purchases/Bank Charges", source: "Manual", amount: 482.76, status: 'cleared' },
+  { id: 't45', date: "2025-11-27", description: "Bank charges", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -482.76, status: 'cleared' },
+  { id: 't46', date: "2025-11-27", description: "Printer cartridges", account: "Expenses/VAT Purchases/Office", source: "Manual", amount: 67.34, status: 'cleared' },
+  { id: 't47', date: "2025-11-27", description: "Printer cartridges", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -67.34, status: 'cleared' },
+  { id: 't48', date: "2025-11-27", description: "Travel/accom", account: "Expenses/VAT Purchases/Travel/Accom", source: "Manual", amount: 622.0, status: 'cleared' },
+  { id: 't49', date: "2025-11-27", description: "Travel/accom", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -622.0, status: 'cleared' },
+  { id: 't50', date: "2025-11-27", description: "Sundries", account: "Expenses/VAT Purchases/Sundries", source: "Manual", amount: 82.41, status: 'cleared' },
+  { id: 't51', date: "2025-11-27", description: "Sundries", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -82.41, status: 'cleared' },
+  { id: 't52', date: "2025-11-27", description: "Subscriptions", account: "Expenses/VAT Purchases/Subscriptions", source: "Manual", amount: 242.0, status: 'cleared' },
+  { id: 't53', date: "2025-11-27", description: "Subscriptions", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -242.0, status: 'cleared' },
+  { id: 't54', date: "2025-12-03", description: "Contract 2", account: "Assets/Owed To Us", source: "Manual", amount: 3744.0, status: 'cleared' },
+  { id: 't55', date: "2025-12-03", description: "Contract 2", account: "Income/Sales/UK", source: "Manual", amount: 3120.0, status: 'cleared' },
+  { id: 't56', date: "2025-12-03", description: "Contract 2", account: "Liabilities/VAT/Output/Sales", source: "Manual", amount: -624.0, status: 'cleared' },
+  { id: 't57', date: "2025-12-04", description: "Employee 1", account: "Expenses/Emoluments/Employees/Net Salaries", source: "Manual", amount: 4477.31, status: 'cleared' },
+  { id: 't58', date: "2025-12-04", description: "Employee 1", account: "Expenses/Emoluments/Employer Pension Contribution", source: "Manual", amount: 91.12, status: 'cleared' },
+  { id: 't59', date: "2025-12-04", description: "Employee 1", account: "Expenses/Emoluments/Employees/Income Tax", source: "Manual", amount: 421.12, status: 'cleared' },
+  { id: 't60', date: "2025-12-04", description: "Employee 1", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -4989.55, status: 'cleared' },
+  { id: 't61', date: "2025-12-09", description: "Computer equipment", account: "Assets/Capital Equipment/Computer Equipment", source: "Manual", amount: 591.12, status: 'cleared' },
+  { id: 't62', date: "2025-12-09", description: "Computer equipment", account: "Assets/VAT/Input", source: "Manual", amount: 118.22, status: 'cleared' },
+  { id: 't63', date: "2025-12-09", description: "Computer equipment", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -709.34, status: 'cleared' },
+  { id: 't64', date: "2025-12-13", description: "Buy-in", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 3000.0, status: 'cleared' },
+  { id: 't65', date: "2025-12-13", description: "Buy-in", account: "Equity/Shareholdings/Preference Shares", source: "Manual", amount: -3000.0, status: 'cleared' },
+  { id: 't66', date: "2025-12-13", description: "Contract 1c payment", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 4094.4, status: 'cleared' },
+  { id: 't67', date: "2025-12-13", description: "Contract 1c payment", account: "Assets/Owed To Us", source: "Manual", amount: -4094.4, status: 'cleared' },
+  { id: 't68', date: "2025-12-20", description: "Pay accountant", account: "Expenses/VAT Purchases/Accountant", source: "Manual", amount: 482.0, status: 'cleared' },
+  { id: 't69', date: "2025-12-20", description: "Pay accountant", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -482.0, status: 'cleared' },
+  { id: 't70', date: "2026-01-02", description: "Pay Corp tax", account: "Liabilities/Owed Corporation Tax", source: "Manual", amount: 1655.57, status: 'cleared' },
+  { id: 't71', date: "2026-01-02", description: "Pay Corp tax", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -1655.57, status: 'cleared' },
+  { id: 't72', date: "2026-01-11", description: "Interest paid", account: "Expenses/Interest Paid", source: "Manual", amount: 67.0, status: 'cleared' },
+  { id: 't73', date: "2026-01-11", description: "Interest paid", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -67.0, status: 'cleared' },
+  { id: 't74', date: "2026-01-21", description: "Interest received", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 98.0, status: 'cleared' },
+  { id: 't75', date: "2026-01-21", description: "Interest received", account: "Income/Interest", source: "Manual", amount: 98.0, status: 'cleared' },
+  { id: 't76', date: "2026-02-10", description: "Contract 2 payment", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 3744.0, status: 'cleared' },
+  { id: 't77', date: "2026-02-10", description: "Contract 2 payment", account: "Assets/Owed To Us", source: "Manual", amount: -3744.0, status: 'cleared' },
+  { id: 't78', date: "2026-02-10", description: "Contract 2b", account: "Assets/Owed To Us", source: "Manual", amount: 4800.14, status: 'cleared' },
+  { id: 't79', date: "2026-02-10", description: "Contract 2b", account: "Income/Sales/UK", source: "Manual", amount: 4000.12, status: 'cleared' },
+  { id: 't80', date: "2026-02-10", description: "Contract 2b", account: "Liabilities/VAT/Output/Sales", source: "Manual", amount: -800.02, status: 'cleared' },
+  { id: 't81', date: "2026-02-15", description: "Contract 2c", account: "Assets/Owed To Us", source: "Manual", amount: 4800.0, status: 'cleared' },
+  { id: 't82', date: "2026-02-15", description: "Contract 2c", account: "Income/Sales/UK", source: "Manual", amount: 4000.0, status: 'cleared' },
+  { id: 't83', date: "2026-02-15", description: "Contract 2c", account: "Liabilities/VAT/Output/Sales", source: "Manual", amount: -800.0, status: 'cleared' },
+  { id: 't84', date: "2026-03-02", description: "Divident payout", account: "Equity/Dividends/Shareholder Dividends 1", source: "Manual", amount: 125.0, status: 'cleared' },
+  { id: 't85', date: "2026-03-02", description: "Divident payout", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: -125.0, status: 'cleared' },
+  { id: 't86', date: "2026-03-02", description: "Contract 2b payment", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 4800.14, status: 'cleared' },
+  { id: 't87', date: "2026-03-02", description: "Contract 2b payment", account: "Assets/Owed To Us", source: "Manual", amount: -4800.14, status: 'cleared' },
+  { id: 't88', date: "2026-03-12", description: "Deprec", account: "Expenses/Depreciation", source: "Manual", amount: 291.48, status: 'cleared' },
+  { id: 't89', date: "2026-03-12", description: "Deprec", account: "Assets/Capital Equipment/Depreciation", source: "Manual", amount: -291.48, status: 'cleared' },
+  { id: 't90', date: "2026-03-12", description: "Corp tax", account: "Equity/Corporation Tax/Corporation Tax", source: "Manual", amount: 123.5, status: 'cleared' },
+  { id: 't91', date: "2026-03-12", description: "Corp tax", account: "Liabilities/Owed Corporation Tax", source: "Manual", amount: -123.5, status: 'cleared' },
+  { id: 't92', date: "2026-03-12", description: "R&D Enhanced Expenditure for project Iguana - £357.69 @ 130%", account: "Expenses/R&D Enhanced Expenditure/Expenditure/Project Iguana/Staffing Costs", source: "Manual", amount: 465.2, status: 'cleared' },
+  { id: 't93', date: "2026-03-12", description: "R&D Enhanced Expenditure for project Iguana - £357.69 @ 130%", account: "Expenses/R&D Enhanced Expenditure/Relief Claimed", source: "Manual", amount: -465.2, status: 'cleared' },
+  { id: 't94', date: "2026-03-31", description: "Contract 2c payment", account: "Assets/Bank Accounts/Current Account", source: "Starling", amount: 4800.0, status: 'cleared' },
+  { id: 't95', date: "2026-03-31", description: "Contract 2c payment", account: "Assets/Owed To Us", source: "Manual", amount: -4800.0, status: 'cleared' },
 ]
-
 // ---------- chart of accounts ----------
-// GnuCash-style top-level groups with their leaf accounts. Leaf names MUST
-// match `Transaction.account`, because balances are derived from the
-// transactions list (tree and table therefore always agree).
-export interface AccountLeaf {
+// The whole GnuCash book from libs/ixbrl/example_data/basic-1/input.gnucash,
+// kept as a tree in memory and re-rooted under the app's five top-level groups
+// by account type. Balances derive from the transactions list (keyed by full
+// path), so the tree, the account registers and the YTD cards always agree.
+export interface AccountNode {
   name: string
+  type: string
+  children: AccountNode[]
 }
 
-export interface AccountGroup {
-  name: string
-  accounts: AccountLeaf[]
-}
-
-export const chartOfAccounts: AccountGroup[] = [
-  { name: 'Assets', accounts: [{ name: 'Starling' }, { name: 'Barclays' }] },
-  { name: 'Liabilities', accounts: [{ name: 'Loan' }] },
-  { name: 'Equity', accounts: [{ name: 'Share capital' }] },
-  { name: 'Income', accounts: [{ name: 'Sales' }] },
-  {
-    name: 'Expenses',
-    accounts: [
-      { name: 'Rent' },
-      { name: 'Utilities' },
-      { name: 'Software' },
-      { name: 'Telecom' },
-      { name: 'Insurance' },
-      { name: 'Office' },
-      { name: 'Payroll' },
-      { name: 'Tax' },
-    ],
-  },
+export const chartOfAccounts: AccountNode[] = [
+  { name: "Assets", type: "ASSETS", children: [
+    { name: "Bank Accounts", type: "BANK", children: [
+      { name: "Current Account", type: "BANK", children: [] },
+      { name: "Reserve Account", type: "BANK", children: [] },
+    ] },
+    { name: "Capital Equipment", type: "ASSET", children: [
+      { name: "Computer Equipment", type: "ASSET", children: [] },
+      { name: "EU Reverse VAT Purchase", type: "ASSET", children: [] },
+      { name: "Depreciation", type: "ASSET", children: [] },
+    ] },
+    { name: "Other", type: "ASSET", children: [] },
+    { name: "Owed To Us", type: "ASSET", children: [] },
+    { name: "VAT Repayments Due", type: "ASSET", children: [] },
+    { name: "Accounts Receivable", type: "RECEIVABLE", children: [] },
+    { name: "Cash", type: "CASH", children: [] },
+    { name: "VAT", type: "WRAPPER", children: [
+      { name: "Input", type: "ASSET", children: [] },
+    ] },
+    { name: "Settlement", type: "WRAPPER", children: [
+      { name: "Input", type: "ASSET", children: [] },
+    ] },
+  ] },
+  { name: "Liabilities", type: "LIABILITIES", children: [
+    { name: "Owed Corporation Tax", type: "LIABILITY", children: [] },
+    { name: "Owed Fees", type: "LIABILITY", children: [] },
+    { name: "Owed Tax/NI", type: "LIABILITY", children: [] },
+    { name: "Other", type: "LIABILITY", children: [] },
+    { name: "Credit Cards", type: "LIABILITY", children: [] },
+    { name: "VAT", type: "LIABILITY", children: [
+      { name: "Output", type: "LIABILITY", children: [
+        { name: "EU", type: "LIABILITY", children: [] },
+        { name: "Sales", type: "LIABILITY", children: [] },
+      ] },
+      { name: "Settlement", type: "LIABILITY", children: [
+        { name: "Output", type: "LIABILITY", children: [] },
+      ] },
+    ] },
+    { name: "Accounts Payable", type: "PAYABLE", children: [] },
+  ] },
+  { name: "Equity", type: "EQUITY", children: [
+    { name: "Director's Loan", type: "EQUITY", children: [] },
+    { name: "Dividends", type: "EQUITY", children: [
+      { name: "Director's Dividends 1", type: "EQUITY", children: [] },
+      { name: "Director's Dividends 2", type: "EQUITY", children: [] },
+      { name: "Shareholder Dividends 1", type: "EQUITY", children: [] },
+    ] },
+    { name: "Opening Balances", type: "EQUITY", children: [] },
+    { name: "Grants", type: "EQUITY", children: [] },
+    { name: "Shareholdings", type: "EQUITY", children: [
+      { name: "Ordinary Shares", type: "EQUITY", children: [] },
+      { name: "Preference Shares", type: "EQUITY", children: [] },
+    ] },
+    { name: "Corporation Tax", type: "EQUITY", children: [
+      { name: "Corporation Tax", type: "EQUITY", children: [] },
+    ] },
+  ] },
+  { name: "Income", type: "INCOME", children: [
+    { name: "Interest", type: "INCOME", children: [] },
+    { name: "Misc", type: "INCOME", children: [] },
+    { name: "Sales", type: "INCOME", children: [
+      { name: "UK", type: "INCOME", children: [] },
+      { name: "EU", type: "INCOME", children: [
+        { name: "Goods", type: "INCOME", children: [] },
+        { name: "Services", type: "INCOME", children: [] },
+      ] },
+      { name: "World", type: "INCOME", children: [] },
+    ] },
+  ] },
+  { name: "Expenses", type: "EXPENSES", children: [
+    { name: "Depreciation", type: "EXPENSE", children: [] },
+    { name: "Emoluments", type: "EXPENSE", children: [
+      { name: "Director's Fees", type: "EXPENSE", children: [] },
+      { name: "Employer's NICs", type: "EXPENSE", children: [] },
+      { name: "Employees", type: "EXPENSE", children: [
+        { name: "Net Salaries", type: "EXPENSE", children: [] },
+        { name: "Stakeholder Contributions", type: "EXPENSE", children: [] },
+        { name: "NICs", type: "EXPENSE", children: [] },
+        { name: "Income Tax", type: "EXPENSE", children: [] },
+      ] },
+      { name: "Employer Pension Contribution", type: "EXPENSE", children: [] },
+    ] },
+    { name: "Other non-VAT expenses", type: "EXPENSE", children: [] },
+    { name: "VAT Purchases", type: "EXPENSE", children: [
+      { name: "Accountant", type: "EXPENSE", children: [] },
+      { name: "Bank Charges", type: "EXPENSE", children: [] },
+      { name: "EU Reverse VAT", type: "EXPENSE", children: [] },
+      { name: "Office", type: "EXPENSE", children: [] },
+      { name: "Telecoms", type: "EXPENSE", children: [] },
+      { name: "Software", type: "EXPENSE", children: [] },
+      { name: "Subscriptions", type: "EXPENSE", children: [] },
+      { name: "Sundries", type: "EXPENSE", children: [] },
+      { name: "Travel/Accom", type: "EXPENSE", children: [] },
+    ] },
+    { name: "Interest Paid", type: "EXPENSE", children: [] },
+    { name: "R&D Enhanced Expenditure", type: "EXPENSE", children: [
+      { name: "Relief Claimed", type: "EXPENSE", children: [] },
+      { name: "Expenditure", type: "EXPENSE", children: [
+        { name: "Project Iguana", type: "EXPENSE", children: [
+          { name: "Staffing Costs", type: "EXPENSE", children: [] },
+          { name: "Software/Consumables", type: "EXPENSE", children: [] },
+          { name: "External Workers", type: "EXPENSE", children: [] },
+        ] },
+      ] },
+    ] },
+  ] },
 ]
+
+// Path of every account ("Assets/Bank Accounts/Current Account") and the leaf
+// paths in chart order — built once from the tree at module load.
+const nodePaths = new Map<AccountNode, string>()
+const leafPaths: string[] = []
+const indexNode = (node: AccountNode, prefix: string): void => {
+  const path = prefix ? `${prefix}/${node.name}` : node.name
+  nodePaths.set(node, path)
+  if (node.children.length === 0) leafPaths.push(path)
+  for (const child of node.children) indexNode(child, path)
+}
+for (const group of chartOfAccounts) indexNode(group, '')
+
+/** Absolute path of a tree node. */
+export function accountPathOf(node: AccountNode): string {
+  return nodePaths.get(node) ?? node.name
+}
+
+/** Leaf name of an account path, e.g. "Current Account". */
+export function accountLabel(path: string): string {
+  return path.split('/').pop() ?? path
+}
+
+/** Path minus the top-level group, e.g. "Bank Accounts › Current Account". */
+export function accountBreadcrumb(path: string): string {
+  return path.split('/').slice(1).join(' › ')
+}
 
 export function transactionsFor(account: string): Transaction[] {
   return transactions.filter((t) => t.account === account)
@@ -207,16 +397,16 @@ export function accountBalance(account: string): number {
   return transactionsFor(account).reduce((s, t) => s + t.amount, 0)
 }
 
-/** Rolled-up total of a top-level group's leaf accounts. */
-export function groupBalance(group: AccountGroup): number {
-  return group.accounts.reduce((s, a) => s + accountBalance(a.name), 0)
+/** Rolled-up total of a tree node — the sum of every descendant leaf. */
+export function groupBalance(node: AccountNode): number {
+  if (node.children.length === 0) return accountBalance(accountPathOf(node))
+  return node.children.reduce((s, child) => s + groupBalance(child), 0)
 }
 
-/** Leaf account names in chart order (drives the Transactions filter dropdown). */
+/** Leaf account paths in chart order (drives the Transactions filter dropdown). */
 export function chartAccountNames(): string[] {
-  return chartOfAccounts.flatMap((g) => g.accounts.map((a) => a.name))
+  return leafPaths
 }
-
 // ---------- summaries ----------
 export interface MonthSummary {
   month: string
@@ -225,14 +415,25 @@ export interface MonthSummary {
   vat: number
 }
 
-export const summaries: MonthSummary[] = [
-  { month: 'Mar 2026', income: 36140, expenses: 20890, vat: 3210 },
-  { month: 'Apr 2026', income: 38240, expenses: 21300, vat: 3480 },
-  { month: 'May 2026', income: 41720, expenses: 22450, vat: 3790 },
-  { month: 'Jun 2026', income: 35480, expenses: 20180, vat: 3225 },
-  { month: 'Jul 2026', income: 38950, expenses: 23200, vat: 3540 },
-  { month: 'Aug 2026', income: 33610, expenses: 19840, vat: 3055 },
-]
+export const summaries: MonthSummary[] = (() => {
+  // Derived from the transactions so the YTD cards reconcile with the chart.
+  // Income = sums on Income/ accounts; expenses = sums on Expenses/ accounts
+  // (positive, so credits like the R&D relief reduce the spend);
+  // VAT = postings on the VAT output / input accounts.
+  const byMonth = new Map<string, { income: number; expenses: number; vat: number }>()
+  for (const t of transactions) {
+    const key = t.date.slice(0, 7)
+    const m = byMonth.get(key) ?? { income: 0, expenses: 0, vat: 0 }
+    if (t.account.startsWith('Income/')) m.income += t.amount
+    if (t.account.startsWith('Expenses/')) m.expenses += t.amount
+    if (t.account.includes('/VAT/') || t.account.includes('/Settlement/')) m.vat += t.amount
+    byMonth.set(key, m)
+  }
+  return [...byMonth.entries()]
+    .filter(([, v]) => v.income !== 0 || v.expenses !== 0 || v.vat !== 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, v]) => ({ month: fmtMonth(`${key}-01`), ...v }))
+})()
 
 // ---------- data sources ----------
 export interface DataSource {
