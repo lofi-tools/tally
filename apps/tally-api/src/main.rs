@@ -61,13 +61,9 @@ async fn main() -> Result<()> {
 
     // One-shot cleanup of abandoned temporary users (temp-user spec §8): a
     // couple of queries, runs in milliseconds. Best-effort — a fault here
-    // must not take down startup.
-    let guest_ttl_days = std::env::var("TALLY_GUEST_TTL_DAYS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(tally_api::sweep::DEFAULT_GUEST_TTL_DAYS);
-    match tally_api::sweep::sweep_abandoned_guests(&mut db, guest_ttl_days).await {
-        Ok(deleted) => tracing::info!(deleted, guest_ttl_days, "guest sweep complete"),
+    // must not take down startup. The TTL is hardcoded (§12.3).
+    match tally_api::sweep::sweep_abandoned_guests(&mut db, tally_api::sweep::DEFAULT_GUEST_TTL_DAYS).await {
+        Ok(deleted) => tracing::info!(deleted, "guest sweep complete"),
         Err(e) => tracing::error!(error = %e, "guest sweep failed"),
     }
 

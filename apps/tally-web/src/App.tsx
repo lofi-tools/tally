@@ -1,19 +1,21 @@
-import { createMemo, createSignal, For, Match, onCleanup, onMount, Show, Switch as SolidSwitch, type Component } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, Match, onCleanup, onMount, Show, Switch as SolidSwitch, type Component } from 'solid-js'
 import { Avatar, Badge, Button, Kbd, Select, Toaster, toaster } from '@tally/design-system'
 import { createListCollection } from '@tally/design-system'
-import { Building2, ChevronDown, FileCheck2, LayoutGrid, LogIn, LogOut, Plug, Plus, Settings, Users, WifiOff } from 'lucide-solid'
+import { Building2, ChevronDown, FileCheck2, LayoutGrid, LogIn, LogOut, Plug, Plus, Settings, UserRound, Users, WifiOff } from 'lucide-solid'
 import { css } from 'styled-system/css'
 import { bankOptions, getCompanyData, DEMO_COMPANY_ID, demoCompany, type Company, type DataSource } from './mock_data'
 import { loadDb, saveDb, type Db } from './db'
-import { restoreSession, session, signOut } from './session'
-import { createCompany, type Company as ApiCompany } from './api'
+import { restoreSession, session, setSession, signOut } from './session'
+import { bootstrapGuest, createCompany, getToken, listCompanies, NetworkError, setToken, type Company as ApiCompany } from './api'
+import { ensureGuestId } from './guest'
+import { enqueueAdd, flushOutbox, listOutbox } from './outbox'
 import { AccountsView } from './views/Accounts'
 import { FilingsView } from './views/Filings'
 import { PayrollView } from './views/Payroll'
 import { IntegrationsView } from './views/Integrations'
 import { SettingsView } from './views/Settings'
 import { AddCompanyDialog, type NewCompanyInput } from './components/AddCompanyDialog'
-import { migrateCompanies, SignInDialog, toastMigration } from './components/SignInDialog'
+import { SignInDialog } from './components/SignInDialog'
 import { DemoBanner, type DemoBannerVariant } from './components/DemoBanner'
 import { DevtoolsBanner } from './components/DevtoolsBanner'
 
@@ -139,20 +141,75 @@ export function App() {
   const [companyId, setCompanyId] = createSignal<string>(DEMO_COMPANY_ID)
   const [addOpen, setAddOpen] = createSignal(false)
   const [signInOpen, setSignInOpen] = createSignal(false)
-  const [retrying, setRetrying] = createSignal(false)
 
-  const companies = () => db().companies
+  // User companies come from the API (owned by the signed-in user or the
+  // guest workspace — temp-user spec §7.4); the local DB only holds sources.
+  const [apiCompanies, setApiCompanies] = createSignal<ApiCompany[]>([])
   const sources = () => db().sources
 
   // Session: restore a stored token on boot (local mode until resolved — no
   // login-wall flash, §5.2 / §14.6).
   onMount(() => {
-    void restoreSession()
+    void (async () => {
+      await restoreSession()
+      // Offline adds queued earlier need a workspace to sync into — if the
+      // browser has no session but does have a pending outbox, bootstrap the
+      // guest now (temp-user spec §7.5: "app boot with connectivity").
+      if (!getToken() && listOutbox().length > 0) {
+        try {
+          const resp = await bootstrapGuest(ensureGuestId())
+          setToken(resp.token)
+          setSession({ status: 'signed-in', user: resp.user })
+        } catch {
+          // Still offline — the outbox waits.
+        }
+      }
+    })()
   })
 
   const sessionUser = createMemo(() => {
     const s = session()
     return s.status === 'signed-in' ? s.user : null
+  })
+
+  /** Guest mode: signed-in with a temporary user (temp-user spec §7.3). */
+  const isGuest = createMemo(() => {
+    const s = session()
+    return s.status === 'signed-in' && s.user.is_temporary
+  })
+
+  /** The API `Company` shape → the internal display shape the views use. */
+  const toDisplayCompany = (api: ApiCompany): Company => ({
+    id: api.id,
+    name: api.name,
+    companyNumber: api.company_number,
+    utr: api.tax_reference || '', // set in Settings when filing (never at add time)
+    sic: api.sic_codes?.[0] ?? '',
+    address: api.address_lines?.[0] ?? '',
+    standard: api.accounting_standard === 'FRS 102' ? 'FRS 102' : 'FRS 105',
+    registrationDate: api.registration_date ?? undefined,
+  })
+
+  const companies = createMemo(() => apiCompanies().map(toDisplayCompany))
+
+  const refreshCompanies = async (): Promise<void> => {
+    try {
+      setApiCompanies(await listCompanies())
+    } catch {
+      // Offline — keep whatever is already shown.
+    }
+  }
+
+  // Session → company list: fetch on sign-in (login, guest bootstrap,
+  // adoption, restore) and replay offline adds; clear on sign-out.
+  createEffect(() => {
+    const s = session()
+    if (s.status === 'signed-in') {
+      void refreshCompanies()
+      void flushOutbox(() => void refreshCompanies())
+    } else if (s.status === 'local') {
+      setApiCompanies([])
+    }
   })
 
   // The demo company never retires: it stays in the picker (badged) and is
@@ -216,43 +273,67 @@ export function App() {
     onCleanup(() => window.removeEventListener('keydown', handler))
   })
 
+  /**
+   * Ensure a session exists before an ownership-needing action. Lazy: only
+   * bootstraps the guest workspace here, never at app boot (temp-user spec
+   * §7.2). Throws `NetworkError` when the API is unreachable — the caller
+   * routes to the outbox.
+   */
+  const ensureSession = async (): Promise<void> => {
+    if (getToken()) return // signed-in or restoring — use the token as-is
+    const resp = await bootstrapGuest(ensureGuestId())
+    setToken(resp.token)
+    setSession({ status: 'signed-in', user: resp.user })
+  }
+
   const addCompany = async (input: NewCompanyInput): Promise<void> => {
-    // Signed in: save the company into the user's account (spec §7.1) — the
-    // backend holds the CH key and enriches the profile (address, SIC,
-    // directors…) from the company number.  Local mode keeps today's
-    // localStorage add; registering later migrates it up (SignInDialog).
-    let saved: ApiCompany | null = null
-    if (session().status === 'signed-in') {
-      // UTR is no longer collected at add time — it's entered in Settings
-      // when a return is filed. The registration date anchors the period
-      // guess even when the backend has no CH key.
-      saved = await createCompany({
+    // Guest mode is API-backed end-to-end (temp-user spec §7.4): the company
+    // is created server-side (CH enrichment + the filings backfill job spawn
+    // exactly like a signed-in user's) — never a localStorage row.
+    if (!getToken()) {
+      try {
+        await ensureSession()
+      } catch (e) {
+        if (e instanceof NetworkError) {
+          // Offline: queue the add; it syncs when we're back online.
+          enqueueAdd(input)
+          toaster.create({
+            title: 'Saved offline',
+            description: "You're offline — the company will sync when you're back online.",
+            type: 'info',
+          })
+          return
+        }
+        throw e
+      }
+    }
+    try {
+      const saved = await createCompany({
         name: input.name,
         company_number: input.companyNumber,
         registration_date: input.registrationDate,
+        accounting_standard: input.standard,
       })
+      // Optimistic picker update; the session effect's refetch confirms it.
+      setApiCompanies((list) => [saved, ...list.filter((c) => c.id !== saved.id)])
+      setCompanyId(saved.id)
+      toaster.create({
+        title: 'Company added',
+        description: 'Connect a bank or upload your ledger to start.',
+        type: 'success',
+      })
+    } catch (e) {
+      if (e instanceof NetworkError) {
+        enqueueAdd(input)
+        toaster.create({
+          title: 'Saved offline',
+          description: "You're offline — the company will sync when you're back online.",
+          type: 'info',
+        })
+        return
+      }
+      throw e // the dialog surfaces ApiError toasts
     }
-    // The picker/views are still local-driven, so mirror the company (the
-    // API's id when it exists, so the copy stays stable across sessions).
-    const company: Company = {
-      id:
-        saved?.id ??
-        (input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'company'),
-      name: saved?.name ?? input.name,
-      companyNumber: saved?.company_number ?? input.companyNumber,
-      utr: '', // set later in Settings, only needed to file with HMRC
-      sic: saved?.sic_codes?.[0] ?? '',
-      address: saved?.address_lines?.[0] ?? input.address,
-      standard: input.standard,
-      registrationDate: saved?.registration_date ?? input.registrationDate,
-    }
-    updateDb((d) => ({ ...d, companies: [...d.companies, company] }))
-    setCompanyId(company.id)
-    toaster.create({
-      title: 'Company added',
-      description: 'Connect a bank or upload your ledger to start.',
-      type: 'success',
-    })
   }
 
   const connectSource = (cid: string, bank: (typeof bankOptions)[number]) => {
@@ -275,25 +356,6 @@ export function App() {
       description: 'Mock — real Open Banking consent lands with the backend.',
       type: 'success',
     })
-  }
-
-  /** Remove local companies that the API now owns (§7.3). */
-  const onMigrationComplete = (migratedIds: string[]) => {
-    if (migratedIds.length === 0) return
-    updateDb((d) => ({ ...d, companies: d.companies.filter((c) => !migratedIds.includes(c.id)) }))
-    // If the migrated company was selected, fall back to the demo so the
-    // picker and banner stay consistent with what is on screen.
-    if (migratedIds.includes(companyId())) setCompanyId(DEMO_COMPANY_ID)
-  }
-
-  /** Sidebar "Retry migration": re-runs §7.3 with the token already set. */
-  const retryMigration = async () => {
-    if (retrying()) return
-    setRetrying(true)
-    const result = await migrateCompanies(db().companies)
-    onMigrationComplete(result.migratedIds)
-    setRetrying(false)
-    toastMigration(result)
   }
 
   // Safety net: zero companies of any kind (demo retired + none added).
@@ -331,8 +393,7 @@ export function App() {
         <SignInDialog
           open={signInOpen()}
           onOpenChange={setSignInOpen}
-          localCompanies={companies}
-          onMigrationComplete={onMigrationComplete}
+          defaultMode={isGuest() ? 'register' : 'login'}
         />
         <Toaster />
       </div>
@@ -493,7 +554,27 @@ export function App() {
             </Button>
           </Show>}>
             {(user) => (
-              <>
+              <Show
+                when={!user().is_temporary}
+                fallback={
+                  // Guest workspace (temp-user spec §7.7): the primary action
+                  // is adopting it into an account — no avatar, no migration.
+                  <>
+                    <Button
+                      onClick={() => setSignInOpen(true)}
+                      class={css({ w: 'full', justifyContent: 'flex-start', gap: '2' })}
+                    >
+                      <UserRound class={css({ w: '4', h: '4' })} /> Save your work — create account
+                    </Button>
+                    <span class={css({ px: '2.5', fontSize: 'xs', color: 'fg.subtle' })}>
+                      Guest workspace · stored on this browser
+                    </span>
+                    <Button variant="plain" size="sm" onClick={() => void signOut()} class={css({ w: 'full', justifyContent: 'flex-start', fontSize: 'xs', color: 'fg.muted' })}>
+                      <LogOut class={css({ w: '3.5', h: '3.5' })} /> Sign out
+                    </Button>
+                  </>
+                }
+              >
                 <div class={css({ display: 'flex', alignItems: 'center', gap: '2.5' })}>
                   <Avatar.Root class={css({ h: '8', w: '8', flexShrink: '0' })}>
                     <Avatar.Fallback name={user().display_name}>{initials(user().display_name)}</Avatar.Fallback>
@@ -503,23 +584,10 @@ export function App() {
                     <span class={css({ display: 'block', fontSize: 'xs', color: 'fg.subtle', truncate: true })}>{user().email}</span>
                   </span>
                 </div>
-                {/* Retry migration for companies that failed last time (§7.3). */}
-                <Show when={companies().length > 0}>
-                  <Button
-                    variant="plain"
-                    size="sm"
-                    disabled={retrying()}
-                    loading={retrying()}
-                    onClick={() => void retryMigration()}
-                    class={css({ w: 'full', justifyContent: 'flex-start', fontSize: 'xs', color: 'fg.muted' })}
-                  >
-                    Retry migration ({companies().length})
-                  </Button>
-                </Show>
                 <Button variant="plain" size="sm" onClick={() => void signOut()} class={css({ w: 'full', justifyContent: 'flex-start', fontSize: 'xs', color: 'fg.muted' })}>
                   <LogOut class={css({ w: '3.5', h: '3.5' })} /> Sign out
                 </Button>
-              </>
+              </Show>
             )}
           </Show>
         </div>
@@ -600,8 +668,7 @@ export function App() {
       <SignInDialog
         open={signInOpen()}
         onOpenChange={setSignInOpen}
-        localCompanies={companies}
-        onMigrationComplete={onMigrationComplete}
+        defaultMode={isGuest() ? 'register' : 'login'}
       />
 
       <Toaster />

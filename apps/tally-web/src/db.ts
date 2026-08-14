@@ -1,14 +1,15 @@
-// Versioned localStorage "database" for the mock app. There is no backend
-// yet, so everything the user creates persists here instead. Swap this module
-// for real API calls later — the rest of the app only reads/writes via
-// loadDb/saveDb.
-import { dataSources, DEMO_COMPANY_ID, type Company, type DataSource } from './mock_data'
+// Versioned localStorage store for the pieces that still live client-side.
+//
+// User-added companies are API-backed end-to-end now (temp-user spec §7.4):
+// they live on the backend (owned by the signed-in user or a guest
+// workspace) and are fetched via `GET /companies`, so the local DB no longer
+// holds company rows. What stays here: per-company data-source connections
+// (still a mock until Open Banking lands) — the demo company is pre-seeded.
+import { dataSources, DEMO_COMPANY_ID, type DataSource } from './mock_data'
 
 export interface Db {
   version: 1
-  /** User-added companies (never includes the demo). */
-  companies: Company[]
-  /** Data sources per company id; the demo company is pre-seeded. */
+  /** Data sources per company id (API company ids); the demo is pre-seeded. */
   sources: Record<string, DataSource[]>
 }
 
@@ -17,7 +18,6 @@ export const DB_KEY = 'tally.db.v1'
 function defaults(): Db {
   return {
     version: 1,
-    companies: [],
     sources: { [DEMO_COMPANY_ID]: [...dataSources] },
   }
 }
@@ -41,6 +41,6 @@ export function saveDb(db: Db): void {
   try {
     localStorage.setItem(DB_KEY, JSON.stringify(db))
   } catch {
-    // Storage unavailable (private mode etc.) — the mock app still works in memory.
+    // Storage unavailable (private mode etc.) — the app still works in memory.
   }
 }

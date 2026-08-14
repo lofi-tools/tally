@@ -59,6 +59,8 @@ export interface ApiOptions {
   form?: FormData
   /** Default true-when-token; `false` never sends the token (CH search). */
   auth?: boolean
+  /** Extra request headers (e.g. `X-Guest-Id` for the guest bootstrap). */
+  headers?: Record<string, string>
   /** Resolve with the raw Response (report blobs). */
   raw?: boolean
   signal?: AbortSignal
@@ -70,6 +72,7 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
     const token = getToken()
     if (token) headers.Authorization = `Bearer ${token}`
   }
+  if (opts.headers) Object.assign(headers, opts.headers)
   let body: BodyInit | undefined
   if (opts.json !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -142,6 +145,10 @@ export interface AuthUser {
   email: string
   display_name: string
   created_at: string
+  /** True for guest workspaces (temp-user spec §4) — the UI treats it as guest mode. */
+  is_temporary: boolean
+  /** The client-generated anonymous identity; null for real users. */
+  guest_id: string | null
 }
 export interface AuthResponse {
   token: string
@@ -185,6 +192,8 @@ export interface Company {
   contact_country_dimension: string | null
   phone_type_dimension: string | null
   logo_b64: string | null
+  accounting_standard: string
+  updated_at: string | null
   fy1_year: number
   fy2_year: number
   associated_companies: number | null
@@ -230,6 +239,7 @@ export interface CompanyInput {
   contact_country_dimension?: string
   phone_type_dimension?: string
   logo_b64?: string
+  accounting_standard?: 'FRS 105' | 'FRS 102'
   fy1_year?: number
   fy2_year?: number
   associated_companies?: number
@@ -365,11 +375,27 @@ export interface ReportRequest {
 // ---------------------------------------------------------------------------
 
 // ---- auth ----
-export const register = (body: { display_name: string; email: string; password: string }): Promise<AuthResponse> =>
-  api<AuthResponse>('/auth/register', { method: 'POST', json: body })
+/**
+ * Register (or, with `guestId`, adopt the guest workspace in place — temp-
+ * user spec §5.2/§7.6). The `X-Guest-Id` header is only sent when a guest
+ * id is passed.
+ */
+export const register = (
+  body: { display_name: string; email: string; password: string },
+  guestId?: string,
+): Promise<AuthResponse> =>
+  api<AuthResponse>('/auth/register', {
+    method: 'POST',
+    json: body,
+    ...(guestId ? { headers: { 'X-Guest-Id': guestId } } : {}),
+  })
 
 export const login = (body: { email: string; password: string }): Promise<AuthResponse> =>
   api<AuthResponse>('/auth/login', { method: 'POST', json: body })
+
+/** Bootstrap (or re-issue) a guest session for a client-generated id (§5.1). */
+export const bootstrapGuest = (guestId: string): Promise<AuthResponse> =>
+  api<AuthResponse>('/auth/guest', { method: 'POST', headers: { 'X-Guest-Id': guestId } })
 
 export const logout = (): Promise<void> => api<void>('/auth/logout', { method: 'POST' })
 

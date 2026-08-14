@@ -14,8 +14,7 @@ use chrono::{Duration, Utc};
 use crate::error::AppError;
 use crate::models::{Session, User};
 
-/// Default TTL since last activity, in days. Overridable via the
-/// `TALLY_GUEST_TTL_DAYS` env var (spec §12.3).
+/// TTL since last activity, in days — hardcoded per spec §12.3 (no env var).
 pub const DEFAULT_GUEST_TTL_DAYS: i64 = 90;
 
 /// Delete abandoned temp users and everything they own. Returns the number

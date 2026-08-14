@@ -48,8 +48,10 @@ try {
 }
 
 // The add-company dialog searches real Companies House through the backend
-// (GET /api/v1/companies/search). There's no server in jsdom, so serve a
-// canned result deterministically; any other request behaves offline.
+// (GET /api/v1/companies/search), and guest adds are API-backed end-to-end
+// (POST /auth/guest + POST/GET /companies — temp-user spec §7.4). There's
+// no server in jsdom, so serve canned, stateful responses for those; any
+// other request behaves offline.
 const northwindSearch = [{
   company_number: '01234567',
   company_name: 'Northwind Trading Ltd',
@@ -59,14 +61,42 @@ const northwindSearch = [{
   company_type: 'ltd',
   description: 'Trading company',
 }]
-globalThis.fetch = async (input) => {
+const guestUser = {
+  id: '00000000-0000-0000-0000-0000000000aa',
+  email: 'temp+jsdom@local',
+  display_name: 'Guest',
+  created_at: new Date().toISOString(),
+  is_temporary: true,
+  guest_id: 'jsdom-guest',
+}
+const createdCompanies = []
+const json = (body, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+globalThis.fetch = async (input, init) => {
   const url = String(input)
-  if (url.startsWith('/api/v1/companies/search?')) {
-    return new Response(JSON.stringify(northwindSearch), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })
+  const method = (init && init.method) || 'GET'
+  if (url.startsWith('/api/v1/companies/search?')) return json(northwindSearch)
+  if (url === '/api/v1/auth/guest' && method === 'POST') {
+    return json({ token: 'guest-token-' + createdCompanies.length, user: guestUser })
   }
+  if (url === '/api/v1/companies' && method === 'POST') {
+    const body = JSON.parse(init.body)
+    const company = {
+      id: `c-${createdCompanies.length + 1}`,
+      user_id: guestUser.id,
+      name: body.name,
+      company_number: body.company_number,
+      tax_reference: '',
+      registration_date: body.registration_date ?? null,
+      sic_codes: [],
+      address_lines: [],
+      accounting_standard: body.accounting_standard ?? 'FRS 105',
+      updated_at: new Date().toISOString(),
+    }
+    createdCompanies.push(company)
+    return json(company)
+  }
+  if (url === '/api/v1/companies' && method === 'GET') return json(createdCompanies)
   throw new TypeError('offline in jsdom: ' + url)
 }
 const errors = []
@@ -157,14 +187,14 @@ if (text().includes('Demo data')) fail('demo banner still visible after connecti
 const pickerText = document.querySelector('aside').textContent
 if (!pickerText.includes('Demo Co Ltd')) fail('demo should stay in the picker (badged) per spec §6.2')
 
-// 6. The signed-in surface is now the real auth dialog (the old simulated
-// "Save your progress" account was replaced by SignInDialog): verify the
-// sidebar affordance opens it.
-const signInBtn = findByText('button', 'Sign in')
-if (!signInBtn) fail('sign-in affordance missing')
-click(signInBtn)
+// 6. The add ran as a guest workspace (no session at submit time), so the
+// sidebar shows the guest affordance — "Save your work — create account"
+// (temp-user spec §7.7). Verify it opens the (register-defaulted) dialog.
+const saveBtn = findByText('button', 'Save your work — create account')
+if (!saveBtn) fail('guest create-account affordance missing')
+click(saveBtn)
 await sleep(80)
 if (!text().includes('Sign in to Tally')) fail('sign-in dialog did not open')
 
-console.log('INTERACT OK: search→add→connect→banner-resolve→sign-in flow verified')
+console.log('INTERACT OK: search→guest-add→connect→banner-resolve→create-account flow verified')
 process.exit(0)

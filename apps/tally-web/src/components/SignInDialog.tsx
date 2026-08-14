@@ -1,85 +1,21 @@
 // Sign-in / create-account dialog (docs/spec/web-api-wiring-spec.md §5.1,
-// §7.3). Replaces the simulated SaveProgressDialog: real auth against the
-// API, and registering migrates the user's local companies to the account.
+// temp-user spec §7.6).
 //
-// The migration loop is also exported so the sidebar's "Retry migration"
-// action can re-run it for whatever failed last time.
+// Register is "create account + adoption": when the browser has a guest id
+// (`tally.guest.v1`), it is sent as `X-Guest-Id` so the backend upgrades the
+// guest workspace in place (companies / jobs / filings keep their ids — no
+// copy loop). A stale guest id (the workspace was already adopted, or never
+// existed) falls back to a plain register automatically.
 
 import { createSignal, Show, type JSX } from 'solid-js'
-import { Button, Dialog, Field, Input, Spinner, Tabs, toaster } from '@tally/design-system'
+import { Button, Dialog, Field, Input, Tabs, toaster } from '@tally/design-system'
 import { LogIn, UserRound, X } from 'lucide-solid'
 import { css } from 'styled-system/css'
-import { ApiError, createCompany, login, NetworkError, register, setToken } from '../api'
+import { ApiError, login, NetworkError, register, setToken, type AuthResponse } from '../api'
+import { getGuestId } from '../guest'
 import { setSession } from '../session'
-import type { Company } from '../mock_data'
 
 type Mode = 'login' | 'register'
-type Phase = 'form' | 'migrating'
-
-export interface MigrationResult {
-  migratedIds: string[]
-  skipped: number
-  failed: number
-  total: number
-}
-
-/**
- * Migrate real local companies to the API (§7.3). Only user-added companies
- * are passed in — never the demo company's data. Runs in name order; stops at
- * the first hard failure (network / 5xx / validation), keeping the local
- * copy so nothing is lost.
- */
-export async function migrateCompanies(companies: Company[]): Promise<MigrationResult> {
-  const sorted = [...companies].sort((a, b) => a.name.localeCompare(b.name))
-  const result: MigrationResult = { migratedIds: [], skipped: 0, failed: 0, total: sorted.length }
-  for (const c of sorted) {
-    try {
-      await createCompany({
-        name: c.name,
-        company_number: c.companyNumber,
-        tax_reference: c.utr,
-        registration_date: c.registrationDate,
-        sic_codes: c.sic && c.sic !== '—' ? [c.sic] : undefined,
-        address_lines: c.address && c.address !== '—' ? [c.address] : undefined,
-      })
-      result.migratedIds.push(c.id)
-    } catch (e) {
-      if (e instanceof ApiError && e.code === 'duplicate_company') {
-        result.skipped += 1
-        result.migratedIds.push(c.id) // the API copy is authoritative
-      } else {
-        result.failed += 1
-        break
-      }
-    }
-  }
-  return result
-}
-
-/** The §7.3 summary toast (dynamic counts). */
-export function toastMigration(result: MigrationResult): void {
-  if (result.failed > 0) {
-    toaster.create({
-      title: 'Account created — almost there',
-      description: `${result.total - result.failed} of ${result.total} companies migrated; ${result.failed} couldn't be moved. They're still saved locally.`,
-      type: 'warning',
-    })
-  } else if (result.skipped > 0) {
-    toaster.create({
-      title: 'Account created',
-      description: `Migrated ${result.migratedIds.length} companies · ${result.skipped} already in your account.`,
-      type: 'success',
-    })
-  } else if (result.total > 0) {
-    toaster.create({
-      title: 'Account created',
-      description: `Migrated ${result.migratedIds.length} companies.`,
-      type: 'success',
-    })
-  } else {
-    toaster.create({ title: 'Account created', description: "You're all set.", type: 'success' })
-  }
-}
 
 interface FieldErrors {
   name?: string
@@ -90,12 +26,10 @@ interface FieldErrors {
 export function SignInDialog(props: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Real local companies to migrate on register (never the demo). */
-  localCompanies: () => Company[]
-  onMigrationComplete: (migratedIds: string[]) => void
+  /** Default tab when the dialog opens — 'register' when opened from guest mode. */
+  defaultMode?: 'login' | 'register'
 }) {
   const [mode, setMode] = createSignal<Mode>('login')
-  const [phase, setPhase] = createSignal<Phase>('form')
   const [name, setName] = createSignal('')
   const [email, setEmail] = createSignal('')
   const [password, setPassword] = createSignal('')
@@ -103,9 +37,8 @@ export function SignInDialog(props: {
   const [formError, setFormError] = createSignal<string | undefined>(undefined)
   const [submitting, setSubmitting] = createSignal(false)
 
-  const reset = () => {
-    setMode('login')
-    setPhase('form')
+  const reset = (nextMode?: Mode) => {
+    setMode(nextMode ?? 'login')
     setName('')
     setEmail('')
     setPassword('')
@@ -113,8 +46,6 @@ export function SignInDialog(props: {
     setFormError(undefined)
     setSubmitting(false)
   }
-
-  const migrating = () => phase() === 'migrating'
 
   const close = () => {
     props.onOpenChange(false)
@@ -154,6 +85,27 @@ export function SignInDialog(props: {
     }
   }
 
+  /** Register, adopting the browser's guest workspace when it has one. */
+  const registerWithAdoption = async (): Promise<AuthResponse> => {
+    const body = {
+      display_name: name().trim(),
+      email: email().trim(),
+      password: password(),
+    }
+    const guestId = getGuestId()
+    if (!guestId) return register(body)
+    try {
+      return await register(body, guestId)
+    } catch (e) {
+      // A stale guest id (workspace adopted earlier, or never created) has
+      // no temp user to upgrade — fall back to a plain register.
+      if (e instanceof ApiError && (e.code === 'guest_not_found' || e.code === 'guest_already_adopted')) {
+        return register(body)
+      }
+      throw e
+    }
+  }
+
   const submit = async (e: Event) => {
     e.preventDefault()
     if (submitting()) return
@@ -164,29 +116,13 @@ export function SignInDialog(props: {
       const resp =
         mode() === 'login'
           ? await login({ email: email().trim(), password: password() })
-          : await register({
-              display_name: name().trim(),
-              email: email().trim(),
-              password: password(),
-            })
+          : await registerWithAdoption()
       setToken(resp.token)
       setSession({ status: 'signed-in', user: resp.user })
-
-      if (mode() === 'register') {
-        const locals = props.localCompanies()
-        if (locals.length > 0) {
-          // §7.3 migration phase — replace the form with a progress state.
-          setPhase('migrating')
-          setSubmitting(false)
-          const result = await migrateCompanies(locals)
-          props.onMigrationComplete(result.migratedIds)
-          toastMigration(result)
-        } else {
-          toastMigration({ migratedIds: [], skipped: 0, failed: 0, total: 0 })
-        }
-      } else {
-        toaster.create({ title: `Welcome back, ${resp.user.display_name}`, type: 'success' })
-      }
+      toaster.create({
+        title: mode() === 'register' ? 'Account created' : `Welcome back, ${resp.user.display_name}`,
+        type: 'success',
+      })
       close()
     } catch (err) {
       setSubmitting(false)
@@ -202,124 +138,109 @@ export function SignInDialog(props: {
       open={props.open}
       onOpenChange={(d) => {
         props.onOpenChange(d.open)
-        if (!d.open) reset()
+        // Default the tab from the caller (register when opened from guest mode).
+        if (d.open) reset(props.defaultMode ?? 'login')
+        else reset()
       }}
-      closeOnInteractOutside={!migrating()}
-      closeOnEscape={!migrating()}
     >
       <Dialog.Backdrop />
       <Dialog.Positioner>
         <Dialog.Content>
-          <Show when={!migrating()}>
-            <Dialog.CloseTrigger>
-              <X />
-            </Dialog.CloseTrigger>
-          </Show>
+          <Dialog.CloseTrigger>
+            <X />
+          </Dialog.CloseTrigger>
           <Dialog.Header>
             <Dialog.Title>Sign in to Tally</Dialog.Title>
             <Dialog.Description>
               {mode() === 'login'
                 ? 'Sign in to load your companies and books.'
-                : 'Create an account — your local data is moved to it automatically.'}
+                : 'Create an account — your workspace comes with it.'}
             </Dialog.Description>
           </Dialog.Header>
 
           <Dialog.Body>
-            <Show
-              when={phase() === 'form'}
-              fallback={
-                <div class={css({ py: '10', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3', textAlign: 'center' })}>
-                  <Spinner size="sm" class={css({ color: 'brown.11' })} />
-                  <div class={css({ textStyle: 'sm', fontWeight: '600' })}>Moving your data…</div>
-                  <div class={css({ textStyle: 'xs', color: 'fg.muted', maxW: '20rem' })}>
-                    Your companies are being copied to your new account.
+            <form onSubmit={submit}>
+              {/* Segmented control: Log in / Create account */}
+              <Tabs.Root value={mode()} onValueChange={(d) => setMode(d.value as Mode)} class={css({ mb: '5' })}>
+                <Tabs.List class={css({ bg: 'bg.subtle', p: '1', borderRadius: 'md', border: '1px solid {colors.border}' })}>
+                  <Tabs.Trigger
+                    value="login"
+                    class={css({ flex: '1', borderRadius: 'sm', py: '1.5', _selected: { bg: 'bg.default', boxShadow: 'sm' } })}
+                  >
+                    Log in
+                  </Tabs.Trigger>
+                  <Tabs.Trigger
+                    value="register"
+                    class={css({ flex: '1', borderRadius: 'sm', py: '1.5', _selected: { bg: 'bg.default', boxShadow: 'sm' } })}
+                  >
+                    Create account
+                  </Tabs.Trigger>
+                  <Tabs.Indicator />
+                </Tabs.List>
+              </Tabs.Root>
+
+              <div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
+                <Show when={mode() === 'register'}>
+                  <Field.Root invalid={!!fieldErrors().name} required>
+                    <Field.Label>
+                      Name <Field.RequiredIndicator />
+                    </Field.Label>
+                    <Input
+                      placeholder="Sam Rivera"
+                      autocomplete="name"
+                      value={name()}
+                      onInput={(e) => setName(e.currentTarget.value)}
+                    />
+                    {field(fieldErrors().name)}
+                  </Field.Root>
+                </Show>
+
+                <Field.Root invalid={!!fieldErrors().email} required>
+                  <Field.Label>
+                    Email <Field.RequiredIndicator />
+                  </Field.Label>
+                  <Input
+                    type="email"
+                    placeholder="you@company.co.uk"
+                    autocomplete="email"
+                    value={email()}
+                    onInput={(e) => setEmail(e.currentTarget.value)}
+                  />
+                  {field(fieldErrors().email)}
+                </Field.Root>
+
+                <Field.Root invalid={!!fieldErrors().password} required>
+                  <Field.Label>
+                    Password <Field.RequiredIndicator />
+                  </Field.Label>
+                  <Input
+                    type="password"
+                    placeholder="••••••••"
+                    autocomplete={mode() === 'login' ? 'current-password' : 'new-password'}
+                    value={password()}
+                    onInput={(e) => setPassword(e.currentTarget.value)}
+                  />
+                  <Show when={mode() === 'register' && !fieldErrors().password}>
+                    <Field.HelperText>At least 8 characters.</Field.HelperText>
+                  </Show>
+                  {field(fieldErrors().password)}
+                </Field.Root>
+
+                <Show when={formError()}>
+                  <div class={css({ textStyle: 'sm', color: 'red.plain.fg', bg: 'bg.subtle', border: '1px solid {colors.red.a5}', px: '3', py: '2', borderRadius: 'md' })}>
+                    {formError()}
                   </div>
-                </div>
-              }
-            >
-              <form onSubmit={submit}>
-                {/* Segmented control: Log in / Create account */}
-                <Tabs.Root value={mode()} onValueChange={(d) => setMode(d.value as Mode)} class={css({ mb: '5' })}>
-                  <Tabs.List class={css({ bg: 'bg.subtle', p: '1', borderRadius: 'md', border: '1px solid {colors.border}' })}>
-                    <Tabs.Trigger
-                      value="login"
-                      class={css({ flex: '1', borderRadius: 'sm', py: '1.5', _selected: { bg: 'bg.default', boxShadow: 'sm' } })}
-                    >
-                      Log in
-                    </Tabs.Trigger>
-                    <Tabs.Trigger
-                      value="register"
-                      class={css({ flex: '1', borderRadius: 'sm', py: '1.5', _selected: { bg: 'bg.default', boxShadow: 'sm' } })}
-                    >
-                      Create account
-                    </Tabs.Trigger>
-                    <Tabs.Indicator />
-                  </Tabs.List>
-                </Tabs.Root>
-
-                <div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
-                  <Show when={mode() === 'register'}>
-                    <Field.Root invalid={!!fieldErrors().name} required>
-                      <Field.Label>
-                        Name <Field.RequiredIndicator />
-                      </Field.Label>
-                      <Input
-                        placeholder="Sam Rivera"
-                        autocomplete="name"
-                        value={name()}
-                        onInput={(e) => setName(e.currentTarget.value)}
-                      />
-                      {field(fieldErrors().name)}
-                    </Field.Root>
-                  </Show>
-
-                  <Field.Root invalid={!!fieldErrors().email} required>
-                    <Field.Label>
-                      Email <Field.RequiredIndicator />
-                    </Field.Label>
-                    <Input
-                      type="email"
-                      placeholder="you@company.co.uk"
-                      autocomplete="email"
-                      value={email()}
-                      onInput={(e) => setEmail(e.currentTarget.value)}
-                    />
-                    {field(fieldErrors().email)}
-                  </Field.Root>
-
-                  <Field.Root invalid={!!fieldErrors().password} required>
-                    <Field.Label>
-                      Password <Field.RequiredIndicator />
-                    </Field.Label>
-                    <Input
-                      type="password"
-                      placeholder="••••••••"
-                      autocomplete={mode() === 'login' ? 'current-password' : 'new-password'}
-                      value={password()}
-                      onInput={(e) => setPassword(e.currentTarget.value)}
-                    />
-                    <Show when={mode() === 'register' && !fieldErrors().password}>
-                      <Field.HelperText>At least 8 characters.</Field.HelperText>
-                    </Show>
-                    {field(fieldErrors().password)}
-                  </Field.Root>
-
-                  <Show when={formError()}>
-                    <div class={css({ textStyle: 'sm', color: 'red.plain.fg', bg: 'bg.subtle', border: '1px solid {colors.red.a5}', px: '3', py: '2', borderRadius: 'md' })}>
-                      {formError()}
-                    </div>
-                  </Show>
-                </div>
-              </form>
-            </Show>
+                </Show>
+              </div>
+            </form>
           </Dialog.Body>
 
           <Dialog.Footer>
-            <Dialog.ActionTrigger disabled={migrating()} class={css({ color: 'fg.muted' })}>
+            <Dialog.ActionTrigger class={css({ color: 'fg.muted' })}>
               Not now
             </Dialog.ActionTrigger>
             <Button
-              disabled={submitting() || migrating()}
+              disabled={submitting()}
               onClick={(e) => submit(e)}
               loading={submitting()}
             >

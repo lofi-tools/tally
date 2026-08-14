@@ -337,8 +337,8 @@ Web:
 2. **`db.ts` user-company part**: keep as a display cache or delete entirely
    (demo sources remain). Implementation can decide once the adapter (§7.4)
    lands.
-3. **Sweep threshold**: 90 days is a default; pick a number, or make it an
-   env var (`TALLY_GUEST_TTL_DAYS`) — confirm preference.
+3. **Sweep threshold** — **RESOLVED**: hardcoded at 90 days
+   (`DEFAULT_GUEST_TTL_DAYS`), no env var.
 4. **`display_name` for guests**: "Guest" is the placeholder — a nicety could
    let the add-company dialog collect a name for the temp user. Not
    required.
