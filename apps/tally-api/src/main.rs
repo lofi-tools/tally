@@ -20,12 +20,10 @@ const DEFAULT_MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "tally_api=info,tower_http=info".into()),
-        )
-        .init();
+    // Observability: tracing (fastrace spans → OTel/console), logforth for
+    // log output, RUST_LOG filtering — see src/otel.rs. Must run before any
+    // request is served or span is created.
+    tally_api::otel::init();
 
     let db_url = env_or("DATABASE_URL", DEFAULT_DB_URL);
     let addr = env_or("TALLY_API_ADDR", &env_or("PORT", DEFAULT_ADDR));
@@ -96,6 +94,8 @@ async fn main() -> Result<()> {
         .await
         .context("serve")?;
     let _ = worker.await; // already draining via the token
+    // Flush any pending span records to the reporter before exiting.
+    fastrace::flush();
     Ok(())
 }
 
