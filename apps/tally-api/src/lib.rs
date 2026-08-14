@@ -34,16 +34,18 @@ pub mod sweep;
 // silenced (the access log lives in `request_id_layer`, which has the full
 // method/uri/request_id/status/latency).
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use axum::extract::Request;
+use axum::extract::{MatchedPath, Request};
 use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use fastrace::future::FutureExt as _;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::{DefaultOnFailure, DefaultOnResponse, TraceLayer};
@@ -101,13 +103,22 @@ async fn request_id_layer(request: Request, next: Next) -> Response {
     // re-establishes the local parent on every poll, so it survives tokio
     // moving the future between threads (and keeps the future Send — the
     // LocalParentGuard itself is !Send).
+    //
+    // `span.kind=server` makes fastrace-opentelemetry export this as an OTel
+    // SpanKind::Server span, and the Arc is shared with the router so a
+    // route_layer middleware can stamp `http.route` (the matched route
+    // *pattern*, not the concrete path) onto it post-routing — Traceway
+    // groups endpoints by that attribute.
     let root = fastrace::Span::root(
         "http_request",
         fastrace::collector::SpanContext::new(
             fastrace::collector::TraceId(id.as_u128()),
             fastrace::collector::SpanId(0),
         ),
-    );
+    )
+    .with_property(|| ("span.kind", "server"));
+    let shared_root = Arc::new(root);
+    request.extensions_mut().insert(SharedRootSpan(shared_root.clone()));
 
     let method = request.method().clone();
     let uri = request.uri().clone();
@@ -146,7 +157,7 @@ async fn request_id_layer(request: Request, next: Next) -> Response {
                 }
                 response
             }
-            .in_span(root)
+            .in_shared_span(shared_root)
             .await
         })
         .await;
@@ -198,7 +209,27 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(CorsLayer::permissive())
 }
 
-/// The `/api/v1` routes (spec §6).
+/// Stamps `http.route` (the matched route *pattern*) onto the request's
+/// fastrace root span. Runs as a `route_layer`, i.e. only after the router
+/// has matched the path — that's the one place `MatchedPath` is available
+/// (the root span itself is created earlier, in `request_id_layer`, where the
+/// trace id is pinned to `x-request-id`). Traceway groups endpoints by
+/// `http.route`, so this is what makes `/companies/{id}` group as one
+/// endpoint instead of one per concrete id.
+async fn stamp_http_route(request: Request, next: Next) -> Response {
+    if let (Some(shared), Some(pattern)) = (
+        request.extensions().get::<SharedRootSpan>(),
+        request.extensions().get::<MatchedPath>(),
+    ) {
+        shared.0.add_property(|| ("http.route", pattern.as_str().to_owned()));
+    }
+    next.run(request).await
+}
+
+/// The `/api/v1` routes (spec §6). The `route_layer` is applied here (not on
+/// the outer router) so `MatchedPath` carries the full nested pattern
+/// (`/api/v1/companies/{id}`), and only after all routes are declared (a
+/// `route_layer` only wraps routes that exist at the time it is called).
 fn api_v1() -> Router<Arc<AppState>> {
     Router::new()
         // auth
@@ -231,4 +262,46 @@ fn api_v1() -> Router<Arc<AppState>> {
         .route("/companies/{id}/reports/corp-tax", post(reports::corp_tax))
         .route("/companies/{id}/reports/corp-tax.json", post(reports::corp_tax_json))
         .route("/companies/{id}/reports/ct600", post(reports::ct600))
+        .route_layer(middleware::from_fn(stamp_http_route))
+}
+
+/// Shared handle to the per-request fastrace root span, threaded through
+/// request extensions so `stamp_http_route` (post-routing) can add
+/// `http.route` to the span that was created (pre-routing) in
+/// `request_id_layer`.
+#[derive(Clone)]
+struct SharedRootSpan(Arc<fastrace::Span>);
+
+/// `in_span` but taking `Arc<Span>`: sets the root as local parent at every
+/// poll (surviving tokio moving the future between threads; the
+/// `LocalParentGuard` itself is !Send), while the Arc keeps the span
+/// reachable from `stamp_http_route` via request extensions.
+trait SharedSpanFutureExt: Sized {
+    fn in_shared_span(self, span: Arc<fastrace::Span>) -> InSharedSpan<Self>;
+}
+
+impl<T> SharedSpanFutureExt for T {
+    fn in_shared_span(self, span: Arc<fastrace::Span>) -> InSharedSpan<Self> {
+        InSharedSpan {
+            inner: Box::pin(self),
+            span,
+        }
+    }
+}
+
+struct InSharedSpan<T> {
+    inner: Pin<Box<T>>,
+    span: Arc<fastrace::Span>,
+}
+
+impl<T: Future> Future for InSharedSpan<T> {
+    type Output = T::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // The inner future is boxed and pinned; InSharedSpan itself is Unpin
+        // (Pin<Box<T>> and Arc are both Unpin), so plain get_mut is sound.
+        let this = self.get_mut();
+        let _guard = this.span.set_local_parent();
+        this.inner.as_mut().poll(cx)
+    }
 }

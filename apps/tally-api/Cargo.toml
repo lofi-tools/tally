@@ -49,9 +49,9 @@ tracing-subscriber.workspace = true
 fastrace = { version = "0.7", features = ["enable"] }
 fastrace-tracing = "0.1"
 fastrace-opentelemetry = "0.18"
-opentelemetry = { version = "0.32", default-features = false, features = ["trace"] }
-opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"] }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+opentelemetry = { version = "0.32", default-features = false, features = ["trace", "logs"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "logs"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "logs", "http-proto", "reqwest-blocking-client"] }
 logforth = { version = "0.30", features = ["starter-log", "diagnostic-fastrace"] }
 # auth
 argon2.workspace = true

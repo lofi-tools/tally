@@ -35,6 +35,19 @@ curl -s -X POST localhost:8080/api/v1/auth/register \
 | `COMPANIES_HOUSE_API_KEY` | — | live CH (enables search/enrich) |
 | `COMPANIES_HOUSE_SANDBOX_API_KEY` | — | sandbox CH |
 | `CT600_CACHE_DIR` | — | CH response cache |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | when set, fastrace spans **and every log record** (access logs, db queries, worker logs) are exported there as OTLP HTTP/protobuf — e.g. `https://cloud.tracewayapp.com/api/otel`; when unset, spans print to stderr and logs go only to stdout |
+| `OTEL_EXPORTER_OTLP_HEADERS` | — | e.g. `Authorization=Bearer <token>` — quote the whole value, it contains a space (an unquoted export silently splits the token off and Traceway 401s every export; the `dev`/`api` scripts source `.env` with `set -a` for exactly this reason) |
+| `OTEL_SERVICE_NAME` | `tally-api` | `service.name` on exported spans/logs |
+
+When the OTLP endpoint is set, `src/otel.rs` exports **traces** (`/v1/traces`)
+and **logs** (`/v1/logs`) — both use the same env vars (endpoint, headers,
+protocol). Export failures log at `error` (target `fastrace_opentelemetry`,
+included in the default filter), and startup warns if the `Authorization`
+header looks like a bare `Bearer` with the token split off. Traces carry
+`span.kind=server` + `http.route` (the matched route *pattern*, e.g.
+`/api/v1/companies/{id}`) on the request root span so Traceway groups
+endpoints; background jobs (`src/jobs.rs`) run inside a `span.kind=consumer`
+root span, so their db-query logs get a trace id too.
 
 Without a CH key, CH-backed endpoints return `400 companies_house_key_missing`;
 everything else works.

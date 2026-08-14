@@ -94,8 +94,10 @@ async fn main() -> Result<()> {
         .await
         .context("serve")?;
     let _ = worker.await; // already draining via the token
-    // Flush any pending span records to the reporter before exiting.
+    // Flush any pending span records to the reporter, and drain the OTLP log
+    // batch exporter, before exiting.
     fastrace::flush();
+    tally_api::otel::flush_logs();
     Ok(())
 }
 
