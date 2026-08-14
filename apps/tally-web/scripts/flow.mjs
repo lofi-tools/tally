@@ -70,6 +70,27 @@ const guestUser = {
   guest_id: 'jsdom-guest',
 }
 const createdCompanies = []
+// Canned filings for the newly-added company: no fetch has ever completed,
+// so the backend's provisional-period derivation returns the full schedule
+// — ended years as `provisional` (structure-only), the current year as
+// `ongoing` (provisional-periods spec §4.2).
+const filingsFixture = {
+  periods: [
+    {
+      start: '2026-04-01', end: '2027-03-31', status: 'ongoing',
+      due: { hmrc: '2028-03-31', ch: '2027-12-31' },
+      filings: [
+        { kind: 'accounts', state: 'not-sent' },
+        { kind: 'corporation-tax', state: 'not-sent' },
+      ],
+    },
+    { start: '2025-04-01', end: '2026-03-31', status: 'provisional', due: null, filings: [] },
+    { start: '2024-04-01', end: '2025-03-31', status: 'provisional', due: null, filings: [] },
+    { start: '2023-04-01', end: '2024-03-31', status: 'provisional', due: null, filings: [] },
+  ],
+  balance_sheets: [],
+  status: { state: 'none', fetched_at: null, last_error: null },
+}
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 globalThis.fetch = async (input, init) => {
@@ -97,6 +118,7 @@ globalThis.fetch = async (input, init) => {
     return json(company)
   }
   if (url === '/api/v1/companies' && method === 'GET') return json(createdCompanies)
+  if (url.includes('/filings') && method === 'GET') return json(filingsFixture)
   throw new TypeError('offline in jsdom: ' + url)
 }
 const errors = []
@@ -169,6 +191,26 @@ if (!text().includes('No transactions yet')) {
   console.error(text().slice(0, 700))
   fail('empty accounts state missing for user company')
 }
+// 4b. Filings for the guest company: no fetch has completed, so the sub-nav
+// shows the full provisional period list — dashed rows with a per-row
+// indicator + the mini-banner with a Fetch button — and a provisional
+// detail pane is structure-only (provisional-periods spec §6.1–§6.3).
+click(findByText('button', 'Filings'))
+await sleep(120)
+if (!text().includes('Some periods are estimated')) fail('provisional mini-banner missing in the filings sub-nav')
+if (!findByText('nav button', 'provisional')) fail('per-row provisional indicator missing')
+if (!findByText('nav button', 'Fetch missing filings')) fail('sub-nav Fetch button missing')
+// Select the newest provisional period → its detail is the estimated note
+// with no due dates or file actions.
+const provRow = [...document.querySelectorAll('nav button')].find((b) => b.textContent.includes('provisional'))
+if (!provRow) fail('no provisional period row to select')
+click(provRow)
+await sleep(80)
+if (!text().includes('Estimated period')) fail('provisional detail note missing')
+if (text().includes('Prepare / Preview') || text().includes('File now')) fail('provisional period must have no actions')
+click(findByText('button', 'Accounts'))
+await sleep(80)
+
 // 5. Connect a bank -> the demo banner resolves. Both the accounts
 // empty-state and the banner carry a 'Connect a bank' CTA, so scope to
 // <main> to click the view's own button (banner CTA only navigates).
@@ -196,5 +238,5 @@ click(saveBtn)
 await sleep(80)
 if (!text().includes('Sign in to Tally')) fail('sign-in dialog did not open')
 
-console.log('INTERACT OK: search→guest-add→connect→banner-resolve→create-account flow verified')
+console.log('INTERACT OK: search→guest-add→provisional-filings→connect→banner-resolve→create-account flow verified')
 process.exit(0)

@@ -339,7 +339,7 @@ export interface PeriodFiling {
 export interface Period {
   start: string
   end: string
-  status: 'filed' | 'pending' | 'ongoing'
+  status: 'filed' | 'pending' | 'ongoing' | 'provisional'
   due: PeriodDue | null
   filings: PeriodFiling[]
 }

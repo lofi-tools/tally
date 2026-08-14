@@ -280,7 +280,7 @@ pub struct Period {
     pub start: String,
     /// ISO-8601 (`YYYY-MM-DD`).
     pub end: String,
-    /// `filed` | `pending` | `ongoing`.
+    /// `filed` | `pending` | `ongoing` | `provisional`.
     pub status: &'static str,
     /// Filing deadlines; `null` for filed periods.
     pub due: Option<PeriodDue>,
@@ -375,7 +375,23 @@ pub async fn list(
         .exec(&mut db)
         .await?;
 
-    let periods = derive_periods(&company, &balance_sheets, &filings);
+    // Coverage anchor: the most recent *successful* fetch's completion time
+    // (provisional-periods spec §4.2). Using the last `done` job — not the
+    // latest job — keeps periods that a prior success covered as
+    // `filed`/`pending` when a later refresh fails (§7 edge case).
+    let coverage = Job::filter_by_company_id(company.id)
+        .filter(Job::fields().status().eq("done"))
+        .order_by(Job::fields().updated_at().desc())
+        .first()
+        .exec(&mut db)
+        .await?;
+
+    let periods = derive_periods(
+        &company,
+        &balance_sheets,
+        &filings,
+        coverage.as_ref().map(|j| j.updated_at.as_str()),
+    );
     Ok(Json(FilingsView {
         periods,
         balance_sheets: balance_sheets.iter().map(BalanceSheetView::from).collect(),
@@ -454,42 +470,41 @@ fn fetch_status(job: Option<&Job>) -> FetchStatus {
 // ---------------------------------------------------------------------------
 
 /// The company's financial periods, newest first, derived from the
-/// registration-date schedule plus the filed history:
+/// registration-date ARD schedule (incorporation → today) plus the filed
+/// history (provisional-periods spec §4.2):
 ///
-/// - **`ongoing`** — the schedule period containing today;
+/// - **`ongoing`** — the schedule period containing today (always functional:
+///   deadlines + expected `not-sent` filings);
 /// - **`filed`** — a period end with a stored balance sheet (or an accounts
 ///   filing whose period end — parsed from its description — matches);
-/// - **`pending`** — an ended period with no confirmed accounts filing.
+/// - **`pending`** — an ended period with no confirmed accounts filing whose
+///   end a completed fetch has covered (`end <= fetched_at`);
+/// - **`provisional`** — an ended period **not** covered by any completed
+///   fetch: the dates are an estimate from the registration date, so the row
+///   is structure-only (no deadlines, no expected filings).
 ///
+/// **Enrichment**: a successful fetch re-runs the derivation on the next
+/// read — a provisional row whose end now matches a confirmed filing becomes
+/// `filed`, and a covered-and-unfiled ended period becomes `pending`
+/// (§4.3). **Invalidation**: a filing whose implied 12-month span overlaps a
+/// schedule estimate (shortened first period / changed ARD / late filing)
+/// drops the estimate — the CH-derived end drives the list (§4.3, §7).
+///
+/// `fetched_at` is the last successful fetch's completion time (`None` when
+/// no fetch ever completed → every unconfirmed ended period is provisional).
 /// When the company has no registration date, the schedule cannot be built,
-/// so only filed periods appear (from the balance-sheet / filing history);
-/// with neither an anchor nor history, `periods` is empty.
-fn derive_periods(company: &Company, balance_sheets: &[BalanceSheet], filings: &[Filing]) -> Vec<Period> {
-    let today = chrono::Utc::now().date_naive();
-
-    // The ongoing period: the registration-date ARD schedule period
-    // containing today (needs a registration date).
-    let reg_date = company
+/// so only filed ends anchor the list; with neither an anchor nor history,
+/// `periods` is empty.
+fn derive_periods(
+    company: &Company,
+    balance_sheets: &[BalanceSheet],
+    filings: &[Filing],
+    fetched_at: Option<&str>,
+) -> Vec<Period> {
+    let registration_date = company
         .registration_date
         .as_deref()
         .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
-    let mut ongoing_end: Option<NaiveDate> = None;
-    if let Some(reg) = reg_date {
-        let mut lib = LibCompany::new("", "", company.company_number.clone());
-        lib.registration_date = reg;
-        let mut n = 0u32;
-        loop {
-            let period = lib.accounting_period_n(n);
-            if period.start > today {
-                break;
-            }
-            if period.contains(today) {
-                ongoing_end = Some(period.end);
-                break;
-            }
-            n += 1;
-        }
-    }
 
     // Filed ends: stored balance sheets + accounts filings' period ends.
     let mut filed_ends: Vec<NaiveDate> = Vec::new();
@@ -506,45 +521,79 @@ fn derive_periods(company: &Company, balance_sheets: &[BalanceSheet], filings: &
         }
     }
 
-    // The period list covers the schedule from the earliest filed period up
-    // to today, plus any filed end outside the schedule (e.g. shortened
-    // periods / changed ARDs). A company with nothing filed shows just the
-    // ongoing period — not the whole registration-date history as pending.
-    if filed_ends.is_empty() && ongoing_end.is_none() {
-        return Vec::new();
-    }
-    // `unwrap_or_else`, not `unwrap_or`: the `expect` must not fire when a
-    // company has no registration date but does have filed history (the
-    // balance-sheet/filing ends below still anchor the period list).
-    let earliest = filed_ends
-        .iter()
-        .copied()
-        .min()
-        .unwrap_or_else(|| ongoing_end.expect("non-empty above"));
-    let mut ends: Vec<NaiveDate> = Vec::new();
-    if let Some(reg) = reg_date {
-        let mut lib = LibCompany::new("", "", company.company_number.clone());
-        lib.registration_date = reg;
-        // Start from the schedule period covering the earliest filed end
-        // (skip the pre-history periods entirely), walk up to today.
-        let mut n = 0u32;
-        loop {
-            let period = lib.accounting_period_n(n);
-            if period.end >= earliest {
-                break;
-            }
-            n += 1;
+    let covered_through = fetched_at.and_then(parse_coverage_date);
+    let mut periods = derive_periods_from(registration_date, &filed_ends, covered_through);
+    // The pure core builds the expected rows (structure + not-sent rows);
+    // overlay the real CH history so filed/pending/ongoing periods show
+    // their confirmed filings (provisional rows stay structure-only).
+    for p in &mut periods {
+        if p.status != "provisional"
+            && let Some(end) = parse_iso_date(&p.end)
+        {
+            p.filings = filings_for_period(end, p.status == "filed", filings);
         }
+    }
+    periods
+}
+
+/// The pure derivation core (§10 — wasm-portable): a function of the
+/// registration date, the confirmed filed ends, and the fetch-coverage
+/// cutoff — plus the CH history for the period filings. No models, no DB;
+/// every input is a value the caller already holds.
+fn derive_periods_from(
+    registration_date: Option<NaiveDate>,
+    filed_ends: &[NaiveDate],
+    covered_through: Option<NaiveDate>,
+) -> Vec<Period> {
+    let today = chrono::Utc::now().date_naive();
+
+    // The registration-date ARD schedule (incorporation → today), with each
+    // period's true [start, end] — the last one contains today (the ongoing
+    // period). Without a registration date the schedule is empty and only
+    // filed ends anchor the list.
+    let mut schedule: Vec<AccountingPeriod> = Vec::new();
+    if let Some(reg) = registration_date {
+        let mut lib = LibCompany::new("", "", String::new());
+        lib.registration_date = reg;
+        let mut n = 0u32;
         loop {
             let period = lib.accounting_period_n(n);
             if period.start > today {
                 break;
             }
-            ends.push(period.end);
-            if period.contains(today) {
+            let ongoing = period.contains(today);
+            schedule.push(period);
+            if ongoing {
                 break;
             }
             n += 1;
+        }
+    }
+    let ongoing_end = schedule.last().map(|p| p.end);
+
+    // The period list: the whole schedule (every financial year the company
+    // has had appears even before any fetch) plus any filed end outside the
+    // schedule (shortened periods / changed ARDs).
+    //
+    // **Invalidation** (spec §4.3, §7): a confirmed filing whose implied
+    // 12-month span (the 12 months ending on the filed end — the most CH
+    // gives us for the filing's range) overlaps a schedule *estimate* means
+    // that estimate never existed — a shortened first period, a changed ARD,
+    // a late filing. The estimate is dropped and the CH-derived end drives
+    // the list. Estimates whose own end matches a filing (→ `filed`) and the
+    // ongoing period are never invalidated.
+    let mut ends: Vec<NaiveDate> = Vec::new();
+    for p in &schedule {
+        let is_ongoing = ongoing_end == Some(p.end);
+        let is_filed = filed_ends.contains(&p.end);
+        let overlapped = !is_ongoing
+            && !is_filed
+            && filed_ends.iter().any(|f| {
+                let span_start = *f - Months::new(12) + Duration::days(1);
+                span_start <= p.end && *f >= p.start
+            });
+        if !overlapped {
+            ends.push(p.end);
         }
     }
     ends.extend(filed_ends.iter().copied());
@@ -564,13 +613,20 @@ fn derive_periods(company: &Company, balance_sheets: &[BalanceSheet], filings: &
             .unwrap_or_else(|| *end - Months::new(12) + Duration::days(1));
         let is_ongoing = ongoing_end == Some(*end);
         let is_filed = filed_ends.contains(end);
+        let covered = covered_through.is_some_and(|through| *end <= through);
         let status = if is_ongoing {
             "ongoing"
         } else if is_filed {
             "filed"
-        } else {
+        } else if covered {
             "pending"
+        } else {
+            "provisional"
         };
+        // Provisional periods are structure-only: no deadlines, no expected
+        // filings — the dates are an estimate until a fetch confirms them.
+        // Pending periods keep the actionable content (deadlines + not-sent
+        // rows); filed/ongoing unchanged.
         let due = if is_ongoing || status == "pending" {
             Some(PeriodDue {
                 hmrc: (*end + Months::new(12)).to_string(),
@@ -579,7 +635,11 @@ fn derive_periods(company: &Company, balance_sheets: &[BalanceSheet], filings: &
         } else {
             None
         };
-        let period_filings = filings_for_period(*end, is_filed, filings);
+        let period_filings = if status == "provisional" {
+            Vec::new()
+        } else {
+            filings_for_period(*end, is_filed, &[])
+        };
         periods.push(Period {
             start: start.to_string(),
             end: end.to_string(),
@@ -589,6 +649,15 @@ fn derive_periods(company: &Company, balance_sheets: &[BalanceSheet], filings: &
         });
     }
     periods
+}
+
+/// The coverage date from a job's RFC 3339 `updated_at` (or a bare
+/// `YYYY-MM-DD`), as a `NaiveDate` for comparison against period ends.
+fn parse_coverage_date(s: &str) -> Option<NaiveDate> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.date_naive())
+        .ok()
+        .or_else(|| parse_iso_date(s))
 }
 
 /// The period's filings: confirmed items from the CH history (accounts by
@@ -767,5 +836,219 @@ mod tests {
             links: None,
         };
         assert_eq!(ch_transaction_id(&item), "accounts|AA|2024-03-31");
+    }
+
+    // -- provisional-periods spec (§8): derivation unit tests ------------
+
+    /// The expected schedule ends (incorporation → today) for a
+    /// registration date, via the same lib the derivation uses.
+    fn schedule_ends(reg: &str) -> Vec<NaiveDate> {
+        let reg = NaiveDate::parse_from_str(reg, "%Y-%m-%d").unwrap();
+        let today = chrono::Utc::now().date_naive();
+        let mut lib = LibCompany::new("", "", String::new());
+        lib.registration_date = reg;
+        let mut ends = Vec::new();
+        let mut n = 0u32;
+        loop {
+            let period = lib.accounting_period_n(n);
+            if period.start > today {
+                break;
+            }
+            ends.push(period.end);
+            if period.contains(today) {
+                break;
+            }
+            n += 1;
+        }
+        ends
+    }
+
+    fn reg_date(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn unfetched_company_lists_full_schedule_as_provisional() {
+        let periods = derive_periods_from(Some(reg_date("2015-03-01")), &[], None);
+
+        // Every financial year since incorporation appears before any fetch,
+        // newest first.
+        let mut expected = schedule_ends("2015-03-01");
+        expected.sort_by(|a, b| b.cmp(a));
+        assert_eq!(
+            periods.iter().map(|p| p.end.as_str()).collect::<Vec<_>>(),
+            expected.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+            "all schedule periods listed"
+        );
+
+        // The period containing today is ongoing (functional); every other
+        // ended period is provisional and structure-only.
+        let ongoing_end = expected[0]; // newest = the period containing today
+        for p in &periods {
+            let end = parse_iso_date(&p.end).unwrap();
+            if end == ongoing_end {
+                assert_eq!(p.status, "ongoing");
+                assert!(p.due.is_some(), "ongoing keeps its deadlines");
+                assert_eq!(p.filings.len(), 2, "ongoing expected filings: {:?}", p.filings);
+                assert!(p.filings.iter().all(|f| f.state == "not-sent"));
+            } else {
+                assert_eq!(p.status, "provisional", "period ending {end}");
+                assert!(p.due.is_none(), "provisional has no deadlines");
+                assert!(p.filings.is_empty(), "provisional is structure-only");
+            }
+        }
+    }
+
+    #[test]
+    fn covered_ended_periods_are_pending_after_the_fetch_cutoff() {
+        // A fetch completed 2020-06-01: ended periods at/before that date
+        // were checked against CH (pending when unfiled); later ones are
+        // still estimates (provisional).
+        let periods = derive_periods_from(
+            Some(reg_date("2015-03-01")),
+            &[],
+            Some(reg_date("2020-06-01")),
+        );
+
+        let cutoff = reg_date("2020-06-01");
+        let mut expected = schedule_ends("2015-03-01");
+        expected.sort_by(|a, b| b.cmp(a));
+        assert_eq!(periods.len(), expected.len());
+        let ongoing_end = expected[0];
+        for p in &periods {
+            let end = parse_iso_date(&p.end).unwrap();
+            if end == ongoing_end {
+                assert_eq!(p.status, "ongoing");
+            } else if end <= cutoff {
+                assert_eq!(p.status, "pending", "period ending {end} was covered");
+                assert!(p.due.is_some(), "pending keeps its deadlines");
+                assert_eq!(p.filings.len(), 2, "pending keeps actionable rows");
+            } else {
+                assert_eq!(p.status, "provisional", "period ending {end} not covered");
+                assert!(p.due.is_none());
+                assert!(p.filings.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn filed_ends_stay_filed_and_anchor_out_of_schedule_periods() {
+        // 2020-03-31 is a schedule end; 2020-06-30 is an out-of-schedule
+        // end (a shortened period the fetch revealed) — it must still anchor
+        // a `filed` row, not remain a provisional estimate.
+        let periods = derive_periods_from(
+            Some(reg_date("2015-03-01")),
+            &[reg_date("2020-03-31"), reg_date("2020-06-30")],
+            Some(reg_date("2021-01-01")),
+        );
+
+        let by_end = |end: &str| periods.iter().find(|p| p.end == end).unwrap_or_else(|| panic!("{end}"));
+        let on_schedule = by_end("2020-03-31");
+        assert_eq!(on_schedule.status, "filed");
+        assert!(on_schedule.due.is_none(), "filed has no deadlines");
+
+        let shortened = by_end("2020-06-30");
+        assert_eq!(shortened.status, "filed", "out-of-schedule filed end anchors a row");
+        assert!(shortened.due.is_none());
+    }
+
+    /// Find a period row by its end date.
+    fn by_end<'a>(periods: &'a [Period], end: &str) -> Option<&'a Period> {
+        periods.iter().find(|p| p.end == end)
+    }
+
+    #[test]
+    fn shortened_first_period_invalidates_the_estimate() {
+        // Registered 2015-03-01 with the first accounts running to the ARD
+        // (2016-03-31, a 13-month first period): the n=0 estimate ending
+        // 2016-02-29 never existed — the real filing anchors 2016-03-31 and
+        // the estimate is dropped (spec §7 "shortened first period").
+        let periods = derive_periods_from(
+            Some(reg_date("2015-03-01")),
+            &[reg_date("2016-03-31")],
+            Some(reg_date("2026-01-01")),
+        );
+        assert!(by_end(&periods, "2016-02-29").is_none(), "estimate invalidated");
+        let real = by_end(&periods, "2016-03-31").expect("filed end anchors");
+        assert_eq!(real.status, "filed");
+        assert!(periods.iter().any(|p| p.status == "ongoing"), "ongoing kept");
+    }
+
+    #[test]
+    fn changed_ard_invalidates_mid_life_estimates() {
+        // ARD moved from the 03-31 anniversary to 06-30: the real filed ends
+        // 2020-03-31 → 2021-06-30 → 2022-06-30 drive the list; the phantom
+        // 03-31 schedule estimates in between are dropped.
+        let periods = derive_periods_from(
+            Some(reg_date("2015-03-01")),
+            &[
+                reg_date("2020-03-31"),
+                reg_date("2021-06-30"),
+                reg_date("2022-06-30"),
+            ],
+            Some(reg_date("2026-01-01")),
+        );
+        assert!(by_end(&periods, "2021-03-31").is_none(), "phantom before ARD change");
+        assert!(by_end(&periods, "2022-03-31").is_none(), "phantom after ARD change");
+        assert_eq!(by_end(&periods, "2020-03-31").expect("filed").status, "filed");
+        assert_eq!(by_end(&periods, "2021-06-30").expect("filed").status, "filed");
+        assert_eq!(by_end(&periods, "2022-06-30").expect("filed").status, "filed");
+    }
+
+    #[test]
+    fn genuine_unfiled_year_survives_invalidation() {
+        // Filed 2020-03-31 and 2022-03-31 but genuinely missed 2021: the
+        // 2021-03-31 estimate is not overlapped by either filing's span, so
+        // it stays — and once covered by a fetch it is actionable `pending`
+        // (spec §7 "old company, many years": never filed → pending).
+        let periods = derive_periods_from(
+            Some(reg_date("2015-03-01")),
+            &[reg_date("2020-03-31"), reg_date("2022-03-31")],
+            Some(reg_date("2024-06-01")),
+        );
+        let missed = by_end(&periods, "2021-03-31").expect("genuine missed year kept");
+        assert_eq!(missed.status, "pending");
+        assert_eq!(by_end(&periods, "2020-03-31").expect("filed").status, "filed");
+        assert_eq!(by_end(&periods, "2022-03-31").expect("filed").status, "filed");
+    }
+
+    #[test]
+    fn matching_filed_end_confirms_instead_of_invalidating() {
+        // A filing ending exactly on a schedule end enriches the estimate to
+        // `filed` — and does not disturb its neighbours (enrichment, §4.3).
+        let periods = derive_periods_from(
+            Some(reg_date("2015-03-01")),
+            &[reg_date("2020-03-31")],
+            Some(reg_date("2021-01-01")),
+        );
+        assert_eq!(by_end(&periods, "2020-03-31").expect("filed").status, "filed");
+        assert!(by_end(&periods, "2019-03-31").is_some(), "previous estimate kept");
+        assert!(by_end(&periods, "2021-03-31").is_some(), "next estimate kept");
+    }
+
+    #[test]
+    fn no_registration_date_without_history_is_empty() {
+        assert!(derive_periods_from(None, &[], None).is_empty());
+    }
+
+    #[test]
+    fn no_registration_date_is_anchored_by_filed_ends() {
+        let periods = derive_periods_from(None, &[reg_date("2025-03-31")], None);
+        assert_eq!(periods.len(), 1);
+        assert_eq!(periods[0].end, "2025-03-31");
+        assert_eq!(periods[0].status, "filed");
+    }
+
+    #[test]
+    fn coverage_date_parses_rfc3339_and_bare_dates() {
+        assert_eq!(
+            parse_coverage_date("2020-06-01T10:00:00Z"),
+            NaiveDate::from_ymd_opt(2020, 6, 1)
+        );
+        assert_eq!(
+            parse_coverage_date("2020-06-01"),
+            NaiveDate::from_ymd_opt(2020, 6, 1)
+        );
+        assert_eq!(parse_coverage_date("garbage"), None);
     }
 }

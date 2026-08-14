@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from 'solid-js'
 import { Badge, Button, Card, IconButton, Spinner, toaster } from '@tally/design-system'
-import { ArrowUpRight, CheckCircle2, FileCheck2, RefreshCw, TriangleAlert } from 'lucide-solid'
+import { ArrowUpRight, CheckCircle2, CircleDashed, FileCheck2, RefreshCw, TriangleAlert } from 'lucide-solid'
 import { css } from 'styled-system/css'
 import { DEMO_COMPANY_ID, fmtDate, fmtMoney, type Company, type CompanyData } from '../mock_data'
 import { EmptyState, StatusBadge } from '../components/Shared'
@@ -236,6 +236,10 @@ function RealFilingsView(props: { companyId: string }) {
       selectedEnd={selectedEnd()}
       onSelectEnd={setSelectedEnd}
       onPreview={onPreview}
+      // Mini-banner + Fetch inside the sub-nav while any period is still an
+      // estimate (provisional-periods spec §6.2).
+      onFetchMissing={() => void onRefresh()}
+      fetchDisabled={isSyncing()}
       navEmpty={
         data() && !isSyncing() && !isFailed()
           ? 'No periods yet — they appear once Companies House has a record for this company.'
@@ -302,6 +306,9 @@ function FilingsTwoPane(props: {
   header: JSX.Element
   detailEmptyTitle: string
   detailEmptyDescription: string
+  /** Mini-banner + Fetch button inside the sub-nav; absent = no banner. */
+  onFetchMissing?: () => void
+  fetchDisabled?: boolean
 }) {
   const selected = createMemo(() => {
     const all = props.periods
@@ -333,6 +340,18 @@ function FilingsTwoPane(props: {
           bg: 'bg.canvas',
         })}
       >
+        {/* Mini-banner + Fetch while any period is a provisional estimate
+            (spec §6.2). Disappears once nothing is missing. */}
+        <Show when={props.onFetchMissing && props.periods.some((p) => p.status === 'provisional')}>
+          <div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5', px: '2.5', py: '2', mb: '1', borderRadius: 'md', bg: 'bg.subtle' })}>
+            <p class={css({ fontSize: 'xs', color: 'fg.muted', lineHeight: '1.4' })}>
+              Some periods are estimated — filing history hasn't been fetched for them yet.
+            </p>
+            <Button size="2xs" variant="outline" onClick={props.onFetchMissing} disabled={props.fetchDisabled}>
+              <RefreshCw class={css({ w: '3', h: '3' })} /> Fetch missing filings
+            </Button>
+          </div>
+        </Show>
         <Show when={props.periods.length > 0} fallback={props.navEmpty ? <p class={css({ px: '2.5', py: '2', fontSize: 'sm', color: 'fg.subtle' })}>{props.navEmpty}</p> : null}>
           <For each={props.periods}>
             {(p) => (
@@ -386,9 +405,12 @@ function isoAddMonths(iso: string, months: number): string {
 }
 
 /** One row of the periods sub-nav: FY label + range, trailing status
- *  indicator (green tick / yellow "!" pending / Ongoing badge). */
+ *  indicator (green tick / yellow "!" pending / dashed Provisional tag /
+ *  Ongoing badge). Provisional rows get a dashed outline — they read as an
+ *  estimate (provisional-periods spec §6.1). */
 function PeriodNavRow(props: { period: Period; selected: boolean; onClick: () => void }) {
   const p = () => props.period
+  const isProvisional = () => p().status === 'provisional'
   return (
     <button
       type="button"
@@ -405,6 +427,7 @@ function PeriodNavRow(props: { period: Period; selected: boolean; onClick: () =>
         borderRadius: 'md',
         bg: props.selected ? 'bg.subtle' : 'transparent',
         border: 'none',
+        outline: isProvisional() ? '1px dashed {colors.border}' : 'none',
         cursor: 'pointer',
         textAlign: 'left',
         color: props.selected ? 'fg.default' : 'fg.muted',
@@ -440,9 +463,19 @@ function PeriodNavRow(props: { period: Period; selected: boolean; onClick: () =>
           <Show
             when={p().status === 'pending'}
             fallback={
-              <Badge variant="outline" class={css({ flexShrink: '0', fontSize: '10px', px: '1.5', py: '0' })}>
-                Ongoing
-              </Badge>
+              <Show
+                when={isProvisional()}
+                fallback={
+                  <Badge variant="outline" class={css({ flexShrink: '0', fontSize: '10px', px: '1.5', py: '0' })}>
+                    Ongoing
+                  </Badge>
+                }
+              >
+                <span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1', flexShrink: '0', color: 'fg.subtle' })}>
+                  <CircleDashed class={css({ w: '3.5', h: '3.5' })} />
+                  <span class={css({ fontSize: 'xs', fontWeight: '600' })}>provisional</span>
+                </span>
+              </Show>
             }
           >
             <span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1', flexShrink: '0', color: 'amber.subtle.fg' })}>
@@ -477,7 +510,11 @@ function PeriodDetail(props: {
         <div class={css({ display: 'flex', alignItems: 'center', gap: '2.5', flexWrap: 'wrap' })}>
           <h2 class={css({ textStyle: 'lg', fontWeight: '700' })}>{fyLabel(p())}</h2>
           <Show when={p().status === 'filed'} fallback={
-            <StatusBadge status={p().status === 'ongoing' ? 'ongoing' : 'pending'} tone={p().status === 'ongoing' ? 'blue' : 'amber'} />
+            <Show when={p().status === 'provisional'} fallback={
+              <StatusBadge status={p().status === 'ongoing' ? 'ongoing' : 'pending'} tone={p().status === 'ongoing' ? 'blue' : 'amber'} />
+            }>
+              <StatusBadge status="provisional" tone="gray" label="Provisional" />
+            </Show>
           }>
             <StatusBadge status="filed" tone="green" label="Filed" />
           </Show>
@@ -607,9 +644,24 @@ function PeriodDetail(props: {
         </Card.Root>
       </Show>
 
-      <Show when={confirmed().length === 0 && notSent().length === 0}>
+      {/* Provisional periods are structure-only: no filings, no actions — a
+          note explains they're estimated until the history is fetched (spec
+          §6.3). */}
+      <Show
+        when={p().status === 'provisional'}
+        fallback={
+          <Show when={confirmed().length === 0 && notSent().length === 0}>
+            <Card.Root>
+              <EmptyState title="Nothing for this period" description="No filings are recorded or expected for this period." />
+            </Card.Root>
+          </Show>
+        }
+      >
         <Card.Root>
-          <EmptyState title="Nothing for this period" description="No filings are recorded or expected for this period." />
+          <EmptyState
+            title="Estimated period"
+            description="This period is estimated from the registration date — filing details appear once Companies House history is fetched."
+          />
         </Card.Root>
       </Show>
     </>

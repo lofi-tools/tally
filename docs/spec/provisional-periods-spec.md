@@ -109,24 +109,39 @@ Replace the current logic with:
    end) are unchanged.
 
 **Coverage marker**: `derive_periods` needs the last successful fetch's
-completion time. Pass the `Job` (already loaded for `FetchStatus`) into the
-derivation — the `done` job's `updated_at` is `fetched_at`. A company with no
-`done` job ever has `fetched_at = None` → every unconfirmed ended period is
-`provisional`.
+completion time. The `list` handler queries the most recent **`done`** job's
+`updated_at` (its `fetched_at`) — *not* the latest job — and passes it in. A
+company with no `done` job ever has `fetched_at = None` → every unconfirmed
+ended period is `provisional`.
 
 ### 4.3 Enrichment and invalidation (no new machinery)
 
 No new background task: the existing `fetch_filings` job, when it completes, is
-what enriches. On the next `GET /filings` (or a poll after a refresh) the
-derivation re-runs with the new filings/balance sheets:
+what enriches. The derivation re-runs on every `GET /filings` (or a poll after
+a refresh) with the new filings/balance sheets + the coverage anchor:
 
-- **Enrichment**: a provisional row whose end now matches a confirmed filing
-  becomes `filed`; a covered-and-unfiled ended period becomes `pending`.
-- **Invalidation**: a fetched filing whose dates conflict with an estimate
-  (e.g. a shortened first period, a changed ARD, a late filing) anchors the
-  real period end — the conflicting provisional row is replaced by the
-  CH-derived period (the filed end drives the list, exactly as the current
-  filed-ends logic does).
+- **Enrichment** — a provisional row whose end **matches** a confirmed filing
+  (balance-sheet `period_end`, or an accounts filing's `made up to` date
+  parsed from its CH description) becomes `filed`; a covered-and-unfiled ended
+  period (`end <= fetched_at`) becomes `pending`. Nothing more is needed — the
+  status is re-derived per read, so a completed fetch flips the rows on the
+  next load, and the web's mini-banner disappears.
+- **Invalidation** — a confirmed filing whose dates conflict with an estimate
+  (shortened first period, changed ARD, late filing) **drops** the estimate;
+  the CH-derived end drives the list. Concrete rule (in the pure core
+  `derive_periods_from`): the schedule is walked once as real `[start, end]`
+  periods, and a non-filed, non-ongoing estimate is dropped when any confirmed
+  filing's implied span `[filed_end − 12m + 1d, filed_end]` (the most CH's
+  data gives for the filing's range) **overlaps** it. A filing ending exactly
+  on the estimate's end enriches it to `filed` instead of dropping it.
+
+  The 12-month span is deliberately bounded: a genuinely unfiled year is not
+  overlapped by its neighbours' spans, so it survives as `pending` once covered
+  (spec §7 — accurate: it was never filed). The heuristic's one known
+  imprecision is a *shortened mid-life* filing (less than 12 months, e.g. an
+  ARD change) whose implied span can over-reach backward and drop the estimate
+  immediately before it; such a period reappears as `filed` as soon as it is
+  itself filed.
 
 ### 4.4 Response shape
 
@@ -140,10 +155,15 @@ derivation re-runs with the new filings/balance sheets:
 
 1. `derive_periods(company, balance_sheets, filings, fetched_at: Option<&str>)`
    — walk the full schedule; apply §4.2 status rules; structure-only
-   `provisional` rows.
-2. `list` handler passes `fetch_status(job).fetched_at` (the done job's
-   `updated_at`) into the derivation.
-3. Unit tests for the derivation (§8).
+   `provisional` rows; §4.3 invalidation.
+2. The derivation core is the pure, wasm-portable `derive_periods_from(reg
+   date, filed ends, coverage)` (§10); `derive_periods` is the thin
+   model-reading wrapper that also overlays the real CH filings onto
+   non-provisional rows.
+3. `list` handler queries the most recent `done` job's `updated_at` (the
+   coverage anchor) — not the latest job, so a failed refresh doesn't revert
+   covered rows (§7).
+4. Unit + pg tests for the derivation and the invalidation rules (§8).
 
 ## 6. Web changes (`apps/tally-web/src/views/Filings.tsx`)
 
@@ -196,7 +216,10 @@ while such rows exist.
 | No CH key / no number | No job ever spawns; state stays `none`; provisional list + mini-banner persist; the banner's Fetch button surfaces the existing `companies_house_key_missing` error path |
 | Refresh fails after a prior success | Covered periods stay `filed`/`pending` (the per-row model — no global revert); only periods ending after the last success are provisional; the failed banner shows as today |
 | Old company, many years | All periods since incorporation appear; the sub-nav scrolls; pre-history unfiled periods are `pending` once covered by a fetch (accurate — they were never filed) |
-| Shortened first period / changed ARD | A fetched filing overlapping an estimate invalidates the estimate; the CH-derived period wins |
+| Shortened first period | The real filing (e.g. first accounts running to the ARD) overlaps the n=0 estimate → the estimate is dropped, the filed end anchors (§4.3) |
+| Changed ARD mid-life | Phantom schedule ends between the real filed ends are overlapped by the filings' spans → dropped; the real ends drive the list (§4.3) |
+| Genuinely unfiled year | Neighbouring filings' 12-month spans do **not** overlap it → it survives and is `pending` once covered (accurate — never filed) |
+| Filing ending exactly on an estimate | Enrichment, not invalidation: the row becomes `filed`; neighbours untouched |
 | Period end passes while unfetched | New provisional row appears on the next load (§6.4) |
 | Deletion / ownership | Unchanged (ownership-scoped handler) |
 
@@ -220,15 +243,25 @@ Manual (dev stack, `COMPANIES_HOUSE_API_KEY` unset):
 
 Backend tests (`cargo test -p tally-api`):
 
-- unit: `derive_periods` with a registration date and no history → all
+- unit: `derive_periods_from` with a registration date and no history → all
   schedule periods (n=0..today), past = `provisional`, current = `ongoing`
   with due + not-sent rows; provisional rows have empty `filings` and no `due`;
-- unit: with `fetched_at` after a period end and no filing → `pending`;
-  with `fetched_at` before the period end → `provisional`;
-- unit: filed ends still anchor `filed` rows and invalidate overlapping
-  estimates;
-- pg integration: company with a registration date and `ch: None` →
-  `GET /filings` returns the provisional list + `status.state = 'none'`.
+- unit: with coverage after a period end and no filing → `pending`; with
+  coverage before the period end → `provisional`;
+- unit invalidation: shortened first period drops the n=0 estimate and anchors
+  the real end; changed ARD drops the phantom mid-life estimates; a genuinely
+  unfiled year survives as `pending`; a filing ending exactly on an estimate
+  confirms it (`filed`) without disturbing its neighbours;
+- pg integration, no-CH-number company (deterministic — no job can spawn):
+  `GET /filings` returns exactly the schedule periods, `status.state = 'none'`,
+  ended periods `provisional` structure-only, one functional `ongoing`, zero
+  `pending`;
+- pg integration, enrichment + invalidation round-trip: a done job + stored
+  balance sheet at a changed-ARD end → that end is `filed`, the overlapping
+  estimates are gone, covered ends are `pending`, uncovered ends stay
+  `provisional`, the ongoing period stays functional;
+- pg integration: a later failed refresh does not revert covered periods (the
+  coverage anchor stays the last `done` job).
 
 Web: `pnpm --filter @tally/web typecheck` + the `smoke`/`flow` jsdom scripts
 (demo view untouched; the provisional path needs the API, so the jsdom check is
