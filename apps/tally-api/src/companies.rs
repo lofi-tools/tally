@@ -72,6 +72,7 @@ pub struct CompanyInput {
     pub phone_type_dimension: Option<String>,
     pub logo_b64: Option<String>,
     // accounts metadata
+    pub accounting_standard: Option<String>,
     pub fy1_year: Option<i32>,
     pub fy2_year: Option<i32>,
     pub associated_companies: Option<i32>,
@@ -83,11 +84,32 @@ pub struct CompanyInput {
     pub signature_b64: Option<String>,
 }
 
+/// The accounting standards the web add dialog offers (spec §6.1).
+pub const ACCOUNTING_STANDARDS: [&str; 2] = ["FRS 105", "FRS 102"];
+pub const DEFAULT_ACCOUNTING_STANDARD: &str = "FRS 105";
+
 /// A create body must at least name the company.
 fn validate_create(input: &CompanyInput) -> Result<(), AppError> {
     if input.name.as_deref().is_none_or(|s| s.trim().is_empty()) {
         return Err(AppError::Validation {
             fields: vec![FieldIssue { field: "name".into(), reason: "required".into() }],
+        });
+    }
+    validate_accounting_standard(input)?;
+    Ok(())
+}
+
+/// `accounting_standard` must be one of the supported standards when given
+/// (create and PATCH).
+fn validate_accounting_standard(input: &CompanyInput) -> Result<(), AppError> {
+    if let Some(std) = input.accounting_standard.as_deref()
+        && !ACCOUNTING_STANDARDS.contains(&std)
+    {
+        return Err(AppError::Validation {
+            fields: vec![FieldIssue {
+                field: "accounting_standard".into(),
+                reason: format!("must be one of {ACCOUNTING_STANDARDS:?}"),
+            }],
         });
     }
     Ok(())
@@ -179,8 +201,10 @@ pub async fn patch(
 ) -> Result<Json<Company>, AppError> {
     let mut db = state.db.clone();
     let mut company = owned_company(&mut db, user.id, id).await?;
+    validate_accounting_standard(&input)?;
     let mut builder = company.update();
     apply_input(&mut builder, input);
+    builder.set_updated_at(Some(now_rfc3339()));
     builder.exec(&mut db).await?;
     let company = owned_company(&mut db, user.id, id).await?;
     Ok(Json(company))
@@ -195,29 +219,44 @@ pub async fn delete(
     let mut db = state.db.clone();
     let company = owned_company(&mut db, user.id, id).await?;
 
-    let ledgers = Ledger::filter_by_company_id(company.id).exec(&mut db).await?;
     let mut tx = db.transaction().await?;
+    let ledgers = delete_company_and_owned(&mut tx, &company).await?;
+    tx.commit().await?;
+    remove_ledger_files(&ledgers);
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+/// Delete a company and everything it owns (jobs, filings, balance sheets,
+/// ledgers + their rows) inside the caller's transaction. Returns the
+/// deleted ledgers so the caller can remove the stored files after commit.
+/// Shared by the `DELETE` handler and the guest sweep (temp-user spec §6.3).
+pub async fn delete_company_and_owned<E: toasty::Executor>(
+    exec: &mut E,
+    company: &Company,
+) -> Result<Vec<Ledger>, AppError> {
+    let ledgers = Ledger::filter_by_company_id(company.id).exec(exec).await?;
     // The filings sync tables (jobs / filings / balance sheets) cascade
     // with the company, like the ledgers.
-    crate::models::Job::filter_by_company_id(company.id).delete().exec(&mut tx).await?;
-    crate::models::Filing::filter_by_company_id(company.id).delete().exec(&mut tx).await?;
-    crate::models::BalanceSheet::filter_by_company_id(company.id).delete().exec(&mut tx).await?;
+    crate::models::Job::filter_by_company_id(company.id).delete().exec(exec).await?;
+    crate::models::Filing::filter_by_company_id(company.id).delete().exec(exec).await?;
+    crate::models::BalanceSheet::filter_by_company_id(company.id).delete().exec(exec).await?;
     for ledger in &ledgers {
-        Split::filter_by_ledger_id(ledger.id).delete().exec(&mut tx).await?;
-        Transaction::filter_by_ledger_id(ledger.id).delete().exec(&mut tx).await?;
-        Account::filter_by_ledger_id(ledger.id).delete().exec(&mut tx).await?;
-        Ledger::filter_by_id(ledger.id).delete().exec(&mut tx).await?;
+        Split::filter_by_ledger_id(ledger.id).delete().exec(exec).await?;
+        Transaction::filter_by_ledger_id(ledger.id).delete().exec(exec).await?;
+        Account::filter_by_ledger_id(ledger.id).delete().exec(exec).await?;
+        Ledger::filter_by_id(ledger.id).delete().exec(exec).await?;
     }
-    Company::filter_by_id(company.id).delete().exec(&mut tx).await?;
-    tx.commit().await?;
+    Company::filter_by_id(company.id).delete().exec(exec).await?;
+    Ok(ledgers)
+}
 
-    // Remove the stored files (best-effort after the DB work committed).
-    for ledger in &ledgers {
+/// Remove the stored files for deleted ledgers (best-effort, after commit).
+pub fn remove_ledger_files(ledgers: &[Ledger]) {
+    for ledger in ledgers {
         if !ledger.file_path.is_empty() {
             let _ = std::fs::remove_file(&ledger.file_path);
         }
     }
-    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 /// `GET /companies/search?q=` — Companies House search (requires a key).
@@ -271,6 +310,7 @@ pub async fn enrich(
     patch.enrich_from_ch(&profile, officers.as_ref());
     let mut builder = company.update();
     apply_input(&mut builder, patch);
+    builder.set_updated_at(Some(now_rfc3339()));
     builder.exec(&mut db).await?;
 
     let company = owned_company(&mut db, user.id, id).await?;
@@ -285,6 +325,11 @@ pub struct SearchParams {
 // ---------------------------------------------------------------------------
 // Shared helpers (used by ledgers.rs / reports.rs too)
 // ---------------------------------------------------------------------------
+
+/// RFC 3339 UTC now (the app's timestamp convention; see auth.rs/jobs.rs).
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
 
 /// Load a company owned by `user_id`, or 404 (never revealing other users'
 /// resources).
@@ -346,6 +391,10 @@ pub async fn create_row(
         contact_country_dimension: input.contact_country_dimension.unwrap_or_default(),
         phone_type_dimension: input.phone_type_dimension.unwrap_or_default(),
         logo_b64: input.logo_b64,
+        accounting_standard: input
+            .accounting_standard
+            .unwrap_or_else(|| DEFAULT_ACCOUNTING_STANDARD.into()),
+        updated_at: Some(now_rfc3339()),
         fy1_year: input.fy1_year.unwrap_or(DEFAULT_FY1_YEAR),
         fy2_year: input.fy2_year.unwrap_or(DEFAULT_FY2_YEAR),
         associated_companies: input.associated_companies,
@@ -454,6 +503,7 @@ pub fn apply_input<'a>(builder: &mut CompanyUpdate<'a>, input: CompanyInput) {
     set!(set_auditor_address, auditor_address);
     set!(set_industry_sector_dimension, industry_sector_dimension);
     set!(set_legal_form_dimension, legal_form_dimension);
+    set!(set_accounting_standard, accounting_standard);
     set!(set_country_dimension, country_dimension);
     set!(set_contact_country_dimension, contact_country_dimension);
     set!(set_phone_type_dimension, phone_type_dimension);

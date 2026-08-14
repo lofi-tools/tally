@@ -155,7 +155,21 @@ impl Drop for TestApp {
 /// Build a request; `token` becomes `Authorization: Bearer …`, `body`
 /// becomes a JSON body with the proper content type.
 pub fn request(method: Method, uri: &str, token: Option<&str>, body: Option<&Value>) -> Request<Body> {
+    request_with_guest(method, uri, None, token, body)
+}
+
+/// Like [`request`], with an `X-Guest-Id` header (temp-user spec §5).
+pub fn request_with_guest(
+    method: Method,
+    uri: &str,
+    guest_id: Option<&str>,
+    token: Option<&str>,
+    body: Option<&Value>,
+) -> Request<Body> {
     let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(guest_id) = guest_id {
+        builder = builder.header("x-guest-id", guest_id);
+    }
     if let Some(token) = token {
         builder = builder.header(header::AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {token}")).unwrap());
     }

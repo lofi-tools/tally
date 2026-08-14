@@ -12,7 +12,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt
 use argon2::Argon2;
 use axum::extract::{FromRequestParts, State};
 use axum::http::request::Parts;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,9 @@ use crate::models::{Session, User};
 const SESSION_TTL_DAYS: i64 = 30;
 /// Minimum password length (semantic validation, 422).
 const MIN_PASSWORD_LEN: usize = 8;
+/// The header carrying the client-generated anonymous identity (temp-user
+/// spec §5).
+const GUEST_ID_HEADER: &str = "x-guest-id";
 
 // ---------------------------------------------------------------------------
 // Request / response bodies
@@ -56,11 +59,39 @@ pub struct AuthResponse {
 // ---------------------------------------------------------------------------
 
 /// `POST /auth/register` → `{ token, user }`.
+///
+/// When the `X-Guest-Id` header is present, this **upgrades** the mapped
+/// temporary user in place (same row, same ids — companies/jobs/filings
+/// keep their ids) instead of creating a fresh user (temp-user spec §5.2):
+/// email + password + display_name are written, `is_temporary` is cleared,
+/// `guest_id` is dropped, the temp user's old sessions are revoked, and a
+/// fresh session is issued. Without the header, plain register is unchanged.
 pub async fn register(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     AppJson(body): AppJson<RegisterBody>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    let guest_id = guest_id_from_headers(&headers);
     let email = body.email.trim().to_lowercase();
+    let mut db = state.db.clone();
+
+    // Spec §5.2 order: when a guest id is sent, the workspace must exist
+    // before anything else (404 over field/email errors).
+    let temp = match guest_id {
+        Some(ref gid) => {
+            let t = User::filter_by_guest_id(gid)
+                .first()
+                .exec(&mut db)
+                .await?
+                .ok_or(AppError::GuestNotFound)?;
+            if !t.is_temporary {
+                return Err(AppError::GuestAlreadyAdopted);
+            }
+            Some(t)
+        }
+        None => None,
+    };
+
     let mut fields = Vec::new();
     if body.display_name.trim().is_empty() {
         fields.push(FieldIssue { field: "display_name".into(), reason: "required".into() });
@@ -78,33 +109,86 @@ pub async fn register(
         return Err(AppError::Validation { fields });
     }
 
-    let mut db = state.db.clone();
     if User::filter_by_email(&email).first().exec(&mut db).await?.is_some() {
         return Err(AppError::EmailTaken { email });
     }
 
     let password_hash = hash_password(&body.password)?;
-    let user = toasty::create!(User {
-        email,
-        password_hash,
-        display_name: body.display_name.trim().to_string(),
-        created_at: now_rfc3339(),
-    })
-    .exec(&mut db)
-    .await?;
+    let user = if let Some(mut temp) = temp {
+        // In-place upgrade: same row, same ids — companies / jobs / filings
+        // keep their ids, the worker's rows keep working (spec §5.2).
+        let mut builder = temp.update();
+        builder
+            .set_email(email)
+            .set_password_hash(password_hash)
+            .set_display_name(body.display_name.trim().to_string())
+            .set_is_temporary(false)
+            .set_guest_id(None);
+        builder.exec(&mut db).await?;
 
-    let (plain, token_hash) = new_session_token();
-    let expires_at = (Utc::now() + Duration::days(SESSION_TTL_DAYS)).to_rfc3339();
-    toasty::create!(Session {
-        user_id: user.id,
-        token_hash,
-        created_at: now_rfc3339(),
-        expires_at,
-    })
-    .exec(&mut db)
-    .await?;
+        // Revoke the temp user's prior (guest) sessions — the fresh one
+        // below is the only session the app keeps.
+        Session::filter_by_user_id(temp.id).delete().exec(&mut db).await?;
 
-    Ok(Json(AuthResponse { token: plain, user }))
+        User::filter_by_id(temp.id).first().exec(&mut db).await?.ok_or_else(|| {
+            AppError::Internal { message: "upgraded user vanished after update".into() }
+        })?
+    } else {
+        toasty::create!(User {
+            email,
+            password_hash,
+            display_name: body.display_name.trim().to_string(),
+            created_at: now_rfc3339(),
+            is_temporary: false,
+            guest_id: None,
+        })
+        .exec(&mut db)
+        .await?
+    };
+
+    let token = issue_session(&mut db, user.id).await?;
+    Ok(Json(AuthResponse { token, user }))
+}
+
+/// `POST /auth/guest` — bootstrap (or re-issue) a guest session (temp-user
+/// spec §5.1). Idempotent: the `X-Guest-Id` header maps to the same temp
+/// user every time, so a returning browser keeps its workspace.
+pub async fn guest(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AuthResponse>, AppError> {
+    let guest_id = guest_id_from_headers(&headers).ok_or(AppError::GuestIdRequired)?;
+    let mut db = state.db.clone();
+
+    let user = match User::filter_by_guest_id(&guest_id).first().exec(&mut db).await? {
+        Some(user) => {
+            // An adopted workspace is no longer a guest: refuse (the browser
+            // should stop sending this id once registered).
+            if !user.is_temporary {
+                return Err(AppError::GuestAlreadyAdopted);
+            }
+            user
+        }
+        None => {
+            // Placeholder email satisfies NOT NULL + unique and can never
+            // collide with a real address; the dummy hash means login can
+            // never succeed for this row (timing-equalisation stays honest).
+            let placeholder_email = format!("temp+{}@local", uuid::Uuid::new_v4().simple());
+            toasty::create!(User {
+                email: placeholder_email,
+                password_hash: DUMMY_HASH.to_string(),
+                display_name: "Guest".to_string(),
+                created_at: now_rfc3339(),
+                is_temporary: true,
+                guest_id: Some(guest_id),
+            })
+            .exec(&mut db)
+            .await?
+        }
+    };
+
+    let token = issue_session(&mut db, user.id).await?;
+    Ok(Json(AuthResponse { token, user }))
 }
 
 /// `POST /auth/login` → `{ token, user }`.
@@ -127,18 +211,8 @@ pub async fn login(
         return Err(AppError::InvalidCredentials);
     }
 
-    let (plain, token_hash) = new_session_token();
-    let expires_at = (Utc::now() + Duration::days(SESSION_TTL_DAYS)).to_rfc3339();
-    toasty::create!(Session {
-        user_id: user.id,
-        token_hash,
-        created_at: now_rfc3339(),
-        expires_at,
-    })
-    .exec(&mut db)
-    .await?;
-
-    Ok(Json(AuthResponse { token: plain, user }))
+    let token = issue_session(&mut db, user.id).await?;
+    Ok(Json(AuthResponse { token, user }))
 }
 
 /// `POST /auth/logout` → 204 (revokes the presented session).
@@ -232,6 +306,32 @@ fn new_session_token() -> (String, String) {
     let plain = hex::encode(&bytes);
     let hash = sha256_hex(plain.as_bytes());
     (plain, hash)
+}
+
+/// Create a `Session` row for `user_id` and return the plaintext token
+/// (shared by register / login / guest).
+async fn issue_session(db: &mut toasty::Db, user_id: uuid::Uuid) -> Result<String, AppError> {
+    let (plain, token_hash) = new_session_token();
+    let expires_at = (Utc::now() + Duration::days(SESSION_TTL_DAYS)).to_rfc3339();
+    toasty::create!(Session {
+        user_id,
+        token_hash,
+        created_at: now_rfc3339(),
+        expires_at,
+    })
+    .exec(db)
+    .await?;
+    Ok(plain)
+}
+
+/// The trimmed `X-Guest-Id` header value, if present and non-blank.
+fn guest_id_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(GUEST_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// RFC 3339 UTC now.

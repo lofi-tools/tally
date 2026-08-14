@@ -59,6 +59,18 @@ async fn main() -> Result<()> {
         .context("apply schema migrations")?;
     tracing::info!(db_url = %db_url, "connected to postgres; migrations applied");
 
+    // One-shot cleanup of abandoned temporary users (temp-user spec §8): a
+    // couple of queries, runs in milliseconds. Best-effort — a fault here
+    // must not take down startup.
+    let guest_ttl_days = std::env::var("TALLY_GUEST_TTL_DAYS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(tally_api::sweep::DEFAULT_GUEST_TTL_DAYS);
+    match tally_api::sweep::sweep_abandoned_guests(&mut db, guest_ttl_days).await {
+        Ok(deleted) => tracing::info!(deleted, guest_ttl_days, "guest sweep complete"),
+        Err(e) => tracing::error!(error = %e, "guest sweep failed"),
+    }
+
     // --- state + serve --------------------------------------------------------
     let state = Arc::new(AppState {
         db,

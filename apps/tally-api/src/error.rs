@@ -46,6 +46,12 @@ pub enum AppError {
     EmailTaken { email: String },
     #[snafu(display("invalid email or password"))]
     InvalidCredentials,
+    #[snafu(display("missing or blank X-Guest-Id header"))]
+    GuestIdRequired,
+    #[snafu(display("no guest workspace exists for this guest id"))]
+    GuestNotFound,
+    #[snafu(display("this guest workspace has already been adopted by an account"))]
+    GuestAlreadyAdopted,
 
     // -- request -------------------------------------------------------------
     #[snafu(display("invalid JSON body: {message}"))]
@@ -110,6 +116,9 @@ impl AppError {
                 Some(json!({ "email": email })),
             ),
             Self::InvalidCredentials => (StatusCode::UNAUTHORIZED, "invalid_credentials", self.to_string(), None),
+            Self::GuestIdRequired => (StatusCode::BAD_REQUEST, "guest_id_required", self.to_string(), None),
+            Self::GuestNotFound => (StatusCode::NOT_FOUND, "guest_not_found", self.to_string(), None),
+            Self::GuestAlreadyAdopted => (StatusCode::BAD_REQUEST, "guest_already_adopted", self.to_string(), None),
             Self::InvalidJson { message, line, column } => {
                 let mut details = json!({ "message": message });
                 if let (Some(line), Some(column)) = (line, column) {
@@ -355,6 +364,9 @@ mod tests {
             (AppError::AuthTokenExpired, StatusCode::UNAUTHORIZED, "auth_expired"),
             (AppError::EmailTaken { email: "a@b.c".into() }, StatusCode::CONFLICT, "email_taken"),
             (AppError::InvalidCredentials, StatusCode::UNAUTHORIZED, "invalid_credentials"),
+            (AppError::GuestIdRequired, StatusCode::BAD_REQUEST, "guest_id_required"),
+            (AppError::GuestNotFound, StatusCode::NOT_FOUND, "guest_not_found"),
+            (AppError::GuestAlreadyAdopted, StatusCode::BAD_REQUEST, "guest_already_adopted"),
             (
                 AppError::invalid_json("expected value at line 1 column 2".into()),
                 StatusCode::BAD_REQUEST,

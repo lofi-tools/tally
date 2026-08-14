@@ -38,6 +38,13 @@ pub struct User {
     pub display_name: String,
     /// RFC 3339 UTC.
     pub created_at: String,
+    /// True for guest rows (temp-user spec §4): a placeholder email + dummy
+    /// hash, adopted in place by `POST /auth/register`.
+    pub is_temporary: bool,
+    /// The client-generated anonymous identity (`X-Guest-Id`); NULL for
+    /// real users, cleared on adoption. DB unique index in 0003.
+    #[unique]
+    pub guest_id: Option<String>,
     #[serde(skip)]
     #[has_many]
     pub sessions: toasty::Deferred<Vec<Session>>,
@@ -121,6 +128,12 @@ pub struct Company {
     pub logo_b64: Option<String>,
 
     // -- accounts metadata (report generation inputs) -----------------------
+    /// The accounting standard the web add dialog collects: `FRS 105` (micro-
+    /// entities, default) or `FRS 102`.
+    pub accounting_standard: String,
+    /// RFC 3339 UTC — last write (create / PATCH / enrich). The guest sweep's
+    /// activity clock (temp-user spec §8); NULL for pre-0003 rows.
+    pub updated_at: Option<String>,
     pub fy1_year: i32,
     pub fy2_year: i32,
     /// Number of associated companies excluding this one; `None` = standalone.

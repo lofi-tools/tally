@@ -16,6 +16,7 @@ pub mod migrations;
 pub mod models;
 pub mod period;
 pub mod reports;
+pub mod sweep;
 
 // Router assembly and shared state (spec §4).
 //
@@ -106,6 +107,7 @@ fn api_v1() -> Router<Arc<AppState>> {
     Router::new()
         // auth
         .route("/auth/register", post(auth::register))
+        .route("/auth/guest", post(auth::guest))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))

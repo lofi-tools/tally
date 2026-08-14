@@ -75,6 +75,64 @@ async fn create_list_get_patch_delete() {
     assert_error(resp, StatusCode::NOT_FOUND, "not_found").await;
 }
 
+/// temp-user spec §6.1: `accounting_standard` round-trips through create /
+/// PATCH and is validated (FRS 105 / FRS 102 only).
+#[tokio::test]
+async fn accounting_standard_roundtrips() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let token = app.register("standard@example.com").await;
+
+    // Explicit FRS 102 is persisted.
+    let resp = app
+        .send(request(
+            Method::POST,
+            "/api/v1/companies",
+            Some(&token),
+            Some(&json!({ "name": "FRS102 Ltd", "accounting_standard": "FRS 102" })),
+        ))
+        .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let id = json_body(resp).await["id"].as_str().unwrap().to_string();
+
+    // Absent → default FRS 105.
+    let resp = app
+        .send(request(
+            Method::POST,
+            "/api/v1/companies",
+            Some(&token),
+            Some(&json!({ "name": "Default Ltd" })),
+        ))
+        .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["accounting_standard"], "FRS 105");
+
+    // PATCH switches the standard.
+    let resp = app
+        .send(request(
+            Method::PATCH,
+            &format!("/api/v1/companies/{id}"),
+            Some(&token),
+            Some(&json!({ "accounting_standard": "FRS 105" })),
+        ))
+        .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["accounting_standard"], "FRS 105");
+
+    // An unknown standard → 422 validation_failed.
+    let resp = app
+        .send(request(
+            Method::POST,
+            "/api/v1/companies",
+            Some(&token),
+            Some(&json!({ "name": "Bad Ltd", "accounting_standard": "GAAP 2020" })),
+        ))
+        .await;
+    assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
+}
+
 #[tokio::test]
 async fn create_requires_name() {
     let Some(app) = TestApp::setup().await else {
