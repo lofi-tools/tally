@@ -7,8 +7,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tally_api::{router, AppState};
 use tally_api::companies_house::ChApi;
+use tally_api::db_log::LoggingDriver;
 use tally_api::models::{Account, BalanceSheet, Company, Filing, Job, Ledger, Session, Split, Transaction, User};
-use toasty::db::Connect;
 use tokio_util::sync::CancellationToken;
 
 /// Default bind (spec §13: LTS owns 8081, so the API defaults to 8080).
@@ -40,15 +40,18 @@ async fn main() -> Result<()> {
         .with_context(|| format!("create upload dir '{}'", upload_dir.display()))?;
 
     // --- database -----------------------------------------------------------
-    let connect = Connect::new(&db_url)
-        .await
+    // The driver is wrapped (src/db_log.rs) so that failed DB requests log at
+    // ERROR with the whole evaluated request (SQL + bound params), which the
+    // stock driver keeps hidden at DEBUG. Same scheme validation as
+    // `toasty::db::Connect`.
+    let driver = LoggingDriver::new(&db_url)
         .with_context(|| format!("parse DATABASE_URL '{db_url}'"))?;
     let mut builder = toasty::Db::builder();
     builder.models(toasty::models!(
         User, Session, Company, Ledger, Account, Transaction, Split, Job, Filing, BalanceSheet
     ));
     let mut db = builder
-        .build(connect)
+        .build(driver)
         .await
         .with_context(|| format!("connect to '{db_url}'"))?;
     // Idempotent: plays only the committed SQL migrations that are missing

@@ -646,6 +646,13 @@
 
         env = {
           CARGO_NET_GIT_FETCH_WITH_CLI = "true";
+          # Default log filter for the dev shell: the app + http layers at
+          # info, the toasty postgres driver crates at debug (the
+          # `toasty::query` events render each evaluated request — SQL +
+          # params — for every query).  main.rs reads RUST_LOG via
+          # EnvFilter::try_from_default_env, so a shell-set RUST_LOG fully
+          # overrides this default.
+          RUST_LOG = "tally_api=info,tower_http=info,toasty_driver_postgresql=debug,toasty::query=debug";
         };
       in
       {
