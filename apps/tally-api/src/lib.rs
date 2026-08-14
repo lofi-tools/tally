@@ -15,6 +15,7 @@ pub mod jobs;
 pub mod ledgers;
 pub mod migrations;
 pub mod models;
+pub mod otel;
 pub mod period;
 pub mod reports;
 pub mod sweep;
@@ -27,8 +28,11 @@ pub mod sweep;
 //
 // Middleware stack (outermost → innermost): CORS, request-id scoping,
 // trace, catch-panic, body limit. Request-id scoping sits *outside* the
-// trace layer so the access-log span can carry the `x-request-id` (the
-// seed for future trace correlation).
+// trace layer: it generates the `x-request-id`, roots the fastrace trace
+// with it (trace id == request id, so exported spans correlate with logs),
+// and emits the access-log line. tower-http's own on_response event is
+// silenced (the access log lives in `request_id_layer`, which has the full
+// method/uri/request_id/status/latency).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -39,6 +43,7 @@ use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use fastrace::future::FutureExt as _;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::{DefaultOnFailure, DefaultOnResponse, TraceLayer};
@@ -77,23 +82,75 @@ async fn method_not_allowed() -> Response {
 }
 
 /// Scopes a fresh request id into the [`REQUEST_ID`] task-local (5xx
-/// responses echo it) and reflects it as the `X-Request-Id` header — on the
-/// request as well as the response, so the outer access-log span can carry
-/// it (the seed for future trace correlation).
+/// responses echo it), reflects it as the `X-Request-Id` header on both the
+/// request and the response, roots the fastrace trace for the request (trace
+/// id == the request id, so exported spans correlate with the logs via
+/// `FastraceDiagnostic`), and emits one access-log line per request
+/// (method/uri/request_id/status/latency; 5xx at ERROR).
 async fn request_id_layer(request: Request, next: Next) -> Response {
-    let id = uuid::Uuid::new_v4().to_string();
-    let value = HeaderValue::from_str(&id).expect("uuid is a valid header value");
-    let request = {
-        let mut request = request;
-        request.headers_mut().insert("x-request-id", value.clone());
-        request
-    };
+    let id = uuid::Uuid::new_v4();
+    let id_str = id.to_string();
+    let value = HeaderValue::from_str(&id_str).expect("uuid is a valid header value");
+    let mut request = request;
+    request.headers_mut().insert("x-request-id", value.clone());
+
+    // fastrace root: trace id == x-request-id (the uuid bytes). The tracing
+    // spans/events for this request (tower-http's `request` span, handlers,
+    // db_log errors) become its children via the FastraceCompatLayer; the
+    // local parent also feeds logforth's FastraceDiagnostic. `in_span`
+    // re-establishes the local parent on every poll, so it survives tokio
+    // moving the future between threads (and keeps the future Send — the
+    // LocalParentGuard itself is !Send).
+    let root = fastrace::Span::root(
+        "http_request",
+        fastrace::collector::SpanContext::new(
+            fastrace::collector::TraceId(id.as_u128()),
+            fastrace::collector::SpanId(0),
+        ),
+    );
+
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+
     let mut response = REQUEST_ID
-        .scope(id.clone(), async { next.run(request).await })
+        .scope(id_str.clone(), async {
+            let started = std::time::Instant::now();
+            // The access-log line is emitted *inside* the in_span'd future:
+            // the fastrace local parent is set for the whole poll, so
+            // logforth's FastraceDiagnostic stamps trace_id on it (the trace
+            // id == x-request-id, so logs correlate with Traceway). The
+            // LocalParentGuard never crosses an await, keeping the future
+            // Send.
+            async {
+                let response = next.run(request).await;
+                let latency_ms = started.elapsed().as_secs_f64() * 1000.0;
+                let status = response.status().as_u16();
+                if response.status().is_server_error() {
+                    tracing::error!(
+                        method = %method,
+                        uri = %uri,
+                        request_id = %id_str,
+                        status,
+                        latency_ms,
+                        "http request failed"
+                    );
+                } else {
+                    tracing::info!(
+                        method = %method,
+                        uri = %uri,
+                        request_id = %id_str,
+                        status,
+                        latency_ms,
+                        "http request"
+                    );
+                }
+                response
+            }
+            .in_span(root)
+            .await
+        })
         .await;
-    response
-        .headers_mut()
-        .insert("x-request-id", value);
+    response.headers_mut().insert("x-request-id", value);
     response
 }
 
@@ -114,11 +171,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(axum::extract::DefaultBodyLimit::max(body_limit as usize))
         .layer(CatchPanicLayer::new())
         .layer(
-            // Request access logs (level discipline: one INFO line per
-            // request with status + latency; 5xx at ERROR). The span carries
-            // the x-request-id set by the outer request_id_layer, so the
-            // access log line correlates with the response header and the
-            // 5xx error envelope — ready for OTel trace ids later.
+            // The `request` span feeds fastrace (via the compat layer): its
+            // properties (method/uri/request_id) become the trace's root
+            // span attributes. The access-log line itself is emitted by the
+            // outer request_id_layer (it has the full field set, and 5xx at
+            // ERROR), so tower-http's own on_response event is dropped to
+            // DEBUG (the stock default — invisible at the default
+            // `tower_http=info` filter).
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request| {
                     tracing::info_span!(
@@ -132,7 +191,7 @@ pub fn router(state: Arc<AppState>) -> Router {
                             .unwrap_or(""),
                     )
                 })
-                .on_response(DefaultOnResponse::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::DEBUG))
                 .on_failure(DefaultOnFailure::new().level(Level::ERROR)),
         )
         .layer(middleware::from_fn(request_id_layer))

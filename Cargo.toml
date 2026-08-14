@@ -25,7 +25,7 @@ toasty = { version = "0.9.0", features = ["postgresql", "serde", "rust_decimal"]
 tower = "0.5"
 tower-http = { version = "0.7.0", features = ["cors", "trace", "catch-panic", "request-id", "limit"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 argon2 = "0.5"
 rand = "0.9"
 sha2 = "0.10"

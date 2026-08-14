@@ -35,8 +35,24 @@ rust_decimal.workspace = true
 # errors, logs
 anyhow.workspace = true
 snafu.workspace = true
-tracing.workspace = true
+# tracing's `log` feature forwards tracing events to the `log` facade, which
+# logforth (below) sinks — that's how the existing tracing::* calls become
+# logforth records (src/otel.rs). `log-always` is required because plain
+# `log` suppresses the emission while a tracing subscriber is set (it assumes
+# the subscriber renders events itself), and ours (Registry + fastrace layer)
+# doesn't render logs.
+tracing = { workspace = true, features = ["log", "log-always"] }
 tracing-subscriber.workspace = true
+# observability (src/otel.rs): fastrace spans exported to OTel (Traceway) via
+# fastrace-opentelemetry, fastrace-tracing as the tokio-tracing ↔ fastrace
+# compatibility layer, logforth for log output.
+fastrace = { version = "0.7", features = ["enable"] }
+fastrace-tracing = "0.1"
+fastrace-opentelemetry = "0.18"
+opentelemetry = { version = "0.32", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+logforth = { version = "0.30", features = ["starter-log", "diagnostic-fastrace"] }
 # auth
 argon2.workspace = true
 rand.workspace = true
