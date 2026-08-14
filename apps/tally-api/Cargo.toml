@@ -20,6 +20,13 @@ tower.workspace = true
 tower-http.workspace = true
 # ORM / db
 toasty.workspace = true
+# toasty's postgres driver + SQL serializer, wrapped in src/db_log.rs so a
+# failed DB request logs at ERROR with the whole evaluated request (the stock
+# driver only surfaces queries at DEBUG via its `toasty::query` event).
+toasty-core = "0.9.0"
+toasty-sql = "0.9.0"
+toasty-driver-postgresql = "0.9.0"
+async-trait.workspace = true
 # formats, serde
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

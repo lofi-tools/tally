@@ -4223,6 +4223,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
+ "async-trait",
  "axum",
  "chrono",
  "ct600",
@@ -4239,6 +4240,9 @@ dependencies = [
  "snafu",
  "tempfile",
  "toasty",
+ "toasty-core",
+ "toasty-driver-postgresql",
+ "toasty-sql",
  "tokio",
  "tokio-postgres",
  "tokio-util",
