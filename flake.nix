@@ -348,6 +348,10 @@
               {
                 name = "api";
                 command = ''
+                  # Source .env with `set -a` so quoted values survive (the
+                  # OTEL auth header contains a space — an unquoted export
+                  # splits the token off and Traceway 401s everything).
+                  set -a; [ -f "${wd}/.env" ] && . "${wd}/.env" || true; set +a
                   ${bin.db-wait}
                   cargo run -p tally-api
                 '';
@@ -627,8 +631,12 @@
           '';
 
           # Run the tally-api service (env from .env / defaults; see
-          # apps/tally-api/README.md).
-          api = ''cargo run -p tally-api'';
+          # apps/tally-api/README.md).  .env is sourced with `set -a` so
+          # quoted values survive (the OTEL auth header contains a space).
+          api = ''
+            set -a; [ -f "${wd}/.env" ] && . "${wd}/.env" || true; set +a
+            cargo run -p tally-api
+          '';
 
           # The tally-api suites.  `test-api` is self-sufficient: it first
           # ensures the compose Postgres is up (`docker compose up -d --wait db`
@@ -651,8 +659,10 @@
           # `toasty::query` events render each evaluated request — SQL +
           # params — for every query).  main.rs reads RUST_LOG via
           # EnvFilter::try_from_default_env, so a shell-set RUST_LOG fully
-          # overrides this default.
-          RUST_LOG = "tally_api=info,tower_http=info,toasty_driver_postgresql=debug,toasty::query=debug";
+          # overrides this default.  fastrace_opentelemetry=error surfaces
+          # failed OTLP exports (bad endpoint / 401 / network) instead of
+          # dropping spans silently (see apps/tally-api/src/otel.rs).
+          RUST_LOG = "tally_api=info,tower_http=info,toasty_driver_postgresql=debug,toasty::query=debug,fastrace_opentelemetry=error";
         };
       in
       {

@@ -19,6 +19,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use fastrace::future::FutureExt as _;
 use snafu::{ResultExt, Snafu};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -234,33 +235,51 @@ pub async fn run_worker(state: Arc<AppState>, shutdown: CancellationToken) {
 }
 
 /// Run one claimed job: dispatch on `kind`, persist the outcome.
+///
+/// The whole run sits inside a fastrace root span marked `span.kind=consumer`
+/// (fastrace-opentelemetry maps that property to OTel SpanKind::Consumer,
+/// which is how Traceway renders background jobs). Rooting the job also gives
+/// every db query / log emitted during it a trace context, so logs that
+/// *didn't* originate from a request still link to a trace in Traceway.
 async fn run_job(state: Arc<AppState>, job: ClaimedJob, token: CancellationToken) {
-    let result = match job.kind.as_str() {
-        "fetch_filings" => crate::filings::fetch_and_store(&state, job.company_id, &token).await,
-        other => Err(crate::error::AppError::Validation {
-            fields: vec![crate::error::FieldIssue {
-                field: "kind".into(),
-                reason: format!("unknown job kind '{other}'"),
-            }],
-        }),
-    };
-    let mut db = state.db.clone();
-    let (status, err) = match result {
-        Ok(()) => ("done", None),
-        Err(e) => {
-            tracing::error!(job = %job.id, kind = %job.kind, error = %e, "job failed");
-            ("failed", Some(e.to_string()))
-        }
-    };
-    let _ = toasty::sql::statement(
-        r#"UPDATE "jobs" SET "status" = $1, "last_error" = $2, "attempts" = "attempts" + 1, "updated_at" = $3
-           WHERE "id" = $4"#,
+    let root = fastrace::Span::root(
+        format!("job.{}", job.kind),
+        fastrace::collector::SpanContext::random(),
     )
-    .bind(status)
-    .bind(err.as_deref())
-    .bind(&now_rfc3339())
-    .bind(job.id)
-    .exec(&mut db)
+    .with_property(|| ("span.kind", "consumer"))
+    .with_property(|| ("job.id", job.id.to_string()))
+    .with_property(|| ("job.kind", job.kind.clone()));
+
+    async move {
+        let result = match job.kind.as_str() {
+            "fetch_filings" => crate::filings::fetch_and_store(&state, job.company_id, &token).await,
+            other => Err(crate::error::AppError::Validation {
+                fields: vec![crate::error::FieldIssue {
+                    field: "kind".into(),
+                    reason: format!("unknown job kind '{other}'"),
+                }],
+            }),
+        };
+        let mut db = state.db.clone();
+        let (status, err) = match result {
+            Ok(()) => ("done", None),
+            Err(e) => {
+                tracing::error!(job = %job.id, kind = %job.kind, error = %e, "job failed");
+                ("failed", Some(e.to_string()))
+            }
+        };
+        let _ = toasty::sql::statement(
+            r#"UPDATE "jobs" SET "status" = $1, "last_error" = $2, "attempts" = "attempts" + 1, "updated_at" = $3
+               WHERE "id" = $4"#,
+        )
+        .bind(status)
+        .bind(err.as_deref())
+        .bind(&now_rfc3339())
+        .bind(job.id)
+        .exec(&mut db)
+        .await;
+    }
+    .in_span(root)
     .await;
 }
 
