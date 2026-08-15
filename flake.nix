@@ -330,7 +330,7 @@
           # (db tab), the tally-api (api tab), and the Vite web app (web tab)
           # — one tab per process so each one's logs stay visible.  Only the
           # db tab runs `docker compose up` (it owns the container); the api
-          # tab waits for the healthcheck via db-wait (read-only, no race)
+          # tab waits for the healthcheck via await-db (read-only, no race)
           # before `cargo run`.  The db tab's cleanup stops the container
           # before starting (any stale instance) and again when the session
           # ends (data persists in the named volume, so the db survives
@@ -348,11 +348,11 @@
               {
                 name = "api";
                 command = ''
-                  # Source .env with `set -a` so quoted values survive (the
-                  # OTEL auth header contains a space — an unquoted export
-                  # splits the token off and Traceway 401s everything).
+                  # # Source .env with `set -a` so quoted values survive (the
+                  # # OTEL auth header contains a space — an unquoted export
+                  # # splits the token off and Traceway 401s everything).
                   set -a; [ -f "${wd}/.env" ] && . "${wd}/.env" || true; set +a
-                  ${bin.db-wait}
+                  ${bin.await-db}
                   cargo run -p tally-api
                 '';
               }
@@ -596,10 +596,10 @@
           # (`docker compose ps` + `docker inspect`, never `up`): unlike
           # dev-db it cannot create a container, so it can't race the db tab's
           # foreground `docker compose up db` over the container name.
-          db-wait = ''
+          await-db = ''
             cd "${wd}"
             command -v docker >/dev/null 2>&1 || {
-              echo "db-wait: docker not available; the api will fail to reach the db" >&2
+              echo "await-db: docker not available; the api will fail to reach the db" >&2
               exit 0
             }
             UP=0
@@ -610,7 +610,7 @@
               fi
               sleep 1
             done
-            [ "$UP" = 1 ] || { echo "db-wait: db not healthy after 90s; starting the api anyway" >&2; }
+            [ "$UP" = 1 ] || { echo "await-db: db not healthy after 90s; starting the api anyway" >&2; }
           '';
 
           # Wipe the dev database (compose container + named volume) and any
@@ -622,9 +622,7 @@
           reset = ''
             cd "${wd}"
             docker compose down -v --remove-orphans
-            # Belt-and-braces: force-remove any leftover container/volume that
-            # compose couldn't clean up (e.g. a stale instance mid-race), so a
-            # later `dev` can't hit a "container name already in use" conflict.
+            # force-remove any leftover container/volume that compose couldn't clean up
             docker rm -f accounting-db-1 2>/dev/null || true
             docker volume rm tally-pg 2>/dev/null || true
             rm -rf "${wd}/.cache/tally-api/uploads"
@@ -634,7 +632,7 @@
           # apps/tally-api/README.md).  .env is sourced with `set -a` so
           # quoted values survive (the OTEL auth header contains a space).
           api = ''
-            set -a; [ -f "${wd}/.env" ] && . "${wd}/.env" || true; set +a
+            # set -a; [ -f "${wd}/.env" ] && . "${wd}/.env" || true; set +a
             cargo run -p tally-api
           '';
 

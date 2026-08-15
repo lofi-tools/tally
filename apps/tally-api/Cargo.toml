@@ -18,6 +18,9 @@ tokio = { workspace = true, features = ["full"] }
 axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true
+# the `http_body::Body` trait for the request-body recorder in src/lib.rs
+# (axum re-exports it as `axum::body::HttpBody`, but the impl needs the crate)
+http-body = "1"
 # ORM / db
 toasty.workspace = true
 # toasty's postgres driver + SQL serializer, wrapped in src/db_log.rs so a

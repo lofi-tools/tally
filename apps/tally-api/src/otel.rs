@@ -26,6 +26,21 @@
 //! fastrace span carry the trace/span id as the OTel trace context, so
 //! Traceway links them to their originating trace.
 //!
+//! Two instrumented sources feed the traces:
+//!
+//! - **requests** (`lib.rs`): the trace root is created per request (trace id
+//!   == `x-request-id`), and the captured request body rides the root span as
+//!   `http.request.body` plus the access-log line (text-ish bodies only, up
+//!   to 8 KiB, `/api/v1/auth/*` redacted);
+//! - **db queries**: the toasty driver emits one event per statement (target
+//!   `toasty::query`) with the full evaluated request — `db.statement` (SQL)
+//!   and, with `log_statement_params(true)` in `main.rs`, `db.params` (the
+//!   bound values) — plus `duration_ms`/`rows`. The default filter enables
+//!   them, so every query lands in Traceway as a log record with trace
+//!   context *and* as a span event on its request's trace (the
+//!   FastraceCompatLayer turns the tracing event into a fastrace event, which
+//!   fastrace-opentelemetry exports as an OTel span event).
+//!
 //! The standard OpenTelemetry env vars are honoured: `OTEL_SERVICE_NAME`,
 //! `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` (e.g.
 //! `Authorization=Bearer …`), `OTEL_EXPORTER_OTLP_PROTOCOL` and the timeout.
@@ -61,12 +76,15 @@ const OTEL_SERVICE_NAME_ENV: &str = "OTEL_SERVICE_NAME";
 /// Default service name when `OTEL_SERVICE_NAME` is unset.
 const DEFAULT_SERVICE_NAME: &str = "tally-api";
 /// Log filter when `RUST_LOG` is unset (matches the pre-logforth default).
-/// `fastrace_opentelemetry=error` is included so a failed OTLP export (bad
-/// endpoint, 401, network) shows up in the API logs instead of dropping
-/// spans silently — without a matching directive (or a bare default level)
-/// logforth rejects records from unknown targets outright.
+/// `toasty::query=debug` enables the driver's per-query event (full evaluated
+/// SQL + bound params — see `main.rs` `log_statement_params`) so db queries
+/// reach Traceway as logs and span events. `fastrace_opentelemetry=error` is
+/// included so a failed OTLP export (bad endpoint, 401, network) shows up in
+/// the API logs instead of dropping spans silently — without a matching
+/// directive (or a bare default level) logforth rejects records from unknown
+/// targets outright.
 const DEFAULT_LOG_FILTER: &str =
-    "tally_api=info,tower_http=info,fastrace_opentelemetry=error";
+    "tally_api=info,tower_http=info,toasty::query=debug,fastrace_opentelemetry=error";
 
 /// The logs `SdkLoggerProvider` (batch exporter), kept so `flush_logs()` can
 /// drain pending records at shutdown. Set once by [`init`].

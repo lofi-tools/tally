@@ -7,7 +7,8 @@
 //! behaviour); `cargo test -p tally-api --no-default-features` disables the
 //! whole suite at compile time.
 
-use std::sync::Arc;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::http::{header, HeaderValue, Method, Request, StatusCode};
@@ -33,6 +34,34 @@ pub const FIXTURE_GNUCASH: &str = concat!(
 /// [`setup_with_max_upload_bytes`](TestApp::setup_with_max_upload_bytes)
 /// with a tiny cap.
 pub const DEFAULT_MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
+
+/// A `MakeWriter` that captures every formatted log line for assertions
+/// (feed it to `tracing_subscriber::fmt().with_writer(Capture(captured))`).
+#[allow(dead_code)] // only the log-assertion test binaries use it
+#[derive(Clone)]
+pub struct Capture(pub Arc<Mutex<Vec<String>>>);
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+    type Writer = CaptureWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        CaptureWriter(self.0.clone())
+    }
+}
+
+pub struct CaptureWriter(Arc<Mutex<Vec<String>>>);
+
+impl Write for CaptureWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let line = String::from_utf8_lossy(buf).into_owned();
+        self.0.lock().unwrap().push(line);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 /// A running test app + the admin handle that owns its database.
 pub struct TestApp {

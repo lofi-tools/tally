@@ -30,9 +30,12 @@ pub mod sweep;
 // trace, catch-panic, body limit. Request-id scoping sits *outside* the
 // trace layer: it generates the `x-request-id`, roots the fastrace trace
 // with it (trace id == request id, so exported spans correlate with logs),
-// and emits the access-log line. tower-http's own on_response event is
-// silenced (the access log lives in `request_id_layer`, which has the full
-// method/uri/request_id/status/latency).
+// wraps the request body in a recorder (so what was sent — up to a cap, and
+// never on `/api/v1/auth/*` — lands on the trace as `http.request.body` and
+// in the access-log line), and emits the access-log line. tower-http's own
+// on_response event is silenced (the access log lives in
+// `request_id_layer`, which has the full method/uri/request_id/status/
+// latency/body).
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -41,7 +44,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use axum::extract::{MatchedPath, Request};
-use axum::http::{HeaderValue, StatusCode};
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -83,12 +86,179 @@ async fn method_not_allowed() -> Response {
     plain_error(StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed", "method not allowed")
 }
 
+/// Cap on the request-body bytes captured for observability. Bodies larger
+/// than this are logged truncated (with a marker); multipart uploads are
+/// never captured at all.
+const REQUEST_BODY_CAPTURE_CAP: usize = 8 * 1024;
+
+/// Whether to wrap this request's body in a recorder so the trace and access
+/// log can show what was sent.
+///
+/// Redaction: `/api/v1/auth/*` bodies carry plaintext passwords — never
+/// captured. Multipart uploads (ledger files) are skipped (large, binary).
+/// Everything else text-ish is captured up to [`REQUEST_BODY_CAPTURE_CAP`].
+fn should_capture_body(request: &Request) -> bool {
+    if request.uri().path().starts_with("/api/v1/auth/") {
+        return false;
+    }
+    let content_type = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if content_type.starts_with("multipart/") {
+        return false;
+    }
+    // Text-ish bodies, plus untyped POST/PUT/PATCH bodies (almost always
+    // JSON in this API). Empty bodies are a no-op for the recorder.
+    content_type.starts_with("application/json")
+        || content_type.starts_with("application/x-www-form-urlencoded")
+        || content_type.starts_with("application/xml")
+        || content_type.starts_with("text/")
+        || (content_type.is_empty()
+            && matches!(request.method().as_str(), "POST" | "PUT" | "PATCH"))
+}
+
+/// Accumulates request-body bytes (up to a cap) as the handler consumes the
+/// body, so the trace and access log can include what was sent.
+struct BodyRecorder {
+    cap: usize,
+    buf: std::sync::Mutex<Vec<u8>>,
+    overflow: std::sync::atomic::AtomicBool,
+}
+
+impl BodyRecorder {
+    fn new(cap: usize) -> Self {
+        Self {
+            cap,
+            buf: std::sync::Mutex::new(Vec::new()),
+            overflow: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn push(&self, data: &[u8]) {
+        let mut buf = self.buf.lock().expect("body recorder lock");
+        let take = self.cap.saturating_sub(buf.len()).min(data.len());
+        if take > 0 {
+            buf.extend_from_slice(&data[..take]);
+        }
+        if take < data.len() {
+            self.overflow
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// The captured body as lossy UTF-8 (with a truncation marker when the
+    /// cap was hit), or `None` when nothing was captured.
+    fn label(&self) -> Option<String> {
+        let buf = self.buf.lock().expect("body recorder lock");
+        let overflow = self.overflow.load(std::sync::atomic::Ordering::Relaxed);
+        if buf.is_empty() && !overflow {
+            return None;
+        }
+        let mut s = String::from_utf8_lossy(&buf).into_owned();
+        if overflow {
+            s.push_str("…(truncated)");
+        }
+        Some(s)
+    }
+}
+
+/// A [`http_body::Body`] wrapper that copies each data frame into a
+/// [`BodyRecorder`] as it streams through.
+struct RecordingBody<B> {
+    inner: B,
+    recorder: Arc<BodyRecorder>,
+}
+
+impl<B> http_body::Body for RecordingBody<B>
+where
+    B: http_body::Body<Data = axum::body::Bytes>,
+{
+    type Data = axum::body::Bytes;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        // Manual projection: the pinned pointee is never moved, so
+        // re-projecting `inner` as pinned and reading `recorder` by
+        // reference are both sound.
+        let this = unsafe { self.get_unchecked_mut() };
+        match unsafe { Pin::new_unchecked(&mut this.inner) }.poll_frame(cx) {
+            Poll::Ready(Some(Ok(frame))) => {
+                if let Some(data) = frame.data_ref() {
+                    this.recorder.push(data);
+                }
+                Poll::Ready(Some(Ok(frame)))
+            }
+            poll => poll,
+        }
+    }
+}
+
+/// Emits the access-log line, including the captured request body only when
+/// there was one (keeps GET and redacted requests clean). Called from within
+/// the request's fastrace local parent, so the record carries the trace id.
+fn emit_access_log(
+    is_error: bool,
+    method: &axum::http::Method,
+    uri: &axum::http::Uri,
+    request_id: &str,
+    status: u16,
+    latency_ms: f64,
+    body: Option<&str>,
+) {
+    // The level must be a constant at the callsite (tracing builds a static
+    // callsite per level), so branch on it explicitly.
+    match (is_error, body) {
+        (true, Some(body)) => tracing::error!(
+            method = %method,
+            uri = %uri,
+            request_id = %request_id,
+            status,
+            latency_ms,
+            body = %body,
+            "http request failed"
+        ),
+        (true, None) => tracing::error!(
+            method = %method,
+            uri = %uri,
+            request_id = %request_id,
+            status,
+            latency_ms,
+            "http request failed"
+        ),
+        (false, Some(body)) => tracing::info!(
+            method = %method,
+            uri = %uri,
+            request_id = %request_id,
+            status,
+            latency_ms,
+            body = %body,
+            "http request"
+        ),
+        (false, None) => tracing::info!(
+            method = %method,
+            uri = %uri,
+            request_id = %request_id,
+            status,
+            latency_ms,
+            "http request"
+        ),
+    }
+}
+
 /// Scopes a fresh request id into the [`REQUEST_ID`] task-local (5xx
 /// responses echo it), reflects it as the `X-Request-Id` header on both the
 /// request and the response, roots the fastrace trace for the request (trace
 /// id == the request id, so exported spans correlate with the logs via
-/// `FastraceDiagnostic`), and emits one access-log line per request
-/// (method/uri/request_id/status/latency; 5xx at ERROR).
+/// `FastraceDiagnostic`), wraps the body in a recorder (see
+/// [`should_capture_body`]) so what was sent lands on the trace as
+/// `http.request.body` and in the access-log line, and emits one access-log
+/// line per request (method/uri/request_id/status/latency[/body]; 5xx at
+/// ERROR).
 async fn request_id_layer(request: Request, next: Next) -> Response {
     let id = uuid::Uuid::new_v4();
     let id_str = id.to_string();
@@ -98,11 +268,12 @@ async fn request_id_layer(request: Request, next: Next) -> Response {
 
     // fastrace root: trace id == x-request-id (the uuid bytes). The tracing
     // spans/events for this request (tower-http's `request` span, handlers,
-    // db_log errors) become its children via the FastraceCompatLayer; the
-    // local parent also feeds logforth's FastraceDiagnostic. `in_span`
-    // re-establishes the local parent on every poll, so it survives tokio
-    // moving the future between threads (and keeps the future Send — the
-    // LocalParentGuard itself is !Send).
+    // db_log errors, the driver's per-query `toasty::query` events) become
+    // its children via the FastraceCompatLayer; the local parent also feeds
+    // logforth's FastraceDiagnostic. `in_span` re-establishes the local
+    // parent on every poll, so it survives tokio moving the future between
+    // threads (and keeps the future Send — the LocalParentGuard itself is
+    // !Send).
     //
     // `span.kind=server` makes fastrace-opentelemetry export this as an OTel
     // SpanKind::Server span, and the Arc is shared with the router so a
@@ -123,6 +294,21 @@ async fn request_id_layer(request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
 
+    // Wrap the body in a recorder (unless redacted/skipped) so the trace and
+    // access log can show what was sent; see `should_capture_body`.
+    let recorder = should_capture_body(&request)
+        .then(|| Arc::new(BodyRecorder::new(REQUEST_BODY_CAPTURE_CAP)));
+    if let Some(recorder) = &recorder {
+        let original = std::mem::replace(request.body_mut(), axum::body::Body::empty());
+        *request.body_mut() = axum::body::Body::new(RecordingBody {
+            inner: original,
+            recorder: recorder.clone(),
+        });
+    }
+    // The root span's Arc is moved into `in_shared_span` below; keep a clone
+    // here to stamp `http.request.body` after the handler has consumed it.
+    let root_for_body = shared_root.clone();
+
     let mut response = REQUEST_ID
         .scope(id_str.clone(), async {
             let started = std::time::Instant::now();
@@ -136,25 +322,25 @@ async fn request_id_layer(request: Request, next: Next) -> Response {
                 let response = next.run(request).await;
                 let latency_ms = started.elapsed().as_secs_f64() * 1000.0;
                 let status = response.status().as_u16();
-                if response.status().is_server_error() {
-                    tracing::error!(
-                        method = %method,
-                        uri = %uri,
-                        request_id = %id_str,
-                        status,
-                        latency_ms,
-                        "http request failed"
-                    );
-                } else {
-                    tracing::info!(
-                        method = %method,
-                        uri = %uri,
-                        request_id = %id_str,
-                        status,
-                        latency_ms,
-                        "http request"
-                    );
+
+                // Attach the captured body (if any) to the trace root as
+                // `http.request.body` — Traceway shows it on the request
+                // span. The access log carries the same value.
+                let body = recorder.as_ref().and_then(|rec| rec.label());
+                if let Some(body) = &body {
+                    let body = body.clone();
+                    root_for_body.add_property(|| ("http.request.body", body));
                 }
+
+                emit_access_log(
+                    response.status().is_server_error(),
+                    &method,
+                    &uri,
+                    &id_str,
+                    status,
+                    latency_ms,
+                    body.as_deref(),
+                );
                 response
             }
             .in_shared_span(shared_root)

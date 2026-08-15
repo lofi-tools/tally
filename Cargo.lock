@@ -4504,6 +4504,7 @@ dependencies = [
  "fastrace-opentelemetry",
  "fastrace-tracing",
  "hex",
+ "http-body",
  "include_dir",
  "ixbrl",
  "logforth",

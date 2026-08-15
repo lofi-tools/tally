@@ -48,6 +48,11 @@ async fn main() -> Result<()> {
     builder.models(toasty::models!(
         User, Session, Company, Ledger, Account, Transaction, Split, Job, Filing, BalanceSheet
     ));
+    // Include bound parameter values in the per-query `toasty::query` event
+    // so Traceway sees the full evaluated request (SQL + params). Off by
+    // default in toasty because params can contain personal data — the app's
+    // own observability backend is trusted (see the note in src/otel.rs).
+    builder.log_statement_params(true);
     let mut db = builder
         .build(driver)
         .await
