@@ -9,10 +9,9 @@
 //! poked directly).
 #![cfg(feature = "pg-tests")]
 
-mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{assert_error, json_body, request, TestApp};
+use tally_tests_common::{assert_error, json_body, request, TestApp};
 use ixbrl::reports::uk_frs105_accounts::PreviousYearFigures;
 use serde_json::json;
 use tally_api::models::{BalanceSheet, Job};

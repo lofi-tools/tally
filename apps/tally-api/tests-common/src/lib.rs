@@ -1,4 +1,4 @@
-//! Shared harness for the pg-gated integration tests.
+//! Shared harness for tally-api's pg-gated integration tests.
 //!
 //! Every test gets its own throwaway database (`tally_test_<uuid>`), created
 //! and dropped via an admin connection, so tests can run in parallel (within
@@ -6,6 +6,14 @@
 //! database is unreachable, and callers skip (the spec's graceful no-DB
 //! behaviour); `cargo test -p tally-api --no-default-features` disables the
 //! whole suite at compile time.
+//!
+//! This lives in a separate **dev-dependency crate** rather than a module
+//! under `tests/` so that every item here is `pub` in a library: rustc's
+//! `dead_code` lint never flags `pub` items of a lib, however many (or few)
+//! test binaries use a given helper.  A module shared across test binaries
+//! would instead be compiled per-binary, and any helper unused in a
+//! particular binary (e.g. `assert_error` in the body-capture / db-log tests)
+//! would be reported as dead code there.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -15,19 +23,19 @@ use axum::http::{header, HeaderValue, Method, Request, StatusCode};
 use axum::response::Response;
 use axum::Router;
 use serde_json::Value;
-use tally_api::{router, AppState};
 use tally_api::models::{Account, BalanceSheet, Company, Filing, Job, Ledger, Session, Split, Transaction, User};
+use tally_api::{router, AppState};
 use tempfile::TempDir;
 use tokio_postgres::NoTls;
 use tower::ServiceExt;
 
 /// Matches `main.rs` (and `docker-compose.yml`).
 pub const DEFAULT_DB_URL: &str = "postgres://tally:tally@localhost:5432/tally";
-/// The basic FRS 105 fixture book used by the upload/report tests.
-#[allow(dead_code)] // only some of the test binaries use it
+/// The basic FRS 105 fixture book used by the upload/report tests (this
+/// crate sits at `apps/tally-api/tests-common`, three levels under the root).
 pub const FIXTURE_GNUCASH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../libs/ixbrl/example_data/basic-1/input.gnucash"
+    "/../../../libs/ixbrl/example_data/basic-1/input.gnucash"
 );
 /// The per-upload size cap `setup()` uses (mirrors production `main.rs`).
 /// Tests that want to trip the 413 branch use
@@ -37,7 +45,6 @@ pub const DEFAULT_MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
 
 /// A `MakeWriter` that captures every formatted log line for assertions
 /// (feed it to `tracing_subscriber::fmt().with_writer(Capture(captured))`).
-#[allow(dead_code)] // only the log-assertion test binaries use it
 #[derive(Clone)]
 pub struct Capture(pub Arc<Mutex<Vec<String>>>);
 
@@ -69,7 +76,6 @@ pub struct TestApp {
     /// The app's toasty `Db` (clone), exposed so tests can poke at rows
     /// directly — e.g. backdate a session's `expires_at` for the
     /// `auth_expired` path.
-    #[allow(dead_code)] // only some of the test binaries use it
     pub db: toasty::Db,
     admin: Option<tokio_postgres::Client>,
     db_name: String,
@@ -142,7 +148,6 @@ impl TestApp {
     }
 
     /// A convenience: a second user on the same app (for ownership tests).
-    #[allow(dead_code)] // only some of the test binaries use it
     pub async fn register_second(&self, email: &str) -> String {
         self.register(email).await
     }
@@ -228,7 +233,6 @@ pub async fn assert_error(resp: Response, status: StatusCode, code: &str) {
 }
 
 /// Multipart body for the ledger upload endpoint.
-#[allow(dead_code)] // only some of the test binaries use it
 pub fn multipart_body(boundary: &str, filename: &str, bytes: &[u8]) -> Body {
     let mut buf = Vec::new();
     buf.extend_from_slice(format!("--{boundary}\r\n").as_bytes());

@@ -4519,6 +4519,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "snafu",
+ "tally-tests-common",
  "tempfile",
  "toasty",
  "toasty-core",
@@ -4549,6 +4550,22 @@ dependencies = [
  "serde_json_lenient",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "tally-tests-common"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "serde_json",
+ "tally-api",
+ "tempfile",
+ "toasty",
+ "tokio",
+ "tokio-postgres",
+ "tower",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

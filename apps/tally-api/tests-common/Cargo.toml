@@ -1,0 +1,25 @@
+[package]
+name = "tally-tests-common"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Shared harness for tally-api's pg-gated integration tests.  It lives in a
+# separate lib (dev-dependency of tally-api) so every helper is `pub` in a
+# library — rustc's `dead_code` lint never flags `pub` items of a lib, no
+# matter how few test binaries use a given helper.  Being a dev-dependency,
+# `cargo build` never compiles it.
+axum.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+toasty.workspace = true
+tower.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+# Test-only database administration (create/drop per-test databases).
+tokio-postgres = "0.7"
+# The app under test: the harness builds its router / AppState and runs its
+# migrations.  (tally-api dev-depends on this crate, which depends on
+# tally-api — a dev-dependency cycle, which cargo permits.)
+tally_api = { package = "tally-api", path = ".." }

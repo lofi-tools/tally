@@ -7,10 +7,9 @@
 //! key, so they exercise the registration-date branch).
 #![cfg(feature = "pg-tests")]
 
-mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{assert_error, json_body, multipart_body, request, TestApp, FIXTURE_GNUCASH};
+use tally_tests_common::{assert_error, json_body, multipart_body, request, TestApp, FIXTURE_GNUCASH};
 use serde_json::json;
 
 /// Seed a report-ready company (with dates) + an uploaded ledger.

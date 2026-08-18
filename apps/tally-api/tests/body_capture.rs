@@ -6,12 +6,11 @@
 //! is unreachable.
 #![cfg(feature = "pg-tests")]
 
-mod common;
 
 use std::sync::{Arc, Mutex};
 
 use axum::http::{Method, StatusCode};
-use common::{request, Capture, TestApp};
+use tally_tests_common::{request, Capture, TestApp};
 use serde_json::json;
 
 #[tokio::test]

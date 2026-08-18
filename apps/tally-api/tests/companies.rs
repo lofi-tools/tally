@@ -3,11 +3,10 @@
 //! unreachable.
 #![cfg(feature = "pg-tests")]
 
-mod common;
 
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
-use common::{assert_error, json_body, request, TestApp};
+use tally_tests_common::{assert_error, json_body, request, TestApp};
 use serde_json::json;
 
 #[tokio::test]

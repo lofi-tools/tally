@@ -3,10 +3,9 @@
 //! unreachable.
 #![cfg(feature = "pg-tests")]
 
-mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{assert_error, json_body, multipart_body, request, TestApp, FIXTURE_GNUCASH};
+use tally_tests_common::{assert_error, json_body, multipart_body, request, TestApp, FIXTURE_GNUCASH};
 use serde_json::json;
 
 /// Create a company, returning (token, company_id).

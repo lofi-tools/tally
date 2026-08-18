@@ -12,11 +12,10 @@
 //! is unreachable.
 #![cfg(feature = "pg-tests")]
 
-mod common;
 
 use std::sync::{Arc, Mutex};
 
-use common::Capture;
+use tally_tests_common::Capture;
 use tally_api::db_log::LoggingDriver;
 use tally_api::models::{Account, BalanceSheet, Company, Filing, Job, Ledger, Session, Split, Transaction, User};
 

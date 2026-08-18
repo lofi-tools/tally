@@ -86,3 +86,7 @@ tempfile.workspace = true
 [dev-dependencies]
 # Test-only database administration (create/drop per-test databases).
 tokio-postgres = "0.7"
+# The shared integration-test harness (see tests-common/src/lib.rs for why a
+# separate lib: pub items are never dead code, and dev-deps aren't compiled
+# by `cargo build`).
+tally-tests-common = { path = "tests-common" }

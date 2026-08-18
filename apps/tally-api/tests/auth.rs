@@ -2,10 +2,9 @@
 //! default); skipped gracefully when Postgres is unreachable.
 #![cfg(feature = "pg-tests")]
 
-mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{assert_error, json_body, request, request_with_guest, TestApp};
+use tally_tests_common::{assert_error, json_body, request, request_with_guest, TestApp};
 use serde_json::json;
 use tally_api::models::{Session, User};
 
