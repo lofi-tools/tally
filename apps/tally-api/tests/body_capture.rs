@@ -2,23 +2,20 @@
 //! text-ish request bodies ride the access-log line (and the trace's
 //! `http.request.body` span attribute), while `/api/v1/auth/*` bodies —
 //! which carry plaintext passwords — are redacted.
-//! Gated behind `pg-tests` (on by default); skipped gracefully when Postgres
-//! is unreachable.
+//! Gated behind `pg-tests` (on by default); the harness auto-starts the
+//! `test-postgres` container and fails hard when the database can't be reached.
 #![cfg(feature = "pg-tests")]
 
 
 use std::sync::{Arc, Mutex};
 
 use axum::http::{Method, StatusCode};
-use tally_tests_common::{request, Capture, TestApp};
+use tally_tests_common::{request, Capture, unique_email, TestApp};
 use serde_json::json;
 
 #[tokio::test]
 async fn json_request_body_captured_in_access_log() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     let captured = Arc::new(Mutex::new(Vec::<String>::new()));
     let guard = tracing::subscriber::set_default(
@@ -31,7 +28,7 @@ async fn json_request_body_captured_in_access_log() {
     );
 
     // register is itself a body-bearing request (redacted — asserted below).
-    let token = app.register("capture@example.com").await;
+    let token = app.register(&unique_email("capture")).await;
     let resp = app
         .send(request(
             Method::POST,
@@ -66,10 +63,7 @@ async fn json_request_body_captured_in_access_log() {
 
 #[tokio::test]
 async fn auth_request_bodies_are_redacted() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     let captured = Arc::new(Mutex::new(Vec::<String>::new()));
     let guard = tracing::subscriber::set_default(
@@ -81,14 +75,15 @@ async fn auth_request_bodies_are_redacted() {
             .finish(),
     );
 
-    app.register("redact@example.com").await;
+    let email = unique_email("redact");
+    app.register(&email).await;
     let resp = app
         .send(request(
             Method::POST,
             "/api/v1/auth/login",
             None,
             Some(&json!({
-                "email": "redact@example.com",
+                "email": email,
                 "password": "totally-wrong-password-xyz",
             })),
         ))

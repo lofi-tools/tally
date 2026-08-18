@@ -1,11 +1,11 @@
 //! Guest sweep integration tests (temp-user spec §8). Gated behind
-//! `pg-tests` (on by default); skipped gracefully when Postgres is
-//! unreachable.
+//! `pg-tests` (on by default); the harness auto-starts the `test-postgres`
+//! container and fails hard when the database can't be reached.
 #![cfg(feature = "pg-tests")]
 
 
 use axum::http::{Method, StatusCode};
-use tally_tests_common::{assert_error, json_body, request, request_with_guest, TestApp};
+use tally_tests_common::{assert_error, json_body, request, request_with_guest, unique_email, TestApp};
 use serde_json::json;
 use tally_api::models::{Company, Job, User};
 
@@ -44,13 +44,11 @@ async fn add_company(app: &TestApp, token: &str, name: &str) -> uuid::Uuid {
 
 #[tokio::test]
 async fn sweep_deletes_abandoned_guests_and_keeps_recent_and_real_users() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     // A real user + company (never swept).
-    let real_token = app.register("keeper@example.com").await;
+    let keeper_email = unique_email("keeper");
+    let real_token = app.register(&keeper_email).await;
     let real_company = add_company(&app, &real_token, "Real Ltd").await;
 
     // Guest A: abandoned — activity backdated 100 days.
@@ -134,7 +132,7 @@ async fn sweep_deletes_abandoned_guests_and_keeps_recent_and_real_users() {
 
     // The real user is untouched.
     assert!(
-        User::filter_by_email("keeper@example.com").first().exec(&mut db).await.expect("query").is_some(),
+        User::filter_by_email(&keeper_email).first().exec(&mut db).await.expect("query").is_some(),
         "real user kept"
     );
     assert!(
@@ -145,10 +143,7 @@ async fn sweep_deletes_abandoned_guests_and_keeps_recent_and_real_users() {
 
 #[tokio::test]
 async fn sweep_leaves_guest_with_no_owned_rows_alone_until_ttl() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     // A guest that bootstrapped but never added anything, with a *recent*
     // created_at: no owned rows → activity falls back to created_at → kept.

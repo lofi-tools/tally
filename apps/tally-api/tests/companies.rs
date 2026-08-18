@@ -1,21 +1,18 @@
 //! Company CRUD + ownership integration tests (spec §5).  Gated behind
-//! `pg-tests` (on by default); skipped gracefully when Postgres is
-//! unreachable.
+//! `pg-tests` (on by default); the harness auto-starts the `test-postgres`
+//! container and fails hard when the database can't be reached.
 #![cfg(feature = "pg-tests")]
 
 
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
-use tally_tests_common::{assert_error, json_body, request, TestApp};
+use tally_tests_common::{assert_error, json_body, request, unique_email, TestApp};
 use serde_json::json;
 
 #[tokio::test]
 async fn create_list_get_patch_delete() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("owner@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("owner")).await;
 
     // create
     let resp = app
@@ -78,11 +75,8 @@ async fn create_list_get_patch_delete() {
 /// PATCH and is validated (FRS 105 / FRS 102 only).
 #[tokio::test]
 async fn accounting_standard_roundtrips() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("standard@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("standard")).await;
 
     // Explicit FRS 102 is persisted.
     let resp = app
@@ -134,11 +128,8 @@ async fn accounting_standard_roundtrips() {
 
 #[tokio::test]
 async fn create_requires_name() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("named@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("named")).await;
 
     let resp = app
         .send(request(
@@ -153,11 +144,8 @@ async fn create_requires_name() {
 
 #[tokio::test]
 async fn duplicate_company_number_is_rejected() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("dup@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("dup")).await;
 
     let body = json!({ "name": "First Ltd", "company_number": "01234567" });
     let resp = app.send(request(Method::POST, "/api/v1/companies", Some(&token), Some(&body))).await;
@@ -169,12 +157,9 @@ async fn duplicate_company_number_is_rejected() {
 
 #[tokio::test]
 async fn companies_are_ownership_scoped() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let alice = app.register("alice@example.com").await;
-    let bob = app.register_second("bob@example.com").await;
+    let app = TestApp::setup().await;
+    let alice = app.register(&unique_email("alice")).await;
+    let bob = app.register_second(&unique_email("bob")).await;
 
     let resp = app
         .send(request(
@@ -201,11 +186,8 @@ async fn companies_are_ownership_scoped() {
 
 #[tokio::test]
 async fn search_without_key_is_a_clear_400() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("search@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("search")).await;
 
     // Missing q → 422 validation_failed.
     let resp = app
@@ -229,10 +211,7 @@ async fn search_without_key_is_a_clear_400() {
 /// pre-login. No bearer token → still a 422/400, never 401 auth_missing.
 #[tokio::test]
 async fn search_is_unprotected() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     // No token at all: missing q → 422 validation_failed (auth is not the
     // gate), and a real query with no CH key → 400, not 401.
@@ -254,11 +233,8 @@ async fn search_is_unprotected() {
 
 #[tokio::test]
 async fn create_rejects_malformed_json() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("badjson@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("badjson")).await;
 
     // A body that is not valid JSON (with the JSON content type) → 400
     // `invalid_json` with the serde position in details.

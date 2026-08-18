@@ -1,6 +1,6 @@
 //! Filings sync integration tests (spec: ch-filings-sync-spec.md §5, §7).
-//! Gated behind `pg-tests` (on by default); skipped gracefully when Postgres
-//! is unreachable.
+//! Gated behind `pg-tests` (on by default); the harness auto-starts the
+//! `test-postgres` container and fails hard when the database can't be reached.
 //!
 //! The harness builds `AppState { ch: None }` (no CH key), so these tests
 //! cover the no-key paths: the refresh endpoint's `companies_house_key_missing`,
@@ -11,7 +11,7 @@
 
 
 use axum::http::{Method, StatusCode};
-use tally_tests_common::{assert_error, json_body, request, TestApp};
+use tally_tests_common::{assert_error, json_body, request, unique_email, TestApp};
 use ixbrl::reports::uk_frs105_accounts::PreviousYearFigures;
 use serde_json::json;
 use tally_api::models::{BalanceSheet, ChFormType, Filing, Job};
@@ -65,11 +65,8 @@ fn schedule_ends_desc(reg: &str) -> Vec<String> {
 
 #[tokio::test]
 async fn refresh_without_ch_key_is_rejected() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "refresh@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("refresh")).await;
 
     let resp = app
         .send(request(
@@ -84,12 +81,9 @@ async fn refresh_without_ch_key_is_rejected() {
 
 #[tokio::test]
 async fn refresh_without_company_number_is_rejected() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     // No company_number → the refresh would be a no-op, so it must 422.
-    let token = app.register("nonumber@example.com").await;
+    let token = app.register(&unique_email("nonumber")).await;
     let resp = app
         .send(request(
             Method::POST,
@@ -114,11 +108,8 @@ async fn refresh_without_company_number_is_rejected() {
 
 #[tokio::test]
 async fn list_derives_periods_from_registration_date() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "periods@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("periods")).await;
 
     let resp = app
         .send(request(
@@ -182,16 +173,13 @@ async fn list_derives_periods_from_registration_date() {
 
 #[tokio::test]
 async fn no_company_number_lists_deterministic_provisional_periods() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     // A company with a registration date but no CH number can never spawn a
     // fetch job (the refresh endpoint rejects it), so the provisional
     // derivation is fully deterministic: the whole registration-date
     // schedule appears, every ended period is provisional + structure-only,
     // exactly one functional ongoing, and nothing pending (spec §8).
-    let token = app.register("nonumber-provisional@example.com").await;
+    let token = app.register(&unique_email("nonumber-provisional")).await;
     let resp = app
         .send(request(
             Method::POST,
@@ -257,16 +245,13 @@ async fn no_company_number_lists_deterministic_provisional_periods() {
 
 #[tokio::test]
 async fn fetch_enriches_and_invalidates_provisional_periods() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     // Enrichment + invalidation round-trip (spec §4.3, §7): a completed
     // fetch stores a balance sheet whose period end (2020-06-30) does not
     // match the 03-31 ARD schedule — the CH-derived period anchors a `filed`
     // row and the overlapping 03-31 estimates are dropped, while covered
     // ends become `pending` and uncovered ones stay `provisional`.
-    let token = app.register("enrich@example.com").await;
+    let token = app.register(&unique_email("enrich")).await;
     let resp = app
         .send(request(
             Method::POST,
@@ -358,11 +343,8 @@ async fn fetch_enriches_and_invalidates_provisional_periods() {
 
 #[tokio::test]
 async fn list_without_registration_date_and_history_is_empty() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("noanchor@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("noanchor")).await;
     let resp = app
         .send(request(
             Method::POST,
@@ -390,15 +372,12 @@ async fn list_without_registration_date_and_history_is_empty() {
 
 #[tokio::test]
 async fn list_without_registration_date_but_with_filed_history_is_anchored_by_balance_sheet() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     // A name-only company (no registration date → no ongoing period, no
     // schedule) that has a stored balance sheet: the filed period must still
     // appear and the endpoint must not panic (regression: an eager `expect`
     // fired whenever the registration date was missing).
-    let token = app.register("bsanchor@example.com").await;
+    let token = app.register(&unique_email("bsanchor")).await;
     let resp = app
         .send(request(
             Method::POST,
@@ -460,14 +439,11 @@ async fn list_without_registration_date_but_with_filed_history_is_anchored_by_ba
 
 #[tokio::test]
 async fn coverage_uses_last_done_job_even_when_a_later_fetch_failed() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     // Spec §7 edge case: a refresh fails after a prior success must not
     // revert covered periods — the derivation anchors coverage to the last
     // *done* job, not the latest job.
-    let (token, company_id) = seed_company(&app, "coverage@example.com").await;
+    let (token, company_id) = seed_company(&app, &unique_email("coverage")).await;
     let company_uuid = uuid::Uuid::parse_str(&company_id).unwrap();
     let mut db = app.db.clone();
 
@@ -536,12 +512,9 @@ async fn coverage_uses_last_done_job_even_when_a_later_fetch_failed() {
 
 #[tokio::test]
 async fn list_is_ownership_scoped() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "owner@example.com").await;
-    let other = app.register_second("intruder@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("owner")).await;
+    let other = app.register_second(&unique_email("intruder")).await;
 
     let resp = app
         .send(request(
@@ -558,11 +531,8 @@ async fn list_is_ownership_scoped() {
 
 #[tokio::test]
 async fn enqueue_dedupes_inflight_jobs_and_status_tracks_them() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "jobs@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("jobs")).await;
 
     // Poke the job table directly (the harness has no CH key, so the
     // refresh endpoint can't enqueue): a first enqueue inserts…
@@ -599,11 +569,8 @@ async fn enqueue_dedupes_inflight_jobs_and_status_tracks_them() {
 /// `Other` payload column (migration 0004).
 #[tokio::test]
 async fn filing_form_type_round_trips_through_db() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (_token, company_id) = seed_company(&app, "form-type@example.com").await;
+    let app = TestApp::setup().await;
+    let (_token, company_id) = seed_company(&app, &unique_email("form-type")).await;
     let company_uuid = uuid::Uuid::parse_str(&company_id).unwrap();
 
     // A modelled code, an unmodelled code, and another modelled code.

@@ -1,21 +1,20 @@
 //! Auth flow integration tests (spec §10).  Gated behind `pg-tests` (on by
-//! default); skipped gracefully when Postgres is unreachable.
+//! default); the harness auto-starts the `test-postgres` container and fails
+//! hard when the database can't be reached.
 #![cfg(feature = "pg-tests")]
 
 
 use axum::http::{Method, StatusCode};
-use tally_tests_common::{assert_error, json_body, request, request_with_guest, TestApp};
+use tally_tests_common::{assert_error, json_body, request, request_with_guest, unique_email, TestApp};
 use serde_json::json;
 use tally_api::models::{Session, User};
 
 #[tokio::test]
 async fn register_login_me_logout_roundtrip() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     // register → token + user
+    let email = unique_email("ada");
     let resp = app
         .send(request(
             Method::POST,
@@ -23,7 +22,7 @@ async fn register_login_me_logout_roundtrip() {
             None,
             Some(&serde_json::json!({
                 "display_name": "Ada Lovelace",
-                "email": "ada@example.com",
+                "email": &email,
                 "password": "hunter2hunter2",
             })),
         ))
@@ -31,7 +30,7 @@ async fn register_login_me_logout_roundtrip() {
     assert_eq!(resp.status(), StatusCode::OK);
     let json = json_body(resp).await;
     let token = json["token"].as_str().expect("token").to_string();
-    assert_eq!(json["user"]["email"], "ada@example.com");
+    assert_eq!(json["user"]["email"], email);
 
     // me → same user
     let resp = app
@@ -39,7 +38,7 @@ async fn register_login_me_logout_roundtrip() {
         .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let me = json_body(resp).await;
-    assert_eq!(me["email"], "ada@example.com");
+    assert_eq!(me["email"], email);
 
     // login → a fresh token works
     let resp = app
@@ -48,7 +47,7 @@ async fn register_login_me_logout_roundtrip() {
             "/api/v1/auth/login",
             None,
             Some(&serde_json::json!({
-                "email": "ada@example.com",
+                "email": &email,
                 "password": "hunter2hunter2",
             })),
         ))
@@ -70,10 +69,7 @@ async fn register_login_me_logout_roundtrip() {
 
 #[tokio::test]
 async fn register_validates_semantics() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     // short password + bad email → 422 validation_failed with field issues
     let resp = app
@@ -91,8 +87,8 @@ async fn register_validates_semantics() {
     assert_error(resp, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed").await;
 
     // duplicate email → 409 email_taken
-    let email = "dup@example.com";
-    app.register(email).await;
+    let email = unique_email("dup");
+    app.register(&email).await;
     let resp = app
         .send(request(
             Method::POST,
@@ -110,12 +106,10 @@ async fn register_validates_semantics() {
 
 #[tokio::test]
 async fn login_rejects_bad_credentials_without_enumeration() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
-    app.register("known@example.com").await;
+    let email = unique_email("known");
+    app.register(&email).await;
 
     // wrong password → 401 invalid_credentials
     let resp = app
@@ -124,7 +118,7 @@ async fn login_rejects_bad_credentials_without_enumeration() {
             "/api/v1/auth/login",
             None,
             Some(&serde_json::json!({
-                "email": "known@example.com",
+                "email": &email,
                 "password": "wrong-password",
             })),
         ))
@@ -148,10 +142,7 @@ async fn login_rejects_bad_credentials_without_enumeration() {
 
 #[tokio::test]
 async fn protected_routes_require_bearer_token() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     // no header → 401 auth_missing
     let resp = app.send(request(Method::GET, "/api/v1/companies", None, None)).await;
@@ -179,12 +170,10 @@ async fn protected_routes_require_bearer_token() {
 
 #[tokio::test]
 async fn expired_session_returns_auth_expired() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
-    let token = app.register("expiring@example.com").await;
+    let email = unique_email("expiring");
+    let token = app.register(&email).await;
 
     // sanity: the fresh token works
     let resp = app
@@ -204,7 +193,7 @@ async fn expired_session_returns_auth_expired() {
         .exec(&mut db)
         .await
         .expect("delete current session");
-    let user = User::filter_by_email("expiring@example.com")
+    let user = User::filter_by_email(&email)
         .first()
         .exec(&mut db)
         .await
@@ -234,7 +223,7 @@ async fn expired_session_returns_auth_expired() {
             "/api/v1/auth/login",
             None,
             Some(&serde_json::json!({
-                "email": "expiring@example.com",
+                "email": &email,
                 "password": "correct horse battery staple",
             })),
         ))
@@ -265,15 +254,14 @@ async fn bootstrap_guest(app: &TestApp, guest_id: &str) -> (String, serde_json::
 
 #[tokio::test]
 async fn guest_bootstrap_is_idempotent_and_adopts_in_place() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let guest_id = "browse-1234";
+    let app = TestApp::setup().await;
+    // Unique per run: the test ends by adopting the row, so a fixed id
+    // would be a non-temp leftover for the next run against the shared DB.
+    let guest_id = format!("browse-{}", uuid::Uuid::new_v4().simple());
 
     // Bootstrap twice with the same id → same user, fresh token, temp flag.
-    let (token1, user1) = bootstrap_guest(&app, guest_id).await;
-    let (token2, user2) = bootstrap_guest(&app, guest_id).await;
+    let (token1, user1) = bootstrap_guest(&app, &guest_id).await;
+    let (token2, user2) = bootstrap_guest(&app, &guest_id).await;
     assert_eq!(user1["id"], user2["id"], "same guest id → same temp user");
     assert_ne!(token1, token2, "each bootstrap issues a fresh session");
     assert_eq!(user1["is_temporary"], true);
@@ -303,15 +291,16 @@ async fn guest_bootstrap_is_idempotent_and_adopts_in_place() {
     // Register with the guest header → in-place upgrade: same user id, temp
     // flag cleared, guest id dropped, old guest sessions revoked.
     let user_id = user1["id"].as_str().unwrap().to_string();
+    let email = unique_email("ada-guest");
     let resp = app
         .send(request_with_guest(
             Method::POST,
             "/api/v1/auth/register",
-            Some(guest_id),
+            Some(&guest_id),
             None,
             Some(&json!({
                 "display_name": "Ada Guest",
-                "email": "ada-guest@example.com",
+                "email": &email,
                 "password": "hunter2hunter2",
             })),
         ))
@@ -321,7 +310,7 @@ async fn guest_bootstrap_is_idempotent_and_adopts_in_place() {
     assert_eq!(adopted["user"]["id"], user_id, "in-place upgrade keeps the row id");
     assert_eq!(adopted["user"]["is_temporary"], false);
     assert!(adopted["user"]["guest_id"].is_null(), "guest_id cleared on adoption");
-    assert_eq!(adopted["user"]["email"], "ada-guest@example.com");
+    assert_eq!(adopted["user"]["email"], email);
 
     // The pre-adoption guest session is revoked.
     let resp = app
@@ -338,7 +327,7 @@ async fn guest_bootstrap_is_idempotent_and_adopts_in_place() {
             Method::POST,
             "/api/v1/auth/login",
             None,
-            Some(&json!({ "email": "ada-guest@example.com", "password": "hunter2hunter2" })),
+            Some(&json!({ "email": &email, "password": "hunter2hunter2" })),
         ))
         .await;
     assert_eq!(resp.status(), StatusCode::OK);
@@ -347,19 +336,18 @@ async fn guest_bootstrap_is_idempotent_and_adopts_in_place() {
     // The same guest id after adoption: §5.2 cleared it from the row, so a
     // re-bootstrap starts a *fresh* temp workspace (the old workspace was
     // adopted — the browser now holds a real session instead).
-    let (_, user3) = bootstrap_guest(&app, guest_id).await;
+    let (_, user3) = bootstrap_guest(&app, &guest_id).await;
     assert_ne!(user3["id"].as_str().unwrap(), user_id, "new temp workspace");
     assert_eq!(user3["is_temporary"], true);
 }
 
 #[tokio::test]
 async fn guest_bootstrap_rejects_an_adopted_row_that_still_has_a_guest_id() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let guest_id = "corrupt-guest";
-    let (_, user_id) = bootstrap_guest(&app, guest_id).await;
+    let app = TestApp::setup().await;
+    // Unique per run: this test deliberately corrupts the row, so a fixed
+    // id would trip the §5.1 guard on the next run against the shared DB.
+    let guest_id = format!("corrupt-{}", uuid::Uuid::new_v4().simple());
+    let (_, user_id) = bootstrap_guest(&app, &guest_id).await;
 
     // The adoption path clears `is_temporary` and `guest_id` together, so a
     // non-temp row that still carries a guest id is a corrupted state — the
@@ -375,7 +363,7 @@ async fn guest_bootstrap_rejects_an_adopted_row_that_still_has_a_guest_id() {
         .send(request_with_guest(
             Method::POST,
             "/api/v1/auth/guest",
-            Some(guest_id),
+            Some(&guest_id),
             None,
             None,
         ))
@@ -385,10 +373,7 @@ async fn guest_bootstrap_rejects_an_adopted_row_that_still_has_a_guest_id() {
 
 #[tokio::test]
 async fn guest_bootstrap_requires_the_header() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     let resp = app
         .send(request(Method::POST, "/api/v1/auth/guest", None, None))
@@ -410,13 +395,11 @@ async fn guest_bootstrap_requires_the_header() {
 
 #[tokio::test]
 async fn guest_register_with_taken_email_rejects_without_merging() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     // A real account already owns the email.
-    app.register("taken@example.com").await;
+    let email = unique_email("taken");
+    app.register(&email).await;
 
     // A guest workspace exists.
     let (token, user) = bootstrap_guest(&app, "guest-with-taken-email").await;
@@ -431,7 +414,7 @@ async fn guest_register_with_taken_email_rejects_without_merging() {
             "/api/v1/auth/register",
             Some(guest_id),
             None,
-            Some(&json!({ "display_name": "Wants Merge", "email": "taken@example.com", "password": "hunter2hunter2" })),
+            Some(&json!({ "display_name": "Wants Merge", "email": &email, "password": "hunter2hunter2" })),
         ))
         .await;
     assert_error(resp, StatusCode::CONFLICT, "email_taken").await;
@@ -456,10 +439,7 @@ async fn guest_register_with_taken_email_rejects_without_merging() {
 
 #[tokio::test]
 async fn guest_register_without_header_is_plain_register() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
 
     // A guest id exists but the register call omits the header → a brand
     // new real user, unrelated to the guest workspace.
@@ -469,7 +449,7 @@ async fn guest_register_without_header_is_plain_register() {
             Method::POST,
             "/api/v1/auth/register",
             None,
-            Some(&json!({ "display_name": "Plain", "email": "plain@example.com", "password": "hunter2hunter2" })),
+            Some(&json!({ "display_name": "Plain", "email": &unique_email("plain"), "password": "hunter2hunter2" })),
         ))
         .await;
     assert_eq!(resp.status(), StatusCode::OK);
@@ -488,11 +468,11 @@ async fn guest_register_without_header_is_plain_register() {
 
 #[tokio::test]
 async fn guest_can_use_company_endpoints() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, _) = bootstrap_guest(&app, "guest-workspace").await;
+    let app = TestApp::setup().await;
+    // Unique per run: the test asserts the guest sees exactly its own
+    // company, so a fixed id would inherit a previous run's leftovers.
+    let guest_id = format!("workspace-{}", uuid::Uuid::new_v4().simple());
+    let (token, _) = bootstrap_guest(&app, &guest_id).await;
 
     // A guest's add goes through the same POST /companies path as a
     // signed-in user's (one auth path — temp-user spec §5.5).

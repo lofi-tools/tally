@@ -1,7 +1,11 @@
 # Local development services for the tally workspace.
 #
-#   nix develop -c dev-db    # or: docker compose up -d --wait db
-#   cargo run -p tally-api   # connects via DATABASE_URL (default below)
+#   nix develop -c dev-db      # or: docker compose up -d --wait db
+#   cargo run -p tally-api     # connects via DATABASE_URL (default below)
+#
+# The pg-gated integration tests auto-start `test-postgres` when it is not
+# running (the shared `tally_test` DB on port 5433), so the dev DB on 5432
+# stays separate.
 #
 # Optional tooling (not started by default): `docker compose --profile tools up adminer`.
 services:
@@ -21,6 +25,25 @@ services:
       timeout: 3s
       retries: 30
 
+  # The shared database for the tally-api integration tests (pg-tests
+  # feature): tests reuse this one DB (not one per test), and the harness
+  # auto-starts it, waits for readiness, and re-initialises it once per run.
+  test-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: tally
+      POSTGRES_PASSWORD: tally
+      POSTGRES_DB: tally_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - tally-test-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tally -d tally_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   adminer:
     image: adminer:latest
     profiles: ["tools"]
@@ -31,3 +54,4 @@ services:
 
 volumes:
   tally-pg:
+  tally-test-pg:

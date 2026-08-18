@@ -1,11 +1,18 @@
 //! Shared harness for tally-api's pg-gated integration tests.
 //!
-//! Every test gets its own throwaway database (`tally_test_<uuid>`), created
-//! and dropped via an admin connection, so tests can run in parallel (within
-//! and across binaries) without colliding.  `setup()` returns `None` when the
-//! database is unreachable, and callers skip (the spec's graceful no-DB
-//! behaviour); `cargo test -p tally-api --no-default-features` disables the
-//! whole suite at compile time.
+//! Tests share one database — the docker-compose `test-postgres` service on
+//! `localhost:5433/tally_test` (`TEST_DATABASE_URL` overrides).  The harness
+//! auto-starts the container when it is not running, waits for readiness, and
+//! re-initialises the schema once per run (guarded by a Postgres advisory
+//! lock + a migration-checksum marker): a missing/edited migration wipes and
+//! re-applies the schema; an unchanged one is reused.  Tests arrange their
+//! own data (see [`unique_email`]), so a shared DB has minimal effects
+//! between tests.
+//!
+//! An unavailable database is a **hard failure** (panic), not a skip — the
+//! pg-tests must not silently pass without a database.  `cargo test -p
+//! tally-api --no-default-features` disables the whole suite at compile time
+//! (the `pg-tests` feature gate).
 //!
 //! This lives in a separate **dev-dependency crate** rather than a module
 //! under `tests/` so that every item here is `pub` in a library: rustc's
@@ -31,8 +38,23 @@ use tempfile::TempDir;
 use tokio_postgres::NoTls;
 use tower::ServiceExt;
 
-/// Matches `main.rs` (and `docker-compose.yml`).
-pub const DEFAULT_DB_URL: &str = "postgres://tally:tally@localhost:5432/tally";
+/// The shared test database: the docker-compose `test-postgres` service
+/// (separate from the dev `db` on 5432), overridable with `TEST_DATABASE_URL`.
+pub const DEFAULT_TEST_DB_URL: &str = "postgres://tally:tally@localhost:5433/tally_test";
+
+/// The shared test database URL: `TEST_DATABASE_URL` when set, else the
+/// docker-compose `test-postgres` default.
+pub fn test_db_url() -> String {
+    std::env::var("TEST_DATABASE_URL")
+        .unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string())
+}
+
+/// A unique email for a test: the shared test DB persists across runs (it is
+/// re-initialised once per run, not per test), so tests must never collide
+/// on the `users.email` unique index.
+pub fn unique_email(prefix: &str) -> String {
+    format!("{prefix}-{}@example.com", uuid::Uuid::new_v4().simple())
+}
 
 /// The repository root directory.
 pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
@@ -83,52 +105,51 @@ impl Write for CaptureWriter {
     }
 }
 
-/// A running test app + the admin handle that owns its database.
+/// A running test app on the shared test database.
 pub struct TestApp {
     pub app: Router,
     /// The app's toasty `Db` (clone), exposed so tests can poke at rows
     /// directly — e.g. backdate a session's `expires_at` for the
     /// `auth_expired` path.
     pub db: toasty::Db,
-    admin: Option<tokio_postgres::Client>,
-    db_name: String,
     _upload_dir: TempDir,
 }
 
 impl TestApp {
-    /// Build the app on a fresh database, with the default upload cap.
-    /// `None` when Postgres is unreachable (test then skips).
-    pub async fn setup() -> Option<Self> {
+    /// Build the app on the shared test database (auto-starting + waiting on
+    /// the `test-postgres` container when it is not running), with the
+    /// default upload cap.
+    ///
+    /// The database is re-initialised once per run (see [`reinit_if_needed`])
+    /// and shared by every test in the run — tests arrange their own data
+    /// (e.g. [`unique_email`]), so one shared DB has minimal effects between
+    /// tests.  An unavailable database is a hard failure (panic), not a skip.
+    pub async fn setup() -> Self {
         Self::setup_with_max_upload_bytes(DEFAULT_MAX_UPLOAD_BYTES).await
     }
 
     /// Like [`setup`](Self::setup), but with a custom per-upload size cap
     /// (the 413 test needs a small one so a tiny fixture body trips it).
-    pub async fn setup_with_max_upload_bytes(max_upload_bytes: u64) -> Option<Self> {
-        let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DB_URL.to_string());
+    pub async fn setup_with_max_upload_bytes(max_upload_bytes: u64) -> Self {
+        let db_url = test_db_url();
+        ensure_test_db(&db_url).await;
+        reinit_if_needed(&db_url).await;
 
-        // Admin connection to the default DB (same server): create the
-        // per-test database.
-        let (admin, conn) = tokio_postgres::connect(&db_url, NoTls).await.ok()?;
-        tokio::spawn(conn);
-        let db_name = format!("tally_test_{}", uuid::Uuid::new_v4().simple());
-        admin
-            .execute(&format!("CREATE DATABASE {db_name}"), &[])
+        let connect = toasty::db::Connect::new(&db_url)
             .await
-            .ok()?;
-
-        let test_url = swap_dbname(&db_url, &db_name);
-        let connect = toasty::db::Connect::new(&test_url).await.ok()?;
+            .expect("connect to the shared test database");
         let mut builder = toasty::Db::builder();
         builder.models(toasty::models!(
             User, Session, Company, Ledger, Account, Transaction, Split, Job, Filing, BalanceSheet
         ));
-        let mut db = builder.build(connect).await.ok()?;
-        // Same path as production startup: play the committed SQL migrations
-        // (the initial one creates the schema that `push_schema` used to).
-        tally_api::migrations::apply_pending(&mut db).await.ok()?;
+        let db = builder
+            .build(connect)
+            .await
+            .expect("build the toasty Db on the shared test database");
+        // The schema is already current: `reinit_if_needed` applies the
+        // committed migrations (the marker makes it a once-per-run step).
 
-        let upload_dir = TempDir::new().ok()?;
+        let upload_dir = TempDir::new().expect("a temp upload dir");
         let state = Arc::new(AppState {
             db: db.clone(),
             ch: None,
@@ -136,13 +157,11 @@ impl TestApp {
             max_upload_bytes,
         });
 
-        Some(Self {
+        Self {
             app: router(state),
             db,
-            admin: Some(admin),
-            db_name,
             _upload_dir: upload_dir,
-        })
+        }
     }
 
     /// `POST /api/v1/auth/register`, returning the bearer token.
@@ -178,21 +197,148 @@ impl TestApp {
     }
 }
 
-impl Drop for TestApp {
-    fn drop(&mut self) {
-        // Best-effort cleanup on whatever runtime the test ran on; ignore
-        // failures (the DB name is unique, so leftovers are harmless).
-        if let Ok(handle) = tokio::runtime::Handle::try_current()
-            && let Some(admin) = self.admin.take()
-        {
-            let db_name = self.db_name.clone();
-            handle.spawn(async move {
-                let _ = admin
-                    .execute(&format!("DROP DATABASE {db_name} WITH (FORCE)"), &[])
-                    .await;
-            });
+// ---------------------------------------------------------------------------
+// Test-database lifecycle: auto-start, wait, re-initialise once per run
+// ---------------------------------------------------------------------------
+
+/// The `pg_advisory_lock` key serialising the once-per-run re-initialisation
+/// across concurrently-running test binaries (arbitrary constant).
+const REINIT_LOCK_KEY: i64 = 0x7461_6C6C_795F_7067; // "tally_pg"
+
+/// Make sure the shared test database is reachable: when it is not, start
+/// the `test-postgres` docker-compose service and wait for it to come up.
+/// A database that cannot be started is a hard failure — the pg-tests must
+/// not silently skip.
+pub async fn ensure_test_db(url: &str) {
+    if connect_ok(url).await {
+        return;
+    }
+
+    // Not running: try the project's own docker-compose `test-postgres`.
+    let status = std::process::Command::new("docker")
+        .args(["compose", "up", "-d", "--wait", "test-postgres"])
+        .current_dir(REPO.as_path())
+        .status();
+    match status {
+        Ok(status) if status.success() => {}
+        Ok(status) => panic!(
+            "`docker compose up -d test-postgres` exited with {status}; the pg-tests need the \
+             test database at {url} — start it manually or disable the `pg-tests` feature"
+        ),
+        Err(source) => panic!(
+            "docker unavailable ({source}): the pg-tests auto-start their database via docker \
+             compose — install/start Docker or disable the `pg-tests` feature"
+        ),
+    }
+
+    // `docker compose up --wait` already waits for the healthcheck; poll as
+    // a fallback (e.g. a container that was mid-restart).
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if connect_ok(url).await {
+            return;
         }
     }
+    panic!(
+        "the test database at {url} did not become reachable after `docker compose up -d \
+         test-postgres` (is the docker daemon running?)"
+    );
+}
+
+/// Can the URL accept a connection + a trivial query?
+async fn connect_ok(url: &str) -> bool {
+    match tokio_postgres::connect(url, NoTls).await {
+        Ok((client, conn)) => {
+            tokio::spawn(conn);
+            client.simple_query("SELECT 1").await.is_ok()
+        }
+        Err(_) => false,
+    }
+}
+
+/// Re-initialise the shared test database once per run: when the committed
+/// migration set (fingerprint) differs from the `_test_schema_marker` row,
+/// drop the `public` schema and re-apply every migration; otherwise leave it
+/// untouched.
+///
+/// The `pg_advisory_lock` serialises the check across concurrently-running
+/// test binaries, so exactly one of them performs the (rare) wipe — the rest
+/// see the fresh marker and proceed straight to their data.  A plain re-run
+/// with unchanged migrations reuses the existing schema; tests use unique
+/// data ([`unique_email`]), so leftover rows never collide.
+pub async fn reinit_if_needed(url: &str) {
+    let (mut admin, conn) = tokio_postgres::connect(url, NoTls)
+        .await
+        .unwrap_or_else(|e| panic!("connect to the shared test database at {url}: {e}"));
+    tokio::spawn(conn);
+
+    admin
+        .execute("SELECT pg_advisory_lock($1)", &[&REINIT_LOCK_KEY])
+        .await
+        .expect("acquire the test-db reinit lock");
+    let result = reinit_locked(&mut admin, url).await;
+    let _ = admin
+        .execute("SELECT pg_advisory_unlock($1)", &[&REINIT_LOCK_KEY])
+        .await;
+    result.expect("re-initialise the test database");
+}
+
+async fn reinit_locked(
+    admin: &mut tokio_postgres::Client,
+    url: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fingerprint = migrations_fingerprint();
+
+    // The marker table may not exist yet (first run) — treat that as needing
+    // a re-initialisation.
+    let marker = match admin
+        .query_opt("SELECT checksum FROM _test_schema_marker", &[])
+        .await
+    {
+        Ok(row) => row.map(|row| row.get::<_, String>(0)),
+        Err(_) => None,
+    };
+    if marker.as_deref() == Some(fingerprint.as_str()) {
+        return Ok(());
+    }
+
+    // Wipe + recreate the public schema, then apply the committed migrations
+    // (the same path production startup uses).  No other test binary can be
+    // mid-run against it: they all wait on the advisory lock above before
+    // opening their connections.
+    admin
+        .batch_execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        .await?;
+
+    let connect = toasty::db::Connect::new(url).await?;
+    let mut builder = toasty::Db::builder();
+    builder.models(toasty::models!(
+        User, Session, Company, Ledger, Account, Transaction, Split, Job, Filing, BalanceSheet
+    ));
+    let mut db = builder.build(connect).await?;
+    tally_api::migrations::apply_pending(&mut db).await?;
+
+    admin
+        .batch_execute("CREATE TABLE _test_schema_marker (checksum TEXT NOT NULL)")
+        .await?;
+    admin
+        .execute(
+            "INSERT INTO _test_schema_marker (checksum) VALUES ($1)",
+            &[&fingerprint],
+        )
+        .await?;
+    Ok(())
+}
+
+/// The identity of the committed migration set: every file's `name:checksum`
+/// in apply order.  Any added or edited migration changes the fingerprint and
+/// triggers a re-initialisation on the next run.
+fn migrations_fingerprint() -> String {
+    tally_api::migrations::list_all_migrations()
+        .iter()
+        .map(|entry| format!("{}:{}", entry.name, entry.checksum))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -258,11 +404,3 @@ pub fn multipart_body(boundary: &str, filename: &str, bytes: &[u8]) -> Body {
     Body::from(buf)
 }
 
-/// Swap the database name in a `postgres://` URL.
-fn swap_dbname(url: &str, db_name: &str) -> String {
-    let mut parts = url.split('/').collect::<Vec<_>>();
-    if let Some(last) = parts.last_mut() {
-        *last = db_name;
-    }
-    parts.join("/")
-}

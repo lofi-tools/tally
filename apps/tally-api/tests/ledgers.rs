@@ -1,11 +1,11 @@
 //! Ledger upload + JSON views integration tests (spec §9).  Gated behind
-//! `pg-tests` (on by default); skipped gracefully when Postgres is
-//! unreachable.
+//! `pg-tests` (on by default); the harness auto-starts the `test-postgres`
+//! container and fails hard when the database can't be reached.
 #![cfg(feature = "pg-tests")]
 
 
 use axum::http::{Method, StatusCode};
-use tally_tests_common::{assert_error, json_body, multipart_body, request, TestApp, FIXTURE_GNUCASH};
+use tally_tests_common::{assert_error, json_body, multipart_body, request, unique_email, TestApp, FIXTURE_GNUCASH};
 use serde_json::json;
 
 /// Create a company, returning (token, company_id).
@@ -26,11 +26,8 @@ async fn seed_company(app: &TestApp, email: &str) -> (String, String) {
 
 #[tokio::test]
 async fn upload_list_get_views_delete() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "ledger@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("ledger")).await;
 
     let bytes = std::fs::read(&*FIXTURE_GNUCASH).expect("fixture exists");
     let boundary = "----tally-test-boundary";
@@ -124,11 +121,8 @@ async fn upload_list_get_views_delete() {
 
 #[tokio::test]
 async fn upload_rejects_wrong_extension() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "ext@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("ext")).await;
 
     let boundary = "----tally-test-boundary";
     let resp = app
@@ -150,12 +144,9 @@ async fn upload_rejects_wrong_extension() {
 
 #[tokio::test]
 async fn upload_to_foreign_company_is_not_found() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (alice, alice_company) = seed_company(&app, "alice@example.com").await;
-    let bob = app.register_second("bob@example.com").await;
+    let app = TestApp::setup().await;
+    let (alice, alice_company) = seed_company(&app, &unique_email("alice")).await;
+    let bob = app.register_second(&unique_email("bob")).await;
     let _ = alice_company;
 
     let bytes = std::fs::read(&*FIXTURE_GNUCASH).expect("fixture exists");
@@ -181,11 +172,8 @@ async fn upload_to_foreign_company_is_not_found() {
 
 #[tokio::test]
 async fn upload_requires_file_field() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "nofile@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("nofile")).await;
 
     // A multipart body with no `file` field → 422 validation_failed.
     let boundary = "----tally-test-boundary";
@@ -209,11 +197,8 @@ async fn upload_requires_file_field() {
 
 #[tokio::test]
 async fn upload_garbage_gnucash_is_rejected() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "garbage@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("garbage")).await;
 
     // Valid extension, garbage content: the parser must fail with the 422
     // `ledger_parse_failed` envelope, not 500.  (This relies on rucash
@@ -240,11 +225,8 @@ async fn upload_garbage_gnucash_is_rejected() {
 #[tokio::test]
 async fn upload_too_large_is_rejected() {
     // A tiny cap so a 1 KiB body trips the streaming size check mid-upload.
-    let Some(app) = TestApp::setup_with_max_upload_bytes(256).await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "big@example.com").await;
+    let app = TestApp::setup_with_max_upload_bytes(256).await;
+    let (token, company_id) = seed_company(&app, &unique_email("big")).await;
 
     let boundary = "----tally-test-boundary";
     let payload = vec![b'x'; 1024];
@@ -270,11 +252,8 @@ async fn upload_too_large_is_rejected() {
 
 #[tokio::test]
 async fn upload_malformed_multipart_is_rejected() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id) = seed_company(&app, "mime@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id) = seed_company(&app, &unique_email("mime")).await;
 
     // Declares the boundary and a `file` field but never closes it: the
     // stream ends mid-field, so multer errors while reading chunks → 400
@@ -302,11 +281,8 @@ async fn upload_malformed_multipart_is_rejected() {
 
 #[tokio::test]
 async fn ledger_route_rejects_invalid_uuid() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("badpath@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("badpath")).await;
 
     // A non-UUID path segment fails the `Path<Uuid>` extractor before the
     // handler runs → field-level 422 `validation_failed`.
@@ -318,11 +294,8 @@ async fn ledger_route_rejects_invalid_uuid() {
 
 #[tokio::test]
 async fn transactions_view_rejects_bad_query() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("badquery@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("badquery")).await;
 
     // The `Query` extractor rejects before the handler runs, so the ledger
     // id need not exist; `limit=abc` fails u32 deserialization → 422.

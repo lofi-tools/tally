@@ -1,5 +1,6 @@
 //! Report generation integration tests (spec §6).  Gated behind `pg-tests`
-//! (on by default); skipped gracefully when Postgres is unreachable.
+//! (on by default); the harness auto-starts the `test-postgres` container
+//! and fails hard when the database can't be reached.
 //!
 //! Reports need a company with the required dates (`report_date`,
 //! `authorised_date`). The period resolves from the company's registration
@@ -9,7 +10,7 @@
 
 
 use axum::http::{Method, StatusCode};
-use tally_tests_common::{assert_error, json_body, multipart_body, request, TestApp, FIXTURE_GNUCASH};
+use tally_tests_common::{assert_error, json_body, multipart_body, request, unique_email, TestApp, FIXTURE_GNUCASH};
 use serde_json::json;
 
 /// Seed a report-ready company (with dates) + an uploaded ledger.
@@ -86,11 +87,8 @@ fn report_body(ledger_id: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn accounts_report_renders_html() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id, ledger_id) = seed(&app, "acc@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id, ledger_id) = seed(&app, &unique_email("acc")).await;
 
     let resp = app
         .send(request(
@@ -108,11 +106,8 @@ async fn accounts_report_renders_html() {
 
 #[tokio::test]
 async fn corp_tax_report_and_json() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id, ledger_id) = seed(&app, "tax@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id, ledger_id) = seed(&app, &unique_email("tax")).await;
 
     // html
     let resp = app
@@ -145,11 +140,8 @@ async fn corp_tax_report_and_json() {
 
 #[tokio::test]
 async fn ct600_renders_govtalk_xml() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id, ledger_id) = seed(&app, "ct600@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id, ledger_id) = seed(&app, &unique_email("ct600")).await;
 
     let body = json!({
         "ledger_id": ledger_id,
@@ -172,11 +164,8 @@ async fn ct600_renders_govtalk_xml() {
 
 #[tokio::test]
 async fn report_requires_dates_on_the_company() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let token = app.register("nodate@example.com").await;
+    let app = TestApp::setup().await;
+    let token = app.register(&unique_email("nodate")).await;
     // No report_date / authorised_date.
     let resp = app
         .send(request(
@@ -221,11 +210,8 @@ async fn report_requires_dates_on_the_company() {
 
 #[tokio::test]
 async fn report_without_period_resolves_from_registration_date() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
-    let (token, company_id, ledger_id) = seed(&app, "noperiod@example.com").await;
+    let app = TestApp::setup().await;
+    let (token, company_id, ledger_id) = seed(&app, &unique_email("noperiod")).await;
 
     // No explicit period and no CH key → the period is guessed from the
     // stored registration date (was companies_house_key_missing before).
@@ -242,12 +228,9 @@ async fn report_without_period_resolves_from_registration_date() {
 
 #[tokio::test]
 async fn report_without_registration_date_needs_an_explicit_period() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     let (token, company_id, ledger_id) =
-        seed_with(&app, "noregdate@example.com", &json!({ "registration_date": null })).await;
+        seed_with(&app, &unique_email("noregdate"), &json!({ "registration_date": null })).await;
 
     // No explicit period, no CH key, and no registration date → a
     // validation error telling the caller to set it (or pass a period).
@@ -264,12 +247,9 @@ async fn report_without_registration_date_needs_an_explicit_period() {
 
 #[tokio::test]
 async fn corp_tax_and_ct600_require_utr() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     let (token, company_id, ledger_id) =
-        seed_with(&app, "noutr@example.com", &json!({ "tax_reference": null })).await;
+        seed_with(&app, &unique_email("noutr"), &json!({ "tax_reference": null })).await;
 
     // corp-tax.json → 422 validation_failed (UTR missing).
     let resp = app
@@ -327,13 +307,10 @@ async fn corp_tax_and_ct600_require_utr() {
 
 #[tokio::test]
 async fn corp_tax_rejects_malformed_utr() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     // A short, non-10-digit reference.
     let (token, company_id, ledger_id) =
-        seed_with(&app, "badutr@example.com", &json!({ "tax_reference": "12345" })).await;
+        seed_with(&app, &unique_email("badutr"), &json!({ "tax_reference": "12345" })).await;
 
     let resp = app
         .send(request(
@@ -348,14 +325,11 @@ async fn corp_tax_rejects_malformed_utr() {
 
 #[tokio::test]
 async fn report_with_foreign_ledger_is_rejected() {
-    let Some(app) = TestApp::setup().await else {
-        eprintln!("skipping: no Postgres at DATABASE_URL");
-        return;
-    };
+    let app = TestApp::setup().await;
     // Two companies, one ledger each; use company A's ledger on company B.
-    let (token_a, _company_a, ledger_a) = seed(&app, "a@example.com").await;
+    let (token_a, _company_a, ledger_a) = seed(&app, &unique_email("a")).await;
     let (_token_b, company_b, _ledger_b) = {
-        let token_b = app.register_second("b@example.com").await;
+        let token_b = app.register_second(&unique_email("b")).await;
         let resp = app
             .send(request(
                 Method::POST,

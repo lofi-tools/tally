@@ -1085,9 +1085,9 @@ impl FilingHistory {
             .filter(|item| item.category.as_deref() == Some("accounts"))
     }
 
-    /// The filings parsed into typed dates ([`ParsedFiling`]): each filing's
+    /// The filings parsed into typed dates ([`ChFiling`]): each filing's
     /// registration date and, when the API reports one, the period it covers
-    /// (see [`ParsedFiling::from`]).
+    /// (see [`ChFiling::from`]).
     pub fn parsed(&self) -> impl Iterator<Item = ChFiling> {
         self.items.iter().map(ChFiling::from)
     }
