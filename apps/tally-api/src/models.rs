@@ -184,6 +184,72 @@ pub struct Job {
     pub updated_at: String,
 }
 
+/// A Companies House form type code (e.g. `AA` accounts, `CS01` confirmation
+/// statement).  Known codes are modelled; any other code is preserved
+/// verbatim so unknown filings round-trip.
+///
+/// Stored by toasty as an embedded enum: the `form_type` discriminant column
+/// (Postgres `ch_form_type` enum type) plus a nullable `form_type_code`
+/// payload column holding the raw code for the [`Self::Other`] variant.
+#[derive(Debug, Clone, PartialEq, Eq, toasty::Embed)]
+pub enum ChFormType {
+    /// Annual accounts (`AA`).
+    Accounts,
+    /// Change of accounting reference date (`AA01`).
+    ChangeAccountingReferenceDate,
+    /// Confirmation statement (`CS01`).
+    ConfirmationStatement,
+    /// Change of registered office address (`AD01`).
+    ChangeRegisteredOffice,
+    /// Incorporation (`NEWINC`).
+    Incorporation,
+    /// Any other form type code, preserved verbatim.
+    Other { code: String },
+}
+
+impl ChFormType {
+    /// Parse a Companies House form type code; codes without a modelled
+    /// variant are preserved verbatim in [`Self::Other`].
+    pub fn from_code(code: &str) -> Self {
+        match code {
+            "AA" => Self::Accounts,
+            "AA01" => Self::ChangeAccountingReferenceDate,
+            "CS01" => Self::ConfirmationStatement,
+            "AD01" => Self::ChangeRegisteredOffice,
+            "NEWINC" => Self::Incorporation,
+            _ => Self::Other {
+                code: code.to_string(),
+            },
+        }
+    }
+
+    /// The raw Companies House code, e.g. `AA` or `TM01`.
+    pub fn as_code(&self) -> &str {
+        match self {
+            Self::Accounts => "AA",
+            Self::ChangeAccountingReferenceDate => "AA01",
+            Self::ConfirmationStatement => "CS01",
+            Self::ChangeRegisteredOffice => "AD01",
+            Self::Incorporation => "NEWINC",
+            Self::Other { code } => code,
+        }
+    }
+}
+
+/// Serialize as the raw code string (the web UI shows `AA` / `CS01` …).
+impl serde::Serialize for ChFormType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_code())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ChFormType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let code = String::deserialize(deserializer)?;
+        Ok(Self::from_code(&code))
+    }
+}
+
 /// A single Companies House filing-history item, persisted for the company
 /// (spec: ch-filings-sync-spec.md §1). Idempotent re-fetch upserts on
 /// `(company_id, ch_transaction_id)`.
@@ -202,7 +268,7 @@ pub struct Filing {
     /// Filing category, e.g. `accounts`, `confirmation-statement`.
     pub category: String,
     /// Form type code, e.g. `AA`, `CS01`.
-    pub form_type: String,
+    pub form_type: ChFormType,
     /// CH's human-readable description.
     pub description: String,
     /// ISO-8601 date (`YYYY-MM-DD`); optional.

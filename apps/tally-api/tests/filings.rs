@@ -14,7 +14,7 @@ use axum::http::{Method, StatusCode};
 use tally_tests_common::{assert_error, json_body, request, TestApp};
 use ixbrl::reports::uk_frs105_accounts::PreviousYearFigures;
 use serde_json::json;
-use tally_api::models::{BalanceSheet, Job};
+use tally_api::models::{BalanceSheet, ChFormType, Filing, Job};
 
 /// Seed a company with a registration date (so periods derive) + a number
 /// (so a job would be enqueued if a key were set). Returns (token, company_id).
@@ -591,4 +591,55 @@ async fn enqueue_dedupes_inflight_jobs_and_status_tracks_them() {
     assert_eq!(resp.status(), StatusCode::OK);
     let json = json_body(resp).await;
     assert_eq!(json["status"]["state"], "pending");
+}
+
+/// The `form_type` embedded enum (`ChFormType`) round-trips through the
+/// database: a modelled code stores its discriminant and reads back as the
+/// same variant, and an unmodelled code is preserved verbatim via the
+/// `Other` payload column (migration 0004).
+#[tokio::test]
+async fn filing_form_type_round_trips_through_db() {
+    let Some(app) = TestApp::setup().await else {
+        eprintln!("skipping: no Postgres at DATABASE_URL");
+        return;
+    };
+    let (_token, company_id) = seed_company(&app, "form-type@example.com").await;
+    let company_uuid = uuid::Uuid::parse_str(&company_id).unwrap();
+
+    // A modelled code, an unmodelled code, and another modelled code.
+    for code in ["AA", "TM01", "CS01"] {
+        let mut db = app.db.clone();
+        let filing = toasty::create!(Filing {
+            company_id: company_uuid,
+            ch_transaction_id: format!("tx-{code}"),
+            category: "accounts".to_string(),
+            form_type: ChFormType::from_code(code),
+            description: String::new(),
+            filed_on: Some("2025-01-01".to_string()),
+            document_metadata_url: String::new(),
+            raw: toasty::Json(serde_json::json!(null)),
+            fetched_at: "2025-01-01T00:00:00Z".to_string(),
+        })
+        .exec(&mut db)
+        .await
+        .expect("insert filing");
+        assert_eq!(filing.form_type.as_code(), code);
+    }
+
+    // Read the rows back: the enum (and the `Other` payload) round-trips.
+    let mut db = app.db.clone();
+    let filings = Filing::filter_by_company_id(company_uuid)
+        .exec(&mut db)
+        .await
+        .expect("query filings");
+    let mut codes: Vec<&str> = filings.iter().map(|f| f.form_type.as_code()).collect();
+    codes.sort_unstable();
+    assert_eq!(codes, vec!["AA", "CS01", "TM01"]);
+
+    // Serialize as the raw code string (the API/web shape), including the
+    // `Other` payload.
+    for filing in &filings {
+        let json = serde_json::to_value(&filing.form_type).unwrap();
+        assert_eq!(json, serde_json::json!(filing.form_type.as_code()));
+    }
 }

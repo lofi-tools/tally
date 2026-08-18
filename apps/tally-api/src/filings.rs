@@ -32,7 +32,7 @@ use crate::companies_house::key_missing_hint;
 use crate::error::AppError;
 use crate::extract::AppPath;
 use crate::jobs;
-use crate::models::{BalanceSheet, Company, Filing, Job};
+use crate::models::{BalanceSheet, ChFormType, Company, Filing, Job};
 
 /// RFC 3339 UTC now (same convention as auth.rs / jobs.rs).
 fn now_rfc3339() -> String {
@@ -103,7 +103,7 @@ pub async fn fetch_and_store(
             company_id: company.id,
             ch_transaction_id: tx_id.clone(),
             category: item.category.clone().unwrap_or_default(),
-            form_type: item.form_type.clone().unwrap_or_default(),
+            form_type: ChFormType::from_code(item.form_type.as_deref().unwrap_or("")),
             description: item.description.clone().unwrap_or_default(),
             filed_on: item.date.clone(),
             document_metadata_url: item
@@ -697,7 +697,8 @@ fn filings_for_period(end: NaiveDate, is_filed: bool, filings: &[Filing]) -> Vec
             kind,
             state: "confirmed",
             filed_on: filing.filed_on.clone(),
-            form_type: (!filing.form_type.is_empty()).then(|| filing.form_type.clone()),
+            form_type: (!filing.form_type.as_code().is_empty())
+                .then(|| filing.form_type.as_code().to_string()),
             description: (!filing.description.is_empty()).then(|| filing.description.clone()),
             document_metadata_url: (!filing.document_metadata_url.is_empty())
                 .then(|| filing.document_metadata_url.clone()),
