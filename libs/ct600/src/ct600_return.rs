@@ -939,8 +939,15 @@ fn parse_yesno(raw: &str, path: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::companies_house::test_utils::REPO;
     use ixbrl::company::CompanyProfile;
     use std::collections::HashMap;
+
+    /// An `example_data` path resolved from the repository root (the
+    /// GnuCash loader takes a `&str`).
+    fn gnucash(rel: &str) -> String {
+        REPO.join(rel).to_string_lossy().into_owned()
+    }
 
     fn basic_1_company() -> ixbrl::company::Company {
         let mut company =
@@ -972,9 +979,9 @@ mod tests {
 
     async fn basic_1_corp_tax() -> Frs105CorpTax {
         let company = basic_1_company();
-        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
-            "../ixbrl/example_data/basic-1/input.gnucash",
-        )
+        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
+            "libs/ixbrl/example_data/basic-1/input.gnucash",
+        ))
         .await
         .expect("open basic-1 gnucash");
         Frs105CorpTax::builder(&gnucash, &company, &basic_1_accounts_meta())
@@ -1001,9 +1008,9 @@ mod tests {
 
     async fn basic_1_accounts() -> Frs105Accounts {
         let company = basic_1_company();
-        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
-            "../ixbrl/example_data/basic-1/input.gnucash",
-        )
+        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
+            "libs/ixbrl/example_data/basic-1/input.gnucash",
+        ))
         .await
         .expect("open basic-1 gnucash");
         Frs105Accounts::new(
@@ -1201,9 +1208,9 @@ mod tests {
 
     async fn ctm03955_accounts() -> Frs105Accounts {
         let company = ctm03955_company();
-        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
-            "../ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
-        )
+        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
+            "libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
+        ))
         .await
         .expect("open ctm03955 gnucash");
         Frs105Accounts::new(
@@ -1438,9 +1445,9 @@ mod tests {
     async fn ct600_ctm03955_loss_company_message_generates() {
         let company = ctm03955_company();
         let accounts = ctm03955_accounts_meta();
-        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(
-            "../ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
-        )
+        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
+            "libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
+        ))
         .await
         .expect("open ctm03955 gnucash");
 
@@ -1459,9 +1466,9 @@ mod tests {
         let xml = filing.to_xml();
 
         // Write the generated message for the CT-schema validation.
-        std::fs::create_dir_all("../../.cache/ct600-rs-tests").unwrap();
+        std::fs::create_dir_all(REPO.join(".cache/ct600-rs-tests")).unwrap();
         std::fs::write(
-            "../../.cache/ct600-rs-tests/ct600-ctm03955-losses.xml",
+            REPO.join(".cache/ct600-rs-tests/ct600-ctm03955-losses.xml"),
             &xml,
         )
         .unwrap();
@@ -1488,8 +1495,9 @@ mod tests {
 
         // Write the generated message to .cache/ct600-rs-tests for
         // inspection / the LTS.
-        std::fs::create_dir_all("../../.cache/ct600-rs-tests").unwrap();
-        std::fs::write("../../.cache/ct600-rs-tests/ct600-basic-1.xml", &xml).unwrap();
+        std::fs::create_dir_all(REPO.join(".cache/ct600-rs-tests")).unwrap();
+        std::fs::write(REPO.join(".cache/ct600-rs-tests/ct600-basic-1.xml"), &xml)
+            .unwrap();
 
         // -- envelope --------------------------------------------------------
         assert!(xml.contains("<Class>HMRC-CT-CT600</Class>"));
@@ -1552,7 +1560,7 @@ mod tests {
 
         // -- element structure matches the reference ct600.xml ---------------
         // (modulo the three schema fixes, which are stripped from both sides)
-        if let Ok(reference) = std::fs::read_to_string("../../.cache/py-ct600/ct600.xml") {
+        if let Ok(reference) = std::fs::read_to_string(REPO.join(".cache/py-ct600/ct600.xml")) {
             let ref_node = XmlNode::from_xml_string(&reference).expect("parse reference");
             assert_eq!(
                 skeleton(&strip_fixes(&ref_node)),

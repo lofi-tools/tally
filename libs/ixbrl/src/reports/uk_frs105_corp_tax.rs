@@ -2357,6 +2357,7 @@ fn format_date(d: &chrono::NaiveDate) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::REPO;
 
     #[tokio::test]
     async fn test_ct_return_from_basic_1() {
@@ -2413,8 +2414,9 @@ mod tests {
         assert!(ixbrl.contains(&company.name));
         assert!(ixbrl.contains(&company.tax_reference));
 
-        std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
-        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_basic-1.html", &ixbrl).unwrap();
+        std::fs::create_dir_all(REPO.join(".cache/ixbrl-rs-tests")).unwrap();
+        std::fs::write(REPO.join(".cache/ixbrl-rs-tests/ct_return_basic-1.html"), &ixbrl)
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2719,9 +2721,9 @@ mod tests {
         // iXBRL.
         let ct = build_basic_1_ct().await;
         let html = ct.to_ixbrl();
-        std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
+        std::fs::create_dir_all(REPO.join(".cache/ixbrl-rs-tests")).unwrap();
         std::fs::write(
-            "../../.cache/ixbrl-rs-tests/ct_roundtrip_basic-1.html",
+            REPO.join(".cache/ixbrl-rs-tests/ct_roundtrip_basic-1.html"),
             &html,
         )
         .unwrap();
@@ -2844,8 +2846,9 @@ mod tests {
         // Ensure the cache file exists (test may run in parallel)
         let ct = build_basic_1_ct().await;
         let html = ct.to_ixbrl();
-        std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
-        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_basic-1.html", &html).unwrap();
+        std::fs::create_dir_all(REPO.join(".cache/ixbrl-rs-tests")).unwrap();
+        std::fs::write(REPO.join(".cache/ixbrl-rs-tests/ct_return_basic-1.html"), &html)
+            .unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         assert_eq!(
@@ -2901,8 +2904,9 @@ mod tests {
     async fn test_from_ixbrl_worksheet_fy_split() {
         let ct = build_basic_1_ct().await;
         let html = ct.to_ixbrl();
-        std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
-        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_basic-1.html", &html).unwrap();
+        std::fs::create_dir_all(REPO.join(".cache/ixbrl-rs-tests")).unwrap();
+        std::fs::write(REPO.join(".cache/ixbrl-rs-tests/ct_return_basic-1.html"), &html)
+            .unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let fy1_cur = facts.numeric_by_ctx.get(&(
@@ -2921,8 +2925,9 @@ mod tests {
     async fn test_from_parsed_facts() {
         let ct = build_basic_1_ct().await;
         let html = ct.to_ixbrl();
-        std::fs::create_dir_all("../../.cache/ixbrl-rs-tests").unwrap();
-        std::fs::write("../../.cache/ixbrl-rs-tests/ct_return_basic-1.html", &html).unwrap();
+        std::fs::create_dir_all(REPO.join(".cache/ixbrl-rs-tests")).unwrap();
+        std::fs::write(REPO.join(".cache/ixbrl-rs-tests/ct_return_basic-1.html"), &html)
+            .unwrap();
         let facts = ParsedIxBrlFacts::from_html(&html);
 
         let company = crate::test_utils::TestData::default_company();

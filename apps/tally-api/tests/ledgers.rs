@@ -32,7 +32,7 @@ async fn upload_list_get_views_delete() {
     };
     let (token, company_id) = seed_company(&app, "ledger@example.com").await;
 
-    let bytes = std::fs::read(FIXTURE_GNUCASH).expect("fixture exists");
+    let bytes = std::fs::read(&*FIXTURE_GNUCASH).expect("fixture exists");
     let boundary = "----tally-test-boundary";
     let resp = app
         .send(
@@ -158,7 +158,7 @@ async fn upload_to_foreign_company_is_not_found() {
     let bob = app.register_second("bob@example.com").await;
     let _ = alice_company;
 
-    let bytes = std::fs::read(FIXTURE_GNUCASH).expect("fixture exists");
+    let bytes = std::fs::read(&*FIXTURE_GNUCASH).expect("fixture exists");
     let boundary = "----tally-test-boundary";
     let resp = app
         .send(

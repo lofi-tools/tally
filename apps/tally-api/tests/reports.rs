@@ -55,7 +55,7 @@ async fn seed_with(
     assert_eq!(resp.status(), StatusCode::OK, "seed company");
     let company_id = json_body(resp).await["id"].as_str().unwrap().to_string();
 
-    let bytes = std::fs::read(FIXTURE_GNUCASH).expect("fixture exists");
+    let bytes = std::fs::read(&*FIXTURE_GNUCASH).expect("fixture exists");
     let boundary = "----tally-test-boundary";
     let resp = app
         .send(
@@ -189,7 +189,7 @@ async fn report_requires_dates_on_the_company() {
     assert_eq!(resp.status(), StatusCode::OK);
     let company_id = json_body(resp).await["id"].as_str().unwrap().to_string();
 
-    let bytes = std::fs::read(FIXTURE_GNUCASH).expect("fixture exists");
+    let bytes = std::fs::read(&*FIXTURE_GNUCASH).expect("fixture exists");
     let boundary = "----tally-test-boundary";
     let resp = app
         .send(
@@ -370,7 +370,7 @@ async fn report_with_foreign_ledger_is_rejected() {
             .await;
         assert_eq!(resp.status(), StatusCode::OK);
         let company_b = json_body(resp).await["id"].as_str().unwrap().to_string();
-        let bytes = std::fs::read(FIXTURE_GNUCASH).expect("fixture exists");
+        let bytes = std::fs::read(&*FIXTURE_GNUCASH).expect("fixture exists");
         let boundary = "----tally-test-boundary";
         let resp = app
             .send(

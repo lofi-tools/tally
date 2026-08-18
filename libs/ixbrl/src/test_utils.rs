@@ -8,7 +8,23 @@
 //! ([`TestData::accounts_path`]).  Tests run with zero configuration on a
 //! fresh checkout.
 
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::LazyLock;
+
 use crate::company::{AccountingPeriod, AccountsMeta, Company};
+
+/// The repository root directory.
+pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
+    let path_bytes = Command::new("git")
+        .arg("rev-parse")
+        .arg("--show-toplevel")
+        .output()
+        .unwrap()
+        .stdout;
+    let path_str = std::str::from_utf8(&path_bytes).unwrap().trim();
+    PathBuf::from(path_str)
+});
 
 /// Hardcoded test data: the fictional example company and the example
 /// GnuCash accounts files, so tests run with zero configuration on a fresh

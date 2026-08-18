@@ -46,6 +46,26 @@ use ct600::{CompaniesHouseClient, CompaniesHouseClientType};
 use ixbrl::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use serde::{Deserialize, Serialize};
 
+/// The repository root directory, for tests that read committed fixtures
+/// and write to `.cache` without depending on the working directory.
+#[cfg(test)]
+mod test_utils {
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::LazyLock;
+
+    pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
+        let path_bytes = Command::new("git")
+            .arg("rev-parse")
+            .arg("--show-toplevel")
+            .output()
+            .unwrap()
+            .stdout;
+        let path_str = std::str::from_utf8(&path_bytes).unwrap().trim();
+        PathBuf::from(path_str)
+    });
+}
+
 /// The values `tally` reads from the environment, captured once via
 /// [`EnvVars::from_env`] (empty variables count as unset).
 #[derive(Debug, Clone, Default)]
@@ -1076,10 +1096,10 @@ mod tests {
     /// succeeding once the book is present.
     #[tokio::test]
     async fn ct600_config_resolves_and_requires_paths() {
-        let path = Path::new("../../libs/ixbrl/example_data/basic-1/input_config.jsonc");
+        let path = test_utils::REPO.join("libs/ixbrl/example_data/basic-1/input_config.jsonc");
         let empty_env = EnvVars::default();
 
-        let file = ConfigFile::from_file(path).expect("parse example config");
+        let file = ConfigFile::from_file(&path).expect("parse example config");
         assert_eq!(file.company.name.as_deref(), Some("Example Biz Ltd."));
         assert_eq!(
             file.company.directors,
@@ -1340,8 +1360,10 @@ mod tests {
     /// from the environment and the Companies House API.
     #[test]
     fn minimal_config_parses() {
-        let path = Path::new("../../libs/ixbrl/example_data/basic-1/minimal_config.jsonc");
-        let file = ConfigFile::from_file(path).expect("parse the minimal config");
+        let file = ConfigFile::from_file(
+            &test_utils::REPO.join("libs/ixbrl/example_data/basic-1/minimal_config.jsonc"),
+        )
+        .expect("parse the minimal config");
         assert_eq!(file.company.name, None);
         assert_eq!(file.company.tax_reference, None);
         assert_eq!(file.company.company_number, None);
@@ -1595,20 +1617,18 @@ mod live_tests {
                      Tax reference is never resolved from Companies House)",
         );
 
-        // The repository's `.cache/api_responses` (cargo runs the test with
-        // cwd = this package, so `../../.cache/api_responses` is the repo
-        // root's): the profile and officers are cached there, so the second
-        // run is served from it and repeat runs of the suite don't keep
-        // hitting the API.
-        env.cache_dir = Some(PathBuf::from("../../.cache/api_responses"));
+        // The repository's `.cache/api_responses`: the profile and officers
+        // are cached there, so the second run is served from it and repeat
+        // runs of the suite don't keep hitting the API.
+        env.cache_dir = Some(test_utils::REPO.join(".cache/api_responses"));
 
         // The committed minimal config: no identity, no period, blank
         // profile — the identity and period come from the environment and
         // the live API; the required report metadata comes from the config.
-        let path = Path::new("../../libs/ixbrl/example_data/basic-1/minimal_config.jsonc");
-        let file = ConfigFile::from_file(path).expect("parse the minimal config");
+        let path = test_utils::REPO.join("libs/ixbrl/example_data/basic-1/minimal_config.jsonc");
+        let file = ConfigFile::from_file(&path).expect("parse the minimal config");
         let cli = CliArgs {
-            config_path: path.to_path_buf(),
+            config_path: path,
             accounts_made_up_to: None,
             book_path: Some(PathBuf::from("book.gnucash")),
             out_dir: Some(PathBuf::from("out")),

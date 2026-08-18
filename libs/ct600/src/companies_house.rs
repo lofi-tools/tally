@@ -1306,9 +1306,10 @@ pub mod test_utils {
     }
 
     impl CachedCompaniesHouseClient {
-        /// Create a cached client with the default cache directory (`.cache`).
+        /// Create a cached client with the default cache directory (the
+        /// repo's `.cache`, resolved from the repository root).
         pub fn new(inner: CompaniesHouseClient) -> Self {
-            Self::with_cache_dir(inner, PathBuf::from(".cache"))
+            Self::with_cache_dir(inner, REPO.join(".cache"))
         }
 
         /// Create a cached client with the given cache directory.
