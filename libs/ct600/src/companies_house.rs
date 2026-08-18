@@ -53,6 +53,12 @@ pub enum CompaniesHouseError {
     /// A filing-history item carries no downloadable document.
     #[snafu(display("filing has no downloadable document"))]
     NoDocument,
+
+    /// The filing id was not found in the company's filing history.
+    #[snafu(display(
+        "filing {filing_id} not found in the filing history of company {company_number}"
+    ))]
+    FilingNotFound { company_number: String, filing_id: String },
 }
 
 pub type ApiResult<T> = Result<T, CompaniesHouseError>;
@@ -389,6 +395,50 @@ impl CompaniesHouseClient {
         self.get_url_bytes(&content_url).await
     }
 
+    /// Download a filing's document by its filing (transaction) ID — the
+    /// trailing path segment of the filing-history item's `links.self` (e.g.
+    /// `MzA1OTg4NDcwMDY5`), stable across refetches.
+    ///
+    /// The filing is located via the (cache-first) filing history, so a warm
+    /// history cache resolves the item without touching the API.  The
+    /// downloaded bytes are served from the cache first — the
+    /// `filings_downloads` subdirectory of the response cache, named
+    /// `{company_number}-{period_end}-{filing_id}` (the period end, falling
+    /// back to the filed-on date, makes the cache queriable by company +
+    /// period; the id disambiguates filings sharing a date) — and only
+    /// fetched from the document API on a miss.  Without a configured cache
+    /// directory every call hits the API.
+    pub async fn download_filing(&self, company_number: &str, filing_id: &str) -> ApiResult<Vec<u8>> {
+        let history = self.get_filing_history(company_number).await?;
+        let item = history
+            .items
+            .iter()
+            .find(|item| item.transaction_id().as_deref() == Some(filing_id))
+            .ok_or(CompaniesHouseError::FilingNotFound {
+                company_number: company_number.to_string(),
+                filing_id: filing_id.to_string(),
+            })?;
+        let date = ChFiling::from(item).period_end.or_else(|| item.filed_on());
+
+        if let Some(cache_dir) = self.config.cache_dir()
+            && let Some(bytes) =
+                read_cached_filing_download(cache_dir, company_number, date, filing_id)
+        {
+            return Ok(bytes);
+        }
+
+        let metadata_url = item
+            .links
+            .as_ref()
+            .and_then(|l| l.document_metadata.as_deref())
+            .ok_or(CompaniesHouseError::NoDocument)?;
+        let bytes = self.get_filing_document(metadata_url).await?;
+        if let Some(cache_dir) = self.config.cache_dir() {
+            write_cached_filing_download(cache_dir, company_number, date, filing_id, &bytes);
+        }
+        Ok(bytes)
+    }
+
     /// Fetch a company's officers.
     ///
     /// `GET /company/{companyNumber}/officers`
@@ -700,6 +750,66 @@ fn write_cached_officers(cache_dir: &Path, company_number: &str, officers: &Offi
     }
 }
 
+/// The cache file name for a downloaded filing document:
+/// `{company_number}-{date}-{filing_id}`, where `date` is the period end
+/// (falling back to the filed-on date, else `nodate` for filings without
+/// either) — the company + period make the cache queriable, and the
+/// transaction id disambiguates filings sharing a date.
+fn filing_download_file_name(
+    company_number: &str,
+    date: Option<NaiveDate>,
+    filing_id: &str,
+) -> String {
+    let date = date
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "nodate".to_string());
+    format!("{company_number}-{date}-{filing_id}")
+}
+
+/// The cache file for a downloaded filing document, e.g.
+/// `filings_downloads/14510633-2024-11-30-MzQzMzQ3MTgwNGFkaXF6a2N4`.
+fn filing_download_cache_path(
+    cache_dir: &Path,
+    company_number: &str,
+    date: Option<NaiveDate>,
+    filing_id: &str,
+) -> PathBuf {
+    cache_dir
+        .join("filings_downloads")
+        .join(filing_download_file_name(company_number, date, filing_id))
+}
+
+/// Read a cached filing download, if present.
+fn read_cached_filing_download(
+    cache_dir: &Path,
+    company_number: &str,
+    date: Option<NaiveDate>,
+    filing_id: &str,
+) -> Option<Vec<u8>> {
+    std::fs::read(filing_download_cache_path(
+        cache_dir,
+        company_number,
+        date,
+        filing_id,
+    ))
+    .ok()
+}
+
+/// Write a filing download to the cache, best-effort (non-fatal on failure).
+fn write_cached_filing_download(
+    cache_dir: &Path,
+    company_number: &str,
+    date: Option<NaiveDate>,
+    filing_id: &str,
+    bytes: &[u8],
+) {
+    write_cache_file(
+        &cache_dir.join("filings_downloads"),
+        &filing_download_file_name(company_number, date, filing_id),
+        bytes,
+    );
+}
+
 /// Write a cache file under the cache directory, best-effort (non-fatal on
 /// failure).
 fn write_cache_file(cache_dir: &Path, file_name: &str, data: &[u8]) {
@@ -939,6 +1049,17 @@ impl FilingHistoryItem {
         self.date
             .as_deref()
             .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+    }
+
+    /// The Companies House transaction id: the trailing path segment of
+    /// `links.self` (stable across refetches), `None` when the link is
+    /// absent.
+    pub fn transaction_id(&self) -> Option<String> {
+        self.links
+            .as_ref()
+            .and_then(|l| l.self_link.as_deref())
+            .and_then(|url| url.rsplit('/').next().filter(|s| !s.is_empty()))
+            .map(str::to_string)
     }
 }
 
@@ -2169,6 +2290,75 @@ mod tests {
         );
     }
 
+    /// `download_filing` resolves the filing by its transaction id from the
+    /// (cached) history and serves the document from the `filings_downloads`
+    /// cache — named `{company}-{period_end}-{filing_id}` — without any
+    /// network access (a miss would attempt a request and fail for the
+    /// offline client).
+    #[tokio::test]
+    async fn download_filing_serves_from_filings_downloads_cache() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
+
+        let tx = "MzA1OTg4NDcwMDY5";
+        let item = FilingHistoryItem {
+            date: Some("2025-08-31".to_string()),
+            category: Some("accounts".to_string()),
+            form_type: Some("AA".to_string()),
+            description: Some("micro-entity accounts".to_string()),
+            description_values: std::collections::BTreeMap::from([
+                ("period_start_on".to_string(), "2024-12-01".to_string()),
+                ("made_up_date".to_string(), "2025-08-31".to_string()),
+            ]),
+            links: Some(FilingHistoryLinks {
+                self_link: Some(format!(
+                    "https://api.company-information.service.gov.uk/company/12345678/filing-history/{tx}"
+                )),
+                document_metadata: Some(
+                    "https://document-api.company-information.service.gov.uk/document/WztYq5AM2RR80XakT3KPzoVDvWpTycq6gHuxlnSrXrs"
+                        .to_string(),
+                ),
+            }),
+        };
+        assert_eq!(item.transaction_id().as_deref(), Some(tx));
+        seed_filing_history(
+            cache_dir.path(),
+            "12345678",
+            &FilingHistory {
+                total_count: Some(1),
+                items: vec![item],
+            },
+        );
+
+        // The period end (from `made_up_date`) keys the cache filename, and
+        // the download cache lives in the `filings_downloads` subdirectory.
+        let period_end = NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
+        assert_eq!(
+            filing_download_file_name("12345678", Some(period_end), tx),
+            format!("12345678-2025-08-31-{tx}")
+        );
+        assert_eq!(
+            filing_download_cache_path(cache_dir.path(), "12345678", Some(period_end), tx),
+            cache_dir
+                .path()
+                .join("filings_downloads")
+                .join(format!("12345678-2025-08-31-{tx}"))
+        );
+        write_cached_filing_download(
+            cache_dir.path(),
+            "12345678",
+            Some(period_end),
+            tx,
+            b"<html>cached iXBRL</html>",
+        );
+
+        let bytes = client
+            .download_filing("12345678", tx)
+            .await
+            .expect("serving from the filings_downloads cache should succeed");
+        assert_eq!(bytes, b"<html>cached iXBRL</html>");
+    }
+
     /// The cached raw filing history parses into typed dates: each filing's
     /// registration date and, for the accounts filings, the period they cover
     /// (from the `description_values`).
@@ -2689,7 +2879,10 @@ mod live_tests {
 
     /// The past filings of a real company (default `14510633`, overridable
     /// with `COMPANY_NUMBER`) parse into typed dates — printed: the period
-    /// each filing covers and when it was filed.
+    /// each filing covers and when it was filed — and the filed documents
+    /// are downloaded by filing id (cache-first, landing in the
+    /// `filings_downloads` cache subdirectory, so repeat runs never touch
+    /// the network).
     #[tokio::test]
     #[cfg_attr(
         not(any(feature = "cached_live_tests", feature = "always_live_tests")),
@@ -2727,6 +2920,55 @@ mod live_tests {
                 item.description.as_deref().unwrap_or("")
             );
         }
+
+        // Download the filed documents by filing id (cache-first): every
+        // first-page filing carrying a document is downloaded, and each is
+        // verified to land in the `filings_downloads` cache subdirectory —
+        // so repeat runs resolve them from disk without touching the API.
+        let mut n_downloaded = 0usize;
+        for item in &history.items {
+            let Some(tx) = item.transaction_id() else {
+                continue;
+            };
+            let has_document = item
+                .links
+                .as_ref()
+                .and_then(|l| l.document_metadata.as_deref())
+                .is_some_and(|u| !u.is_empty());
+            if !has_document {
+                continue;
+            }
+            let bytes = client
+                .download_filing(&number, &tx)
+                .await
+                .expect("download the filing document");
+            assert!(!bytes.is_empty(), "a downloaded document is non-empty: {tx}");
+            println!(
+                "  filed {}  {}  ({}): {} bytes",
+                item.filed_on()
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "—".to_string()),
+                item.form_type.as_deref().unwrap_or(""),
+                tx,
+                bytes.len()
+            );
+            n_downloaded += 1;
+
+            // The download is cached (cache-first on the next call): the
+            // cache file exists on disk with exactly these bytes.
+            if let Some(cache_dir) = client.cache_dir() {
+                let date = ChFiling::from(item).period_end.or_else(|| item.filed_on());
+                assert_eq!(
+                    read_cached_filing_download(cache_dir, &number, date, &tx).as_deref(),
+                    Some(bytes.as_slice()),
+                    "the download is cached under filings_downloads: {tx}"
+                );
+            }
+        }
+        assert!(
+            n_downloaded > 0,
+            "the company has at least one downloadable filing"
+        );
     }
 
     /// A real company's officers decode, and the current directors can be
