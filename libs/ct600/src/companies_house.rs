@@ -1243,9 +1243,10 @@ impl FormType {
 /// the filing's kind (e.g. an accounts filing's period).
 ///
 /// Dispatch is code-first for the specific kinds (ARD changes, officer
-/// changes, incorporation), then by category for the broad families
-/// (accounts, confirmation statements) — so an accounts filing with an
-/// unknown/new form type code still parses as [`TypedFiling::Accounts`].
+/// changes, incorporation, registered-office address changes), then by
+/// category for the broad families (accounts, confirmation statements) — so
+/// an accounts filing with an unknown/new form type code still parses as
+/// [`TypedFiling::Accounts`].
 ///
 /// ARD changes and officer changes are **not implemented yet**: their
 /// `description_values` keys are unverified (the default test company has no
@@ -1286,6 +1287,19 @@ impl TryFrom<&FilingHistoryItem> for TypedFiling {
                 transaction_id,
                 description,
             })),
+            // Verified against real data (14510633's 2023-12-11 AD01): the
+            // `description_values` carry `change_date`, `old_address` and
+            // `new_address`.
+            FormType::ChangeRegisteredOffice => Ok(TypedFiling::AddressChange(
+                AddressChangeFiling {
+                    filed_on,
+                    transaction_id,
+                    description,
+                    change_date: parse("change_date"),
+                    old_address: item.description_values.get("old_address").cloned(),
+                    new_address: item.description_values.get("new_address").cloned(),
+                },
+            )),
             _ => match item.category.as_deref() {
                 Some("accounts") => Ok(TypedFiling::Accounts(AccountsFiling {
                     filed_on,
@@ -1335,6 +1349,8 @@ pub enum TypedFiling {
     Accounts(AccountsFiling),
     /// A confirmation statement (`CS01`).
     ConfirmationStatement(ConfirmationStatementFiling),
+    /// A registered-office address change (`AD01`).
+    AddressChange(AddressChangeFiling),
     /// A change of accounting reference date (`AA01`). Reserved: the parse
     /// returns [`CompaniesHouseError::Unimplemented`] until the
     /// `description_values` keys are verified against real data.
@@ -1357,6 +1373,7 @@ impl TypedFiling {
         match self {
             Self::Accounts(f) => f.filed_on,
             Self::ConfirmationStatement(f) => f.filed_on,
+            Self::AddressChange(f) => f.filed_on,
             Self::ChangeOfAccountingReferenceDate(f) => f.filed_on,
             Self::OfficerChange(f) => f.filed_on,
             Self::Incorporation(f) => f.filed_on,
@@ -1369,6 +1386,7 @@ impl TypedFiling {
         match self {
             Self::Accounts(f) => f.transaction_id.as_deref(),
             Self::ConfirmationStatement(f) => f.transaction_id.as_deref(),
+            Self::AddressChange(f) => f.transaction_id.as_deref(),
             Self::ChangeOfAccountingReferenceDate(f) => f.transaction_id.as_deref(),
             Self::OfficerChange(f) => f.transaction_id.as_deref(),
             Self::Incorporation(f) => f.transaction_id.as_deref(),
@@ -1381,6 +1399,7 @@ impl TypedFiling {
         match self {
             Self::Accounts(f) => f.description.as_deref(),
             Self::ConfirmationStatement(f) => f.description.as_deref(),
+            Self::AddressChange(f) => f.description.as_deref(),
             Self::ChangeOfAccountingReferenceDate(f) => f.description.as_deref(),
             Self::OfficerChange(f) => f.description.as_deref(),
             Self::Incorporation(f) => f.description.as_deref(),
@@ -1426,6 +1445,20 @@ pub struct ArdChangeFiling {
     pub description: Option<String>,
     /// The new accounting reference date, when reported.
     pub new_ard_date: Option<NaiveDate>,
+}
+
+/// A change of registered office address (`AD01`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddressChangeFiling {
+    pub filed_on: Option<NaiveDate>,
+    pub transaction_id: Option<String>,
+    pub description: Option<String>,
+    /// The date the change took effect (CH reports it as `change_date`).
+    pub change_date: Option<NaiveDate>,
+    /// The previous registered office address, when reported.
+    pub old_address: Option<String>,
+    /// The new registered office address, when reported.
+    pub new_address: Option<String>,
 }
 
 /// An officer appointment / termination / detail change.
@@ -3127,20 +3160,39 @@ mod tests {
         };
         assert_eq!(inc.filed_on, Some(d("2022-11-28")));
 
-        // Any other kind keeps its raw form type code.
-        let other = TypedFiling::try_from(&item(
+        // A registered-office address change (AD01) parses its fields (the
+        // 14510633 shape: `change_date` + old/new addresses).
+        let ad = TypedFiling::try_from(&item(
             "address",
             "AD01",
             "2023-12-11",
             None,
-            &[("change_date", "2023-12-11")],
+            &[
+                ("change_date", "2023-12-11"),
+                ("old_address", "Twincross St Thomas Close Peterlee Tyne and Wear SR8 3AR"),
+                ("new_address", "52 Holly Avenue Whitley Bay NE26 1ED"),
+            ],
         ))
-        .expect("other parses");
+        .expect("address change parses");
+        let TypedFiling::AddressChange(ad) = ad else {
+            panic!("expected AddressChange, got {ad:?}");
+        };
+        assert_eq!(ad.filed_on, Some(d("2023-12-11")));
+        assert_eq!(ad.change_date, Some(d("2023-12-11")));
+        assert_eq!(
+            ad.old_address.as_deref(),
+            Some("Twincross St Thomas Close Peterlee Tyne and Wear SR8 3AR")
+        );
+        assert_eq!(ad.new_address.as_deref(), Some("52 Holly Avenue Whitley Bay NE26 1ED"));
+
+        // Any other kind keeps its raw form type code.
+        let other = TypedFiling::try_from(&item("capital", "SH01", "2023-06-01", None, &[]))
+            .expect("other parses");
         let TypedFiling::Other(other) = other else {
             panic!("expected Other, got {other:?}");
         };
-        assert_eq!(other.form_type.as_deref(), Some("AD01"));
-        assert_eq!(other.filed_on, Some(d("2023-12-11")));
+        assert_eq!(other.form_type.as_deref(), Some("SH01"));
+        assert_eq!(other.filed_on, Some(d("2023-06-01")));
 
         // The transaction id (from `links.self`) is carried on every parsed
         // kind.
@@ -3831,84 +3883,14 @@ mod live_tests {
             .get_filing_history(&number)
             .await
             .expect("fetch the filing history");
-        let filings: Vec<_> = history.parsed().collect();
-        println!(
-            "past filings for {number} ({} total):",
-            history.total_count.unwrap_or(filings.len())
-        );
-        for item in &filings {
-            let filed = item
-                .filed_on
-                .map(|d| d.to_string())
-                .unwrap_or_else(|| "—".to_string());
-            let start = item
-                .period_start
-                .map(|d| d.to_string())
-                .unwrap_or_else(|| "—".to_string());
-            let end = item
-                .period_end
-                .map(|d| d.to_string())
-                .unwrap_or_else(|| "—".to_string());
-            println!(
-                "  filed {filed}  period {start} → {end}  {}  {}",
-                item.form_type.as_deref().unwrap_or(""),
-                item.description.as_deref().unwrap_or("")
-            );
-        }
-
-        // The typed parse classifies each filing into its kind — accounts
-        // (with the period), confirmation statements (with the statement
-        // date), incorporation, or other. ARD changes and officer changes
-        // are unimplemented kinds; this company has none, so every item
-        // parses.
-        let typed: Vec<_> = history
-            .typed()
-            .collect::<Result<Vec<_>, _>>()
-            .expect("no unimplemented filing kinds in this company's history");
-        println!("typed filings:");
-        for typed in &typed {
-            let filed = typed
-                .filed_on()
-                .map(|d| d.to_string())
-                .unwrap_or_else(|| "—".to_string());
-            let (kind, detail) = match &typed {
-                TypedFiling::Accounts(a) => (
-                    "accounts",
-                    a.period_end
-                        .map(|d| format!("made up to {d}"))
-                        .unwrap_or_else(|| "no period".to_string()),
-                ),
-                TypedFiling::ConfirmationStatement(cs) => (
-                    "confirmation-statement",
-                    cs.made_on
-                        .map(|d| format!("made up to {d}"))
-                        .unwrap_or_else(|| "no date".to_string()),
-                ),
-                // Reserved kinds (ARD changes, officer changes) never parse
-                // yet — they return Unimplemented — so they don't appear here.
-                TypedFiling::ChangeOfAccountingReferenceDate(_) | TypedFiling::OfficerChange(_) => {
-                    unreachable!("reserved kinds are unimplemented")
-                }
-                TypedFiling::Incorporation(_) => ("incorporation", String::new()),
-                TypedFiling::Other(o) => {
-                    ("other", o.form_type.as_deref().unwrap_or("?").to_string())
-                }
-            };
-            println!("  filed {filed}  {kind}  {detail}");
-        }
-        // Every item classified, and the accounts items carry a period end.
-        assert_eq!(typed.len(), history.items.len());
-        assert!(
-            typed
-                .iter()
-                .any(|t| matches!(t, TypedFiling::Accounts(a) if a.period_end.is_some())),
-            "at least one accounts filing with a period end"
-        );
-
         // Download the filed documents by filing id (cache-first): every
-        // first-page filing carrying a document is downloaded, and each is
-        // verified to land in the `filings_downloads` cache subdirectory —
-        // so repeat runs resolve them from disk without touching the API.
+        // first-page filing carrying a document is downloaded, each
+        // verified to land in the `filings_downloads` cache subdirectory,
+        // and the accounts documents are parsed so the typed print below
+        // can show the period start — CH's filing-history API reports only
+        // the period end (`made_up_date`), never the start.
+        let mut parsed_periods: std::collections::HashMap<String, (NaiveDate, NaiveDate)> =
+            std::collections::HashMap::new();
         let mut n_downloaded = 0usize;
         for item in &history.items {
             let Some(tx) = item.transaction_id() else {
@@ -3930,15 +3912,6 @@ mod live_tests {
                 !bytes.is_empty(),
                 "a downloaded document is non-empty: {tx}"
             );
-            println!(
-                "  filed {}  {}  ({}): {} bytes",
-                item.filed_on()
-                    .map(|d| d.to_string())
-                    .unwrap_or_else(|| "—".to_string()),
-                item.form_type.as_deref().unwrap_or(""),
-                tx,
-                bytes.len()
-            );
             n_downloaded += 1;
 
             // The download is cached (cache-first on the next call): the
@@ -3951,10 +3924,106 @@ mod live_tests {
                     "the download is cached under filings_downloads: {tx}"
                 );
             }
+
+            // The accounts documents are iXBRL (the other filings' are
+            // PDFs, which fail to parse and are skipped): record the
+            // document's own period.
+            if let Ok(bs) = parse_filed_accounts(&String::from_utf8_lossy(&bytes)) {
+                parsed_periods.insert(tx, (bs.period_start, bs.period_end));
+            }
         }
         assert!(
             n_downloaded > 0,
             "the company has at least one downloadable filing"
+        );
+
+        // The typed parse classifies each filing into its kind — accounts
+        // (with the period), confirmation statements (with the statement
+        // date), incorporation, or other. ARD changes and officer changes
+        // are unimplemented kinds; this company has none, so every item
+        // parses.
+        let typed: Vec<_> = history
+            .typed()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("no unimplemented filing kinds in this company's history");
+        println!(
+            "past filings for {number} ({} total):",
+            history.total_count.unwrap_or(typed.len())
+        );
+        for (i, typed) in typed.iter().enumerate() {
+            let filed = typed
+                .filed_on()
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "—".to_string());
+            let item = &history.items[i];
+            let (kind, detail) = match typed {
+                TypedFiling::Accounts(a) => {
+                    // The typed parse knows only the period end (from
+                    // `made_up_date`); prefer the document's own period
+                    // (start + end), recovered from the parse above.
+                    let period = a
+                        .period_start
+                        .zip(a.period_end)
+                        .or_else(|| {
+                            item.transaction_id()
+                                .and_then(|tx| parsed_periods.get(&tx).copied())
+                        });
+                    (
+                        "accounts",
+                        match period {
+                            Some((start, end)) => format!("period {start} → {end}"),
+                            None => format!(
+                                "period {} → {}",
+                                a.period_start
+                                    .map(|d| d.to_string())
+                                    .unwrap_or_else(|| "—".to_string()),
+                                a.period_end
+                                    .map(|d| d.to_string())
+                                    .unwrap_or_else(|| "—".to_string()),
+                            ),
+                        },
+                    )
+                }
+                TypedFiling::ConfirmationStatement(cs) => (
+                    "confirmation-statement",
+                    cs.made_on
+                        .map(|d| format!("made up to {d}"))
+                        .unwrap_or_else(|| "no date".to_string()),
+                ),
+                // Reserved kinds (ARD changes, officer changes) never parse
+                // yet — they return Unimplemented — so they don't appear here.
+                TypedFiling::ChangeOfAccountingReferenceDate(_) | TypedFiling::OfficerChange(_) => {
+                    unreachable!("reserved kinds are unimplemented")
+                }
+                TypedFiling::AddressChange(ad) => (
+                    "address-change",
+                    match (ad.change_date, ad.new_address.as_deref()) {
+                        (Some(date), Some(address)) => {
+                            format!("changed {date}  new address {address}")
+                        }
+                        (Some(date), None) => format!("changed {date}"),
+                        (None, Some(address)) => format!("new address {address}"),
+                        (None, None) => String::new(),
+                    },
+                ),
+                TypedFiling::Incorporation(_) => ("incorporation", String::new()),
+                TypedFiling::Other(o) => {
+                    ("other", o.form_type.as_deref().unwrap_or("?").to_string())
+                }
+            };
+            let mut parts = vec![format!("filed {filed}"), kind.to_string()];
+            if !detail.is_empty() {
+                parts.push(detail);
+            }
+            println!("  {}", parts.join("  "));
+        }
+        // Every item classified, and the accounts items carry a period end.
+        assert_eq!(typed.len(), history.items.len());
+        assert!(
+            typed
+                .iter()
+                .any(|t| matches!(t, TypedFiling::Accounts(a) if a.period_end.is_some())),
+            "at least one accounts filing with a period end"
         );
     }
 
