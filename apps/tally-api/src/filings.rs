@@ -754,7 +754,7 @@ fn accounts_period_end(filing: &Filing) -> Option<NaiveDate> {
     serde_json::from_value::<FilingHistoryItem>(filing.raw.clone().0)
         .ok()
         .as_ref()
-        .map(TypedFiling::from)
+        .and_then(|item| TypedFiling::try_from(item).ok())
         .and_then(|typed| match typed {
             TypedFiling::Accounts(accounts) => accounts.period_end,
             _ => None,

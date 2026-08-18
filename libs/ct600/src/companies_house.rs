@@ -20,6 +20,7 @@
 use crate::form::CompanyFormValues;
 use chrono::{Datelike, Months, NaiveDate};
 use ixbrl::company::{AccountingPeriod, Company};
+use ixbrl::reports::uk_frs105_accounts::Frs105Accounts;
 use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -59,6 +60,12 @@ pub enum CompaniesHouseError {
         "filing {filing_id} not found in the filing history of company {company_number}"
     ))]
     FilingNotFound { company_number: String, filing_id: String },
+
+    /// The filing kind is not implemented yet: its `description_values` keys
+    /// are unverified (no real filing of this kind to check against), so the
+    /// typed parse refuses it instead of guessing.
+    #[snafu(display("filing type {filing_type} is not implemented yet"))]
+    Unimplemented { filing_type: String },
 }
 
 pub type ApiResult<T> = Result<T, CompaniesHouseError>;
@@ -1094,10 +1101,13 @@ impl FilingHistory {
 
     /// The filings parsed into their kind-specific structs
     /// ([`TypedFiling`]): each filing classified as accounts / confirmation
-    /// statement / ARD change / officer change / incorporation / other, with
-    /// the fields its kind carries (see [`TypedFiling::from`]).
-    pub fn typed(&self) -> impl Iterator<Item = TypedFiling> {
-        self.items.iter().map(TypedFiling::from)
+    /// statement / incorporation / other with the fields its kind carries
+    /// (see [`TypedFiling::try_from`]). Kinds that are not implemented yet
+    /// (ARD changes, officer changes) yield
+    /// [`CompaniesHouseError::Unimplemented`] rather than a best-effort
+    /// parse.
+    pub fn typed(&self) -> impl Iterator<Item = Result<TypedFiling, CompaniesHouseError>> {
+        self.items.iter().map(TypedFiling::try_from)
     }
 }
 
@@ -1228,8 +1238,15 @@ impl FormType {
 /// changes, incorporation), then by category for the broad families
 /// (accounts, confirmation statements) — so an accounts filing with an
 /// unknown/new form type code still parses as [`TypedFiling::Accounts`].
-impl From<&FilingHistoryItem> for TypedFiling {
-    fn from(item: &FilingHistoryItem) -> Self {
+///
+/// ARD changes and officer changes are **not implemented yet**: their
+/// `description_values` keys are unverified (the default test company has no
+/// such filings to check against), so they return
+/// [`CompaniesHouseError::Unimplemented`] instead of a best-effort parse.
+impl TryFrom<&FilingHistoryItem> for TypedFiling {
+    type Error = CompaniesHouseError;
+
+    fn try_from(item: &FilingHistoryItem) -> Result<Self, Self::Error> {
         let parse = |key: &str| {
             item.description_values
                 .get(key)
@@ -1242,43 +1259,27 @@ impl From<&FilingHistoryItem> for TypedFiling {
         );
         let (filed_on, transaction_id, description) = common;
 
+        let unimplemented = |fallback: &str| CompaniesHouseError::Unimplemented {
+            filing_type: item
+                .form_type
+                .clone()
+                .unwrap_or_else(|| fallback.to_string()),
+        };
+
         match FormType::from_code(item.form_type.as_deref().unwrap_or("")) {
-            FormType::ChangeAccountingReferenceDate => {
-                TypedFiling::ChangeOfAccountingReferenceDate(ArdChangeFiling {
-                    filed_on,
-                    transaction_id,
-                    description,
-                    new_ard_date: parse("new_ard_date").or_else(|| parse("action_date")),
-                })
-            }
-            FormType::OfficerAppointed => officer_filing(
-                item,
+            FormType::ChangeAccountingReferenceDate => Err(unimplemented(
+                FormType::ChangeAccountingReferenceDate.as_code(),
+            )),
+            kind @ (FormType::OfficerAppointed
+            | FormType::OfficerTerminated
+            | FormType::OfficerDetailsChanged) => Err(unimplemented(kind.as_code())),
+            FormType::Incorporation => Ok(TypedFiling::Incorporation(IncorporationFiling {
                 filed_on,
                 transaction_id,
                 description,
-                OfficerChangeAction::Appointed,
-            ),
-            FormType::OfficerTerminated => officer_filing(
-                item,
-                filed_on,
-                transaction_id,
-                description,
-                OfficerChangeAction::Terminated,
-            ),
-            FormType::OfficerDetailsChanged => officer_filing(
-                item,
-                filed_on,
-                transaction_id,
-                description,
-                OfficerChangeAction::DetailsChanged,
-            ),
-            FormType::Incorporation => TypedFiling::Incorporation(IncorporationFiling {
-                filed_on,
-                transaction_id,
-                description,
-            }),
+            })),
             _ => match item.category.as_deref() {
-                Some("accounts") => TypedFiling::Accounts(AccountsFiling {
+                Some("accounts") => Ok(TypedFiling::Accounts(AccountsFiling {
                     filed_on,
                     transaction_id,
                     description,
@@ -1287,70 +1288,51 @@ impl From<&FilingHistoryItem> for TypedFiling {
                     period_end: parse("period_end_on")
                         .or_else(|| parse("made_up_to"))
                         .or_else(|| parse("made_up_date")),
-                }),
+                })),
                 Some("confirmation-statement") => {
-                    TypedFiling::ConfirmationStatement(ConfirmationStatementFiling {
+                    Ok(TypedFiling::ConfirmationStatement(ConfirmationStatementFiling {
                         filed_on,
                         transaction_id,
                         description,
                         // CH reports the statement date as `made_up_date`.
                         made_on: parse("made_up_date").or_else(|| parse("made_on")),
-                    })
+                    }))
                 }
-                _ => TypedFiling::Other(OtherFiling {
+                _ => Ok(TypedFiling::Other(OtherFiling {
                     filed_on,
                     transaction_id,
                     description,
                     form_type: item.form_type.clone(),
-                }),
+                })),
             },
         }
     }
-}
-
-/// Build the [`TypedFiling::OfficerChange`] variant from an officer-change
-/// item: the officer's name and the change's date (CH reports it as
-/// `appointment_date`, `termination_date`, `change_date`, or `action_date`
-/// depending on the form).
-fn officer_filing(
-    item: &FilingHistoryItem,
-    filed_on: Option<NaiveDate>,
-    transaction_id: Option<String>,
-    description: Option<String>,
-    action: OfficerChangeAction,
-) -> TypedFiling {
-    let officer_name = item.description_values.get("officer_name").cloned();
-    let action_date = ["appointment_date", "termination_date", "change_date", "action_date"]
-        .iter()
-        .find_map(|key| {
-            item.description_values
-                .get(*key)
-                .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-        });
-    TypedFiling::OfficerChange(OfficerChangeFiling {
-        filed_on,
-        transaction_id,
-        description,
-        officer_name,
-        action,
-        action_date,
-    })
 }
 
 /// A filing parsed into the kind-specific struct it actually is. Match on
 /// the variant to read the kind's fields (see the per-kind structs); the
 /// common fields (when filed, transaction id, description) are on every
 /// variant.
+///
+/// The parse ([`TypedFiling::try_from`]) is fallible: the ARD-change and
+/// officer-change variants below are **reserved** — their field mappings are
+/// unverified (no real filing of those kinds to check against), so parsing
+/// returns [`CompaniesHouseError::Unimplemented`] for them until they are
+/// implemented.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypedFiling {
     /// An accounts filing (category `accounts`, e.g. `AA`, `AA02`, `AAMD`).
     Accounts(AccountsFiling),
     /// A confirmation statement (`CS01`).
     ConfirmationStatement(ConfirmationStatementFiling),
-    /// A change of accounting reference date (`AA01`).
+    /// A change of accounting reference date (`AA01`). Reserved: the parse
+    /// returns [`CompaniesHouseError::Unimplemented`] until the
+    /// `description_values` keys are verified against real data.
     ChangeOfAccountingReferenceDate(ArdChangeFiling),
     /// An officer appointment / termination / detail change (`AP01`–`AP04`,
-    /// `TM01`/`TM02`, `CH01`–`CH04`).
+    /// `TM01`/`TM02`, `CH01`–`CH04`). Reserved: the parse returns
+    /// [`CompaniesHouseError::Unimplemented`] until the `description_values`
+    /// keys are verified against real data.
     OfficerChange(OfficerChangeFiling),
     /// The company's incorporation (`NEWINC`).
     Incorporation(IncorporationFiling),
@@ -2817,7 +2799,7 @@ mod tests {
         };
 
         // Accounts (category fallback: an unknown code still parses).
-        let accounts = TypedFiling::from(&item(
+        let accounts = TypedFiling::try_from(&item(
             "accounts",
             "ZZ-NEW",
             "2025-06-30",
@@ -2826,7 +2808,8 @@ mod tests {
                 ("period_start_on", "2024-07-01"),
                 ("period_end_on", "2025-06-30"),
             ],
-        ));
+        ))
+        .expect("accounts parses");
         let TypedFiling::Accounts(accounts) = accounts else {
             panic!("expected Accounts, got {accounts:?}");
         };
@@ -2836,13 +2819,14 @@ mod tests {
         assert_eq!(accounts.made_up_to, None, "no made_up key in this fixture");
 
         // Accounts with only `made_up_date` (the 14510633 shape).
-        let accounts = TypedFiling::from(&item(
+        let accounts = TypedFiling::try_from(&item(
             "accounts",
             "AA",
             "2025-08-31",
             None,
             &[("made_up_date", "2025-08-31")],
-        ));
+        ))
+        .expect("accounts parses");
         let TypedFiling::Accounts(accounts) = accounts else {
             panic!("expected Accounts, got {accounts:?}");
         };
@@ -2852,101 +2836,83 @@ mod tests {
 
         // Confirmation statement: CH reports the statement date as
         // `made_up_date`.
-        let cs = TypedFiling::from(&item(
+        let cs = TypedFiling::try_from(&item(
             "confirmation-statement",
             "CS01",
             "2025-12-09",
             None,
             &[("made_up_date", "2025-11-27")],
-        ));
+        ))
+        .expect("confirmation statement parses");
         let TypedFiling::ConfirmationStatement(cs) = cs else {
             panic!("expected ConfirmationStatement, got {cs:?}");
         };
         assert_eq!(cs.made_on, Some(d("2025-11-27")));
 
-        // ARD change.
-        let ard = TypedFiling::from(&item(
+        // ARD changes and officer changes are not implemented yet: the typed
+        // parse refuses them with the Unimplemented error kind.
+        let ard = TypedFiling::try_from(&item(
             "accounts",
             "AA01",
             "2024-03-01",
             Some("change of accounting reference date"),
             &[("new_ard_date", "2025-06-30")],
-        ));
-        let TypedFiling::ChangeOfAccountingReferenceDate(ard) = ard else {
-            panic!("expected ChangeOfAccountingReferenceDate, got {ard:?}");
-        };
-        assert_eq!(ard.new_ard_date, Some(d("2025-06-30")));
+        ))
+        .expect_err("ARD change is unimplemented");
+        assert!(
+            matches!(&ard, CompaniesHouseError::Unimplemented { filing_type } if filing_type.as_str() == "AA01"),
+            "{ard}"
+        );
 
-        // Officer appointments / terminations / detail changes.
-        let appointed = TypedFiling::from(&item(
-            "officers",
-            "AP01",
-            "2024-01-15",
-            Some("appointment of Mr A Bloggs as a director"),
-            &[("appointment_date", "2024-01-15"), ("officer_name", "BLOGGS, A")],
-        ));
-        let TypedFiling::OfficerChange(appointed) = appointed else {
-            panic!("expected OfficerChange, got {appointed:?}");
-        };
-        assert_eq!(appointed.action, OfficerChangeAction::Appointed);
-        assert_eq!(appointed.officer_name.as_deref(), Some("BLOGGS, A"));
-        assert_eq!(appointed.action_date, Some(d("2024-01-15")));
-
-        let terminated = TypedFiling::from(&item(
-            "officers",
-            "TM01",
-            "2024-06-30",
-            None,
-            &[("termination_date", "2024-06-30"), ("officer_name", "BLOGGS, A")],
-        ));
-        let TypedFiling::OfficerChange(terminated) = terminated else {
-            panic!("expected OfficerChange, got {terminated:?}");
-        };
-        assert_eq!(terminated.action, OfficerChangeAction::Terminated);
-        assert_eq!(terminated.action_date, Some(d("2024-06-30")));
-
-        let changed = TypedFiling::from(&item(
-            "officers",
-            "CH01",
-            "2024-02-01",
-            None,
-            &[("change_date", "2024-02-01")],
-        ));
-        let TypedFiling::OfficerChange(changed) = changed else {
-            panic!("expected OfficerChange, got {changed:?}");
-        };
-        assert_eq!(changed.action, OfficerChangeAction::DetailsChanged);
-        assert_eq!(changed.action_date, Some(d("2024-02-01")));
+        for code in ["AP01", "TM01", "CH01"] {
+            let err = TypedFiling::try_from(&item(
+                "officers",
+                code,
+                "2024-01-15",
+                None,
+                &[("appointment_date", "2024-01-15"), ("officer_name", "BLOGGS, A")],
+            ))
+            .expect_err("officer changes are unimplemented");
+            assert!(
+                matches!(&err, CompaniesHouseError::Unimplemented { filing_type } if filing_type.as_str() == code),
+                "{code}: {err}"
+            );
+        }
 
         // Incorporation (empty description_values).
-        let inc = TypedFiling::from(&item("incorporation", "NEWINC", "2022-11-28", None, &[]));
+        let inc = TypedFiling::try_from(&item("incorporation", "NEWINC", "2022-11-28", None, &[]))
+            .expect("incorporation parses");
         let TypedFiling::Incorporation(inc) = inc else {
             panic!("expected Incorporation, got {inc:?}");
         };
         assert_eq!(inc.filed_on, Some(d("2022-11-28")));
 
         // Any other kind keeps its raw form type code.
-        let other = TypedFiling::from(&item(
+        let other = TypedFiling::try_from(&item(
             "address",
             "AD01",
             "2023-12-11",
             None,
             &[("change_date", "2023-12-11")],
-        ));
+        ))
+        .expect("other parses");
         let TypedFiling::Other(other) = other else {
             panic!("expected Other, got {other:?}");
         };
         assert_eq!(other.form_type.as_deref(), Some("AD01"));
         assert_eq!(other.filed_on, Some(d("2023-12-11")));
 
-        // The transaction id (from `links.self`) is carried on every kind.
-        let mut tx_item = item("officers", "TM01", "2024-06-30", None, &[]);
+        // The transaction id (from `links.self`) is carried on every parsed
+        // kind.
+        let mut tx_item = item("accounts", "AA", "2025-08-31", None, &[]);
         tx_item.links = Some(FilingHistoryLinks {
             self_link: tx("MzA1OTg4NDcwMDY5"),
             document_metadata: None,
         });
-        let TypedFiling::OfficerChange(with_tx) = TypedFiling::from(&tx_item) else {
-            panic!("expected OfficerChange");
+        let TypedFiling::Accounts(with_tx) =
+            TypedFiling::try_from(&tx_item).expect("accounts parses")
+        else {
+            panic!("expected Accounts");
         };
         assert_eq!(with_tx.transaction_id.as_deref(), Some("MzA1OTg4NDcwMDY5"));
     }
@@ -3475,9 +3441,15 @@ mod live_tests {
 
         // The typed parse classifies each filing into its kind — accounts
         // (with the period), confirmation statements (with the statement
-        // date), ARD changes, officer changes, incorporation, or other.
+        // date), incorporation, or other. ARD changes and officer changes
+        // are unimplemented kinds; this company has none, so every item
+        // parses.
+        let typed: Vec<_> = history
+            .typed()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("no unimplemented filing kinds in this company's history");
         println!("typed filings:");
-        for typed in history.typed() {
+        for typed in &typed {
             let filed = typed
                 .filed_on()
                 .map(|d| d.to_string())
@@ -3495,23 +3467,10 @@ mod live_tests {
                         .map(|d| format!("made up to {d}"))
                         .unwrap_or_else(|| "no date".to_string()),
                 ),
-                TypedFiling::ChangeOfAccountingReferenceDate(ard) => (
-                    "ard-change",
-                    ard.new_ard_date
-                        .map(|d| format!("new ard {d}"))
-                        .unwrap_or_else(|| "no date".to_string()),
-                ),
-                TypedFiling::OfficerChange(o) => {
-                    let name = o.officer_name.as_deref().unwrap_or("?");
-                    let date = o
-                        .action_date
-                        .map(|d| d.to_string())
-                        .unwrap_or_else(|| "?".to_string());
-                    (
-                        "officer-change",
-                        format!("{} {} {}", o.action.as_str(), name, date),
-                    )
-                }
+                // Reserved kinds (ARD changes, officer changes) never parse
+                // yet — they return Unimplemented — so they don't appear here.
+                TypedFiling::ChangeOfAccountingReferenceDate(_)
+                | TypedFiling::OfficerChange(_) => unreachable!("reserved kinds are unimplemented"),
                 TypedFiling::Incorporation(_) => ("incorporation", String::new()),
                 TypedFiling::Other(o) => (
                     "other",
@@ -3520,9 +3479,7 @@ mod live_tests {
             };
             println!("  filed {filed}  {kind}  {detail}");
         }
-        // The typed parse must never fail to classify: every item lands in a
-        // known variant, and the accounts items carry a period end.
-        let typed: Vec<_> = history.typed().collect();
+        // Every item classified, and the accounts items carry a period end.
         assert_eq!(typed.len(), history.items.len());
         assert!(
             typed.iter().any(|t| matches!(t, TypedFiling::Accounts(a) if a.period_end.is_some())),
@@ -3577,6 +3534,116 @@ mod live_tests {
             n_downloaded > 0,
             "the company has at least one downloadable filing"
         );
+    }
+
+    /// The accounts filings of a real company (default `14510633`) carry the
+    /// filed balance sheet: every accounts document is downloaded
+    /// (cache-first) and parsed into a `Frs105Accounts`, printing the
+    /// balance-sheet figures (current period | previous period) for each
+    /// filed period. The filing type that holds the past balance sheet is
+    /// the `accounts` category — the parse is what the tally-api sync
+    /// persists into `balance_sheets`.
+    #[tokio::test]
+    #[cfg_attr(
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key for a cold cache"
+    )]
+    async fn live_past_balance_sheets_print_figures() {
+        let number = std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
+        let client = live_client();
+
+        let history = client
+            .get_filing_history(&number)
+            .await
+            .expect("fetch the filing history");
+
+        // The company for the parse: the profile (cache-first) supplies the
+        // name and registration date; the document's own facts override them
+        // and recover the period.
+        let profile = client
+            .get_company_profile_cached(&number)
+            .await
+            .expect("fetch the company profile");
+        let mut lib = Company::new(profile.company_name.clone(), "", &number);
+        lib.registration_date = profile
+            .date_of_creation
+            .as_deref()
+            .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .unwrap_or_default();
+
+        let mut parsed = 0usize;
+        for item in history.accounts() {
+            let Some(tx) = item.transaction_id() else {
+                continue;
+            };
+            let Some(filed_on) = item.filed_on() else {
+                continue;
+            };
+            let bytes = client
+                .download_filing(&number, &tx)
+                .await
+                .expect("download the accounts document");
+            // CH serves these micro-entity accounts as raw iXBRL (XML), not
+            // a zip.
+            let Ok(html) = std::str::from_utf8(&bytes) else {
+                println!(
+                    "  filed {filed_on}  {tx}: not UTF-8 text ({} bytes) — skipping",
+                    bytes.len()
+                );
+                continue;
+            };
+            match Frs105Accounts::from_ixbrl(
+                html,
+                &lib,
+                &test_utils::TestData::sample_accounts_meta(),
+            ) {
+                Ok(accounts) => {
+                    let period = accounts
+                        .accounts
+                        .period
+                        .as_ref()
+                        .map(|p| p.end.to_string())
+                        .unwrap_or_else(|| "?".to_string());
+                    println!("balance sheet at {period} (filed {filed_on}):");
+                    print_figures(&accounts);
+                    parsed += 1;
+                }
+                Err(e) => println!(
+                    "  filed {filed_on}  {tx}: not a parseable FRS 105 iXBRL document: {e}"
+                ),
+            }
+        }
+        assert!(
+            parsed > 0,
+            "at least one accounts filing parsed into a balance sheet"
+        );
+    }
+
+    /// Print a parsed balance sheet's line items: current period | previous
+    /// period (whole pounds).
+    fn print_figures(accounts: &Frs105Accounts) {
+        for (label, values) in [
+            ("fixed assets", accounts.fixed_assets),
+            ("current assets", accounts.current_assets),
+            (
+                "prepayments and accrued income",
+                accounts.prepayments_and_accrued_income,
+            ),
+            ("creditors within 1 year", accounts.creditors_within_1_year),
+            ("net current assets", accounts.net_current_assets),
+            (
+                "total assets less liabilities",
+                accounts.total_assets_less_liabilities,
+            ),
+            ("creditors after 1 year", accounts.creditors_after_1_year),
+            ("provisions for liabilities", accounts.provisions_for_liabilities),
+            ("accruals and deferred income", accounts.accruals_and_deferred_income),
+            ("net assets", accounts.net_assets),
+            ("capital and reserves", accounts.capital_and_reserves),
+        ] {
+            let (current, previous) = (values[0], values[1]);
+            println!("    {label:<32} {current:>12}  {previous:>12}");
+        }
     }
 
     /// A real company's officers decode, and the current directors can be
