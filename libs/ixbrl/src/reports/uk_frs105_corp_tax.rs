@@ -2364,7 +2364,7 @@ mod tests {
         let company = crate::test_utils::TestData::default_company();
         let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
-            crate::test_utils::TestData::accounts_path(&company.company_number)
+            &crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
@@ -2423,7 +2423,7 @@ mod tests {
     async fn test_try_from_gnucash_file_sql() {
         let company = crate::test_utils::TestData::default_company();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
-            crate::test_utils::TestData::accounts_path(&company.company_number)
+            &crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
@@ -2433,10 +2433,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_from_gnucash_file_xml() {
-        let gnucash =
-            crate::GnucashBook::try_from_gnucash_file("example_data/basic-2/input.gnucash")
-                .await
-                .expect("open xml gnucash");
+        let gnucash = crate::GnucashBook::try_from_gnucash_file(&crate::test_utils::repo_path(
+            "libs/ixbrl/example_data/basic-2/input.gnucash",
+        ))
+        .await
+        .expect("open xml gnucash");
         println!("{gnucash}");
     }
 
@@ -2458,7 +2459,7 @@ mod tests {
         let company = crate::test_utils::TestData::default_company();
         let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
-            crate::test_utils::TestData::accounts_path(&company.company_number)
+            &crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
@@ -2513,7 +2514,7 @@ mod tests {
         let company = crate::test_utils::TestData::default_company();
         let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
-            crate::test_utils::TestData::accounts_path(&company.company_number)
+            &crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
@@ -2590,7 +2591,7 @@ mod tests {
         let company = crate::test_utils::TestData::default_company();
         let accounts = crate::test_utils::TestData::default_accounts_meta();
         let gnucash = crate::GnucashBook::try_from_gnucash_file(
-            crate::test_utils::TestData::accounts_path(&company.company_number)
+            &crate::test_utils::TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
@@ -3504,7 +3505,7 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(),
         );
         let book_from_file = crate::GnucashBook::try_from_gnucash_file(
-            "example_data/ctm03955-marginal-relief/input.gnucash",
+            &crate::test_utils::repo_path("libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash"),
         )
         .await
         .expect("open ctm03955 book");
@@ -3615,9 +3616,10 @@ mod tests {
     /// accounts' incorporation date so the iXBRL output carries a
     /// meaningful value.
     fn load_ctm03955() -> (Company, AccountsMeta) {
-        let json =
-            std::fs::read_to_string("example_data/ctm03955-marginal-relief/input_config.jsonc")
-                .expect("read ctm03955 config");
+        let json = std::fs::read_to_string(crate::test_utils::repo_path(
+            "libs/ixbrl/example_data/ctm03955-marginal-relief/input_config.jsonc",
+        ))
+        .expect("read ctm03955 config");
         // Lenient parse (JSONC: comments / trailing commas allowed).
         let config: Ctm03955Config =
             serde_json_lenient::from_str(&json).expect("parse ctm03955 config");
@@ -3657,8 +3659,10 @@ mod tests {
     #[test]
     fn test_ctm03955_book_matches_committed_fixture() {
         let generated = gzip(ctm03955_book().to_gnucash_xml().as_bytes());
-        let committed = std::fs::read("example_data/ctm03955-marginal-relief/input.gnucash")
-            .expect("read the ctm03955 book");
+        let committed = std::fs::read(crate::test_utils::repo_path(
+            "libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
+        ))
+        .expect("read the ctm03955 book");
         assert_eq!(
             generated, committed,
             "example_data/ctm03955-marginal-relief/input.gnucash is stale — run the ignored \
@@ -3673,8 +3677,11 @@ mod tests {
     #[ignore = "writes the committed fixture; run with --ignored to regenerate"]
     fn regenerate_ctm03955_book_fixture() {
         let data = gzip(ctm03955_book().to_gnucash_xml().as_bytes());
-        std::fs::write("example_data/ctm03955-marginal-relief/input.gnucash", data)
-            .expect("write the ctm03955 book");
+        std::fs::write(
+            crate::test_utils::repo_path("libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash"),
+            data,
+        )
+        .expect("write the ctm03955 book");
     }
 
     /// The serializer round-trips: gzip the generated XML, parse it back

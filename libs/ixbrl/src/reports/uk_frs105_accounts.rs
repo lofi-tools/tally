@@ -1796,12 +1796,12 @@ pub const ACCTS_HTML_ATTRS: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{REPO, TestData};
+    use crate::test_utils::{REPO, TestData, repo_path};
 
     async fn load_example() -> (Company, GnucashBook) {
         let company = example_company();
         let gnucash = GnucashBook::try_from_gnucash_file(
-            TestData::accounts_path(&company.company_number)
+            &TestData::accounts_path(&company.company_number)
                 .expect("example company accounts path"),
         )
         .await
@@ -1835,7 +1835,7 @@ mod tests {
     /// the company identity + profile, the report metadata and the
     /// logo/signature assets.
     fn load_example_data() -> ExampleCompanyData {
-        let json = std::fs::read_to_string("example_data/basic-1/input_config.jsonc")
+        let json = std::fs::read_to_string(repo_path("libs/ixbrl/example_data/basic-1/input_config.jsonc"))
             .expect("read example company data file");
         // Lenient parse (JSONC: comments / trailing commas allowed).
         serde_json_lenient::from_str(&json).expect("parse example company data file")
@@ -1955,9 +1955,10 @@ mod tests {
         )
         .unwrap();
 
-        let expected =
-            std::fs::read_to_string("example_data/basic-1/output-accounts.html")
-                .expect("read reference fixture");
+        let expected = std::fs::read_to_string(repo_path(
+            "libs/ixbrl/example_data/basic-1/output-accounts.html",
+        ))
+        .expect("read reference fixture");
         assert_eq!(
             out, expected,
             "accounts output must match the reference fixture"

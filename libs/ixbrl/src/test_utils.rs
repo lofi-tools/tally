@@ -26,6 +26,12 @@ pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
     PathBuf::from(path_str)
 });
 
+/// A repo-root-relative path resolved to a string (the GnuCash loader and
+/// the file readers take `&str`), so tests run from any working directory.
+pub fn repo_path(rel: &str) -> String {
+    REPO.join(rel).to_string_lossy().into_owned()
+}
+
 /// Hardcoded test data: the fictional example company and the example
 /// GnuCash accounts files, so tests run with zero configuration on a fresh
 /// checkout.
@@ -63,15 +69,15 @@ impl TestData {
     }
 
     /// The path to the example GnuCash accounts file for a company number,
-    /// or `None` for unknown companies.  Paths are relative to the crate
-    /// directory (Cargo runs tests from the package root).
+    /// or `None` for unknown companies.  Paths are resolved from the
+    /// repository root, so tests run from any working directory.
     ///
     /// Only `example_data/basic-1/input.gnucash` is tied to a company
     /// number in the tests; `example_data/basic-2/input.gnucash` is used
     /// solely to exercise XML-format parsing, so it has no map entry.
-    pub fn accounts_path(company_number: &str) -> Option<&'static str> {
+    pub fn accounts_path(company_number: &str) -> Option<String> {
         match company_number {
-            "12345678" => Some("example_data/basic-1/input.gnucash"),
+            "12345678" => Some(repo_path("libs/ixbrl/example_data/basic-1/input.gnucash")),
             _ => None,
         }
     }
@@ -107,7 +113,7 @@ mod tests {
     fn accounts_path_maps_example_company() {
         assert_eq!(
             TestData::accounts_path(TestData::default_company_number()),
-            Some("example_data/basic-1/input.gnucash")
+            Some(repo_path("libs/ixbrl/example_data/basic-1/input.gnucash"))
         );
         assert_eq!(TestData::accounts_path("0"), None);
     }
