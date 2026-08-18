@@ -967,8 +967,8 @@ impl FilingHistory {
     /// The filings parsed into typed dates ([`ParsedFiling`]): each filing's
     /// registration date and, when the API reports one, the period it covers
     /// (see [`ParsedFiling::from`]).
-    pub fn parsed(&self) -> impl Iterator<Item = ParsedFiling> {
-        self.items.iter().map(ParsedFiling::from)
+    pub fn parsed(&self) -> impl Iterator<Item = ChFiling> {
+        self.items.iter().map(ChFiling::from)
     }
 }
 
@@ -976,7 +976,7 @@ impl FilingHistory {
 /// period it covers (when the API reports one — e.g. the accounts filings'
 /// `made_up_date` / `period_start_on` / `period_end_on` description values).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParsedFiling {
+pub struct ChFiling {
     /// When the filing was registered with Companies House.
     pub filed_on: Option<NaiveDate>,
     /// The start of the period the filing covers, when reported.
@@ -991,7 +991,7 @@ pub struct ParsedFiling {
     pub description: Option<String>,
 }
 
-impl From<&FilingHistoryItem> for ParsedFiling {
+impl From<&FilingHistoryItem> for ChFiling {
     fn from(item: &FilingHistoryItem) -> Self {
         let parse = |key: &str| {
             item.description_values
@@ -1034,11 +1034,7 @@ fn resolve_absolute(base: &str, path_or_url: &str) -> String {
     if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
         return path_or_url.to_string();
     }
-    let origin = base
-        .split('/')
-        .take(3)
-        .collect::<Vec<_>>()
-        .join("/");
+    let origin = base.split('/').take(3).collect::<Vec<_>>().join("/");
     format!("{origin}{path_or_url}")
 }
 
@@ -2625,8 +2621,7 @@ mod live_tests {
         ignore = "requires a Companies House API key for a cold cache"
     )]
     async fn live_profile_periods() {
-        let number =
-            std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
+        let number = std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
         let client = live_client();
 
         // The client's cache-first company-details method: the profile
@@ -2700,8 +2695,7 @@ mod live_tests {
         ignore = "requires a Companies House API key for a cold cache"
     )]
     async fn live_past_filings_print_dates() {
-        let number =
-            std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
+        let number = std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
         let client = live_client();
 
         let history = client
