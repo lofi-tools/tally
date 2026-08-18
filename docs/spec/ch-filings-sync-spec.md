@@ -407,7 +407,7 @@ the ct600 test helpers compile untouched and only the tally-api handlers opt in.
 ## Changes — `libs/ixbrl`
 
 - New `PreviousYearFigures` struct (in `libs/ixbrl/src/reports/uk_frs105_accounts.rs`)
-  mirroring the eleven `Frs105Accounts` balance-sheet fields as `f64` (single
+  mirroring the twelve `Frs105Accounts` balance-sheet fields as `f64` (single
   period), deriving `Debug, Clone, Default, PartialEq, Serialize, Deserialize`:
 
 ```rust
@@ -418,6 +418,7 @@ the ct600 test helpers compile untouched and only the tally-api handlers opt in.
 /// values in whole pounds, iXBRL sign convention (creditors negative).
 pub struct PreviousYearFigures {
     pub fixed_assets: f64,
+    pub called_up_share_capital_not_paid: f64,
     pub current_assets: f64,
     pub prepayments_and_accrued_income: f64,
     pub creditors_within_1_year: f64,
@@ -443,6 +444,7 @@ impl Frs105Accounts {
     /// The current-period column is left as computed from the ledger.
     pub fn with_previous_year(mut self, prev: PreviousYearFigures) -> Self {
         self.fixed_assets[1] = prev.fixed_assets;
+        self.called_up_share_capital_not_paid[1] = prev.called_up_share_capital_not_paid;
         self.current_assets[1] = prev.current_assets;
         self.prepayments_and_accrued_income[1] = prev.prepayments_and_accrued_income;
         self.creditors_within_1_year[1] = prev.creditors_within_1_year;

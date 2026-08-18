@@ -258,6 +258,7 @@ fn parse_ixbrl(html: &str, company: &Company) -> Option<Frs105Accounts> {
 fn figures_from_parsed(parsed: &Frs105Accounts) -> PreviousYearFigures {
     PreviousYearFigures {
         fixed_assets: parsed.fixed_assets[0],
+        called_up_share_capital_not_paid: parsed.called_up_share_capital_not_paid[0],
         current_assets: parsed.current_assets[0],
         prepayments_and_accrued_income: parsed.prepayments_and_accrued_income[0],
         creditors_within_1_year: parsed.creditors_within_1_year[0],

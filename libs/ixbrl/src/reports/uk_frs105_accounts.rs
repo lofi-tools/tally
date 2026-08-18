@@ -45,6 +45,10 @@ const REPORT_TITLE: &str = "Unaudited Micro-Entity Accounts";
 pub struct PreviousYearFigures {
     /// Tangible / fixed assets.
     pub fixed_assets: f64,
+    /// Called-up share capital not paid — line A of the FRS 105
+    /// balance-sheet format (above fixed assets), when the filed accounts
+    /// disclosed it separately.
+    pub called_up_share_capital_not_paid: f64,
     /// Current assets (debtors + VAT refund due + bank).
     pub current_assets: f64,
     /// Prepayments and accrued income.
@@ -85,6 +89,13 @@ pub struct Frs105Accounts {
     pub accounts: AccountsMeta,
     /// Tangible / fixed assets.
     pub fixed_assets: [f64; 2],
+    /// Called-up share capital not paid — line A of the FRS 105
+    /// balance-sheet format, shown above fixed assets: the amount called
+    /// up on allotted shares but not yet received as at the balance-sheet
+    /// date.  Micro-entities need not disclose it separately, so it
+    /// defaults to zero and the row is omitted unless the setter supplies
+    /// a nonzero amount ([`Self::with_called_up_share_capital_not_paid`]).
+    pub called_up_share_capital_not_paid: [f64; 2],
     /// Current assets (debtors + VAT refund due + bank).
     pub current_assets: [f64; 2],
     /// Prepayments and accrued income (always zero for this report).
@@ -261,6 +272,9 @@ impl Frs105Accounts {
             profile: profile.clone(),
             accounts: accounts_meta.clone(),
             fixed_assets: fixed_assets.map(round2),
+            // Line A (called-up share capital not paid) defaults to zero;
+            // supply it via `with_called_up_share_capital_not_paid`.
+            called_up_share_capital_not_paid: [0.0; 2],
             current_assets: current_assets.map(round2),
             prepayments_and_accrued_income,
             creditors_within_1_year: creditors_within_1_year.map(round2),
@@ -920,6 +934,16 @@ impl Frs105Accounts {
                 fact("uk-core:FixedAssets", "ctxt-15"),
                 fact("uk-core:FixedAssets", "ctxt-16"),
             ],
+            called_up_share_capital_not_paid: [
+                fact(
+                    "uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset",
+                    "ctxt-15",
+                ),
+                fact(
+                    "uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset",
+                    "ctxt-16",
+                ),
+            ],
             current_assets: [
                 fact("uk-core:CurrentAssets", "ctxt-15"),
                 fact("uk-core:CurrentAssets", "ctxt-16"),
@@ -974,6 +998,7 @@ impl Frs105Accounts {
     /// The current-period column is left as computed from the ledger.
     pub fn with_previous_year(mut self, prev: PreviousYearFigures) -> Self {
         self.fixed_assets[1] = prev.fixed_assets;
+        self.called_up_share_capital_not_paid[1] = prev.called_up_share_capital_not_paid;
         self.current_assets[1] = prev.current_assets;
         self.prepayments_and_accrued_income[1] = prev.prepayments_and_accrued_income;
         self.creditors_within_1_year[1] = prev.creditors_within_1_year;
@@ -984,6 +1009,23 @@ impl Frs105Accounts {
         self.accruals_and_deferred_income[1] = prev.accruals_and_deferred_income;
         self.net_assets[1] = prev.net_assets;
         self.capital_and_reserves[1] = prev.capital_and_reserves;
+        self
+    }
+
+    /// Supply the called-up share capital not paid (line A of the FRS 105
+    /// balance-sheet format, above fixed assets): the amount called up on
+    /// allotted shares but not yet received as at the balance-sheet date.
+    /// Defaults to zero — micro-entities need not disclose it separately,
+    /// and the iXBRL row is rendered only when a nonzero amount is
+    /// supplied.  Line A is part of the total-assets-less-current-
+    /// liabilities and net-assets totals, so the amount is added to both
+    /// columns of those fields; `net_current_assets` is left unchanged.
+    pub fn with_called_up_share_capital_not_paid(mut self, amount: [f64; 2]) -> Self {
+        self.called_up_share_capital_not_paid = amount;
+        for (i, &a) in amount.iter().enumerate() {
+            self.total_assets_less_liabilities[i] += a;
+            self.net_assets[i] += a;
+        }
         self
     }
 
@@ -1195,10 +1237,29 @@ impl Frs105Accounts {
     /// the statutory notes paragraphs and the approval / signature block.
     fn build_balance_sheet_page(&self, current_year: &str, prev_year: &str) -> XmlNode {
         let a = &self;
-        let rows = vec![
+        let mut rows = vec![
             worksheet_header_row_accts(current_year, prev_year),
             worksheet_currency_row_accts(),
             spacer_row(),
+        ];
+        // Called-up share capital not paid is line A of the FRS 105
+        // balance-sheet format, shown above fixed assets.  Micro-entities
+        // need not disclose it separately, so the row is omitted unless
+        // the setter supplied a nonzero amount.
+        if a.called_up_share_capital_not_paid[0] != 0.0
+            || a.called_up_share_capital_not_paid[1] != 0.0
+        {
+            rows.push(bs_row(
+                "Called up share capital not paid",
+                "uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset",
+                "ctxt-15",
+                "ctxt-16",
+                a.called_up_share_capital_not_paid[0],
+                a.called_up_share_capital_not_paid[1],
+            ));
+            rows.push(spacer_row());
+        }
+        rows.extend(vec![
             bs_row(
                 "Fixed Assets",
                 "uk-core:FixedAssets",
@@ -1297,7 +1358,7 @@ impl Frs105Accounts {
                 a.capital_and_reserves[0],
                 a.capital_and_reserves[1],
             ),
-        ];
+        ]);
 
         let notes = elt("div", &[]).child(elt("div", &[]).children(vec![
             statement_p(
@@ -2238,6 +2299,7 @@ mod tests {
             profile,
             accounts,
             fixed_assets: [100.0, 200.0],
+            called_up_share_capital_not_paid: [0.0, 0.0],
             current_assets: [300.0, 400.0],
             prepayments_and_accrued_income: [0.0, 1.0],
             creditors_within_1_year: [-50.0, -60.0],
@@ -2253,6 +2315,7 @@ mod tests {
         // Externally sourced comparative figures (e.g. from CH).
         let prev = PreviousYearFigures {
             fixed_assets: 1111.0,
+            called_up_share_capital_not_paid: 30.0,
             current_assets: 2222.0,
             prepayments_and_accrued_income: 0.0,
             creditors_within_1_year: -333.0,
@@ -2268,6 +2331,7 @@ mod tests {
 
         // Previous column replaced, current column untouched.
         assert_eq!(out.fixed_assets, [100.0, 1111.0]);
+        assert_eq!(out.called_up_share_capital_not_paid, [0.0, 30.0]);
         assert_eq!(out.current_assets, [300.0, 2222.0]);
         assert_eq!(out.creditors_within_1_year, [-50.0, -333.0]);
         assert_eq!(out.net_current_assets, [250.0, 1889.0]);
@@ -2281,6 +2345,100 @@ mod tests {
         // Identity fields survive.
         assert_eq!(out.company.name, base.company.name);
         assert_eq!(out.company.company_number, base.company.company_number);
+    }
+
+    #[test]
+    fn called_up_share_capital_not_paid_renders_only_when_nonzero() {
+        // Build a report with known figures (both columns from the ledger).
+        let company = example_company();
+        let profile = example_profile();
+        let accounts = example_accounts_meta();
+        let base = Frs105Accounts {
+            company,
+            profile,
+            accounts,
+            fixed_assets: [100.0, 200.0],
+            called_up_share_capital_not_paid: [0.0, 0.0],
+            current_assets: [300.0, 400.0],
+            prepayments_and_accrued_income: [0.0, 1.0],
+            creditors_within_1_year: [-50.0, -60.0],
+            net_current_assets: [250.0, 340.0],
+            total_assets_less_liabilities: [350.0, 540.0],
+            creditors_after_1_year: [0.0, 2.0],
+            provisions_for_liabilities: [0.0, 3.0],
+            accruals_and_deferred_income: [0.0, 4.0],
+            net_assets: [350.0, 549.0],
+            capital_and_reserves: [350.0, 549.0],
+        };
+
+        // Default (zero): the row and its fact are omitted from the iXBRL.
+        let default = base.clone().to_ixbrl();
+        assert!(!default.contains("uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset"));
+        assert!(!default.contains("Called up share capital not paid"));
+
+        // Supplied: the amounts land in the field and are folded into the
+        // total-assets-less-current-liabilities and net-assets totals
+        // (line A is part of both), while net current assets is unchanged.
+        let with_line = base
+            .clone()
+            .with_called_up_share_capital_not_paid([100.0, 50.0]);
+        assert_eq!(with_line.called_up_share_capital_not_paid, [100.0, 50.0]);
+        assert_eq!(with_line.total_assets_less_liabilities, [450.0, 590.0]);
+        assert_eq!(with_line.net_assets, [450.0, 599.0]);
+        assert_eq!(with_line.net_current_assets, [250.0, 340.0]);
+
+        // The row renders, above the fixed-assets row.
+        let html = with_line.to_ixbrl();
+        assert!(html.contains("uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset"));
+        assert!(
+            html.find("uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset").unwrap()
+                < html.find("uk-core:FixedAssets").unwrap()
+        );
+    }
+
+    /// The previous filing's balance sheet disclosed line A (called-up
+    /// share capital not paid) as £1; the builder override
+    /// ([`Frs105Accounts::with_called_up_share_capital_not_paid`]) is *not*
+    /// used — the next report's comparative column must carry the £1
+    /// forward on its own, and a nonzero comparative alone makes the row
+    /// render.
+    #[test]
+    fn previous_year_called_up_share_capital_carries_into_the_comparative_column() {
+        let company = example_company();
+        let profile = example_profile();
+        let accounts = example_accounts_meta();
+        let base = Frs105Accounts {
+            company,
+            profile,
+            accounts,
+            fixed_assets: [100.0, 200.0],
+            called_up_share_capital_not_paid: [0.0, 0.0],
+            current_assets: [300.0, 400.0],
+            prepayments_and_accrued_income: [0.0, 1.0],
+            creditors_within_1_year: [-50.0, -60.0],
+            net_current_assets: [250.0, 340.0],
+            total_assets_less_liabilities: [350.0, 540.0],
+            creditors_after_1_year: [0.0, 2.0],
+            provisions_for_liabilities: [0.0, 3.0],
+            accruals_and_deferred_income: [0.0, 4.0],
+            net_assets: [350.0, 549.0],
+            capital_and_reserves: [350.0, 549.0],
+        };
+
+        // Previous filing with line A = £1 (all other lines zero).
+        let prev = PreviousYearFigures {
+            called_up_share_capital_not_paid: 1.0,
+            ..Default::default()
+        };
+        let out = base.with_previous_year(prev);
+
+        // No override called: the £1 carries into the comparative column
+        // and the current column stays zero.
+        assert_eq!(out.called_up_share_capital_not_paid, [0.0, 1.0]);
+
+        // A nonzero comparative alone makes the row render.
+        let html = out.to_ixbrl();
+        assert!(html.contains("uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset"));
     }
 
     #[test]

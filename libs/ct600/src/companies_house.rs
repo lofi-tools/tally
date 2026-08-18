@@ -1591,6 +1591,9 @@ pub fn parse_filed_accounts(html: &str) -> Result<FiledBalanceSheet, String> {
         period_end,
         figures: PreviousYearFigures {
             fixed_assets: current("FixedAssets"),
+            called_up_share_capital_not_paid: current(
+                "CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset",
+            ),
             current_assets: current("CurrentAssets"),
             prepayments_and_accrued_income: current(
                 "PrepaymentsAccruedIncomeNotExpressedWithinCurrentAssetSubtotal",
@@ -3204,6 +3207,7 @@ mod tests {
 <body><ix:header><ix:hidden>
   <ix:nonNumeric contextRef="icur1" name="uk-bus:StartDateForPeriodCoveredByReport">2022-11-28</ix:nonNumeric>
   <ix:nonNumeric contextRef="icur1" name="uk-bus:EndDateForPeriodCoveredByReport">2023-11-30</ix:nonNumeric>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset" unitRef="GBP">100</ix:nonFraction>
   <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:zerodash" name="uk-core:FixedAssets" unitRef="GBP">-</ix:nonFraction>
   <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:CurrentAssets" unitRef="GBP">68,946</ix:nonFraction>
   <ix:nonFraction contextRef="icur9" decimals="2" format="ixt2:numdotdecimal" name="uk-core:Creditors" unitRef="GBP">570</ix:nonFraction>
@@ -3251,6 +3255,7 @@ mod tests {
 <body><ix:header><ix:hidden>
   <ix:nonNumeric contextRef="CY_END" format="ixt2:datedaymonthyear" name="uk-bus:StartDateForPeriodCoveredByReport">1.12.23</ix:nonNumeric>
   <ix:nonNumeric contextRef="CY_END" format="ixt2:datedaymonthyear" name="uk-bus:EndDateForPeriodCoveredByReport">30.11.24</ix:nonNumeric>
+  <ix:nonFraction contextRef="CY_END" decimals="2" name="core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset" unitRef="GBP">0</ix:nonFraction>
   <ix:nonFraction contextRef="CY_END" decimals="2" name="core:FixedAssets" unitRef="GBP">0</ix:nonFraction>
   <ix:nonFraction contextRef="CY_END" decimals="2" name="core:CurrentAssets" unitRef="GBP">74,991</ix:nonFraction>
   <ix:nonFraction contextRef="PY_END" decimals="2" name="core:CurrentAssets" unitRef="GBP">68,946</ix:nonFraction>
@@ -3291,6 +3296,7 @@ mod tests {
         assert_eq!(f.total_assets_less_liabilities, 68_376.0);
         assert_eq!(f.net_assets, 68_376.0);
         assert_eq!(f.capital_and_reserves, 68_376.0);
+        assert_eq!(f.called_up_share_capital_not_paid, 100.0);
         assert_eq!(f.fixed_assets, 0.0, "zerodash reads as zero");
         assert_eq!(f.prepayments_and_accrued_income, 0.0);
         assert_eq!(f.provisions_for_liabilities, 0.0);
@@ -3312,6 +3318,10 @@ mod tests {
         assert_eq!(f.net_current_assets, 74_991.0);
         assert_eq!(f.total_assets_less_liabilities, 74_991.0);
         assert_eq!(f.provisions_for_liabilities, 540.0);
+        assert_eq!(
+            f.called_up_share_capital_not_paid, 0.0,
+            "present as zero in the 2024 rendering"
+        );
         assert_eq!(f.net_assets, 74_451.0);
         assert_eq!(f.capital_and_reserves, 74_451.0);
         // The comparatives (PY_END: 68,946 / -570) must not leak into the
@@ -3981,6 +3991,7 @@ mod live_tests {
     /// lines negative — the reports' sign convention).
     fn print_figures(figures: &PreviousYearFigures) {
         for (label, value) in [
+            ("called up share capital not paid", figures.called_up_share_capital_not_paid),
             ("fixed assets", figures.fixed_assets),
             ("current assets", figures.current_assets),
             (

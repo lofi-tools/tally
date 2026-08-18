@@ -305,9 +305,10 @@ export interface TransactionsPage {
 }
 
 // ---- filings (ch-filings-sync-spec §5) ----
-/** The 11 balance-sheet line items, in the `Frs105Accounts` field names. */
+/** The 12 balance-sheet line items, in the `Frs105Accounts` field names. */
 export interface PreviousYearFigures {
   fixed_assets: number
+  called_up_share_capital_not_paid: number
   current_assets: number
   prepayments_and_accrued_income: number
   creditors_within_1_year: number
