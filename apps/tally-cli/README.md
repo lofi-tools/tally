@@ -49,11 +49,11 @@ is optional.  There is no environment-variable fallback.
 ### Config file
 
 A JSON file with the same shape as
-`libs/ixbrl/example_data/basic-1/input_config.jsonc` (use it as a template): a nested
+`example_data/basic-1/input_config.jsonc` (use it as a template): a nested
 `company` block (identity + descriptive profile) and an `accounts` sub-object
 (period + report metadata).  The file is parsed leniently (JSONC): `//`
 comments and trailing commas are allowed, so you can annotate the config.  This is also the config the tests and the
-`ex2` script run against.  `libs/ixbrl/example_data/basic-1/minimal_config.jsonc`
+`ex2` script run against.  `example_data/basic-1/minimal_config.jsonc`
 is a minimal template — no identity, no period and a blank profile, with
 only the required report metadata — which the live enrichment test resolves
 against the environment and the Companies House API.
@@ -196,8 +196,8 @@ A config file with the optional `company.*` profile fields (directors,
 contacts, accountant/auditor, ...) and the required `accounts.*` report
 metadata (dates, signature; the signatory defaults to the first director and
 the employee counts to 1 per financial year) — copy
-`libs/ixbrl/example_data/basic-1/input_config.jsonc`, or start from
-`libs/ixbrl/example_data/basic-1/minimal_config.jsonc` (no identity, no
+`example_data/basic-1/input_config.jsonc`, or start from
+`example_data/basic-1/minimal_config.jsonc` (no identity, no
 period, blank profile: with a Companies House API key, `COMPANY_NUMBER` and
 `COMPANY_UNIQUE_TAXPAYER_REF`, the identity and period are resolved at
 runtime) — plus a Corporation Tax reference —
@@ -219,8 +219,8 @@ cargo build -p tally-cli
 
 # Produce the example CT600 message
 cargo run -p tally-cli -- ct600 \
-  --config-path libs/ixbrl/example_data/basic-1/input_config.jsonc \
-  --book libs/ixbrl/example_data/basic-1/input.gnucash \
+  --config-path example_data/basic-1/input_config.jsonc \
+  --book example_data/basic-1/input.gnucash \
   --out .cache/tally-cli
 ```
 

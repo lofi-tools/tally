@@ -37,13 +37,13 @@ See [roadmap](docs/current-state-and-roadmap.md) for planned features & progress
 
 ```bash
 tally ct600 \
-  --config-path libs/ixbrl/example_data/basic-1/input_config.jsonc \
-  --book libs/ixbrl/example_data/basic-1/input.gnucash \
+  --config-path example_data/basic-1/input_config.jsonc \
+  --book example_data/basic-1/input.gnucash \
   --out .cache/tally-cli
   # -> writes .cache/tally-cli/ct600-<company-number>.xml
 ```
 
-See the [example config file](libs/ixbrl/example_data/basic-1/input_config.jsonc)
+See the [example config file](example_data/basic-1/input_config.jsonc)
 And the detailed [tally-cli config options](#tally-cli-configuration) for 
 flags, config, and defaults.
 
@@ -56,8 +56,8 @@ flags, config, and defaults.
 
    ```bash
    cargo run -p tally-cli -- ct600 \
-     --config-path libs/ixbrl/example_data/basic-1/input_config.jsonc \
-     --book libs/ixbrl/example_data/basic-1/input.gnucash \
+     --config-path example_data/basic-1/input_config.jsonc \
+     --book example_data/basic-1/input.gnucash \
      --out .cache/tally-cli
      # -> writes .cache/tally-cli/ct600-<company-number>.xml
    ```
@@ -84,7 +84,7 @@ All the offline tests run on fictional data, hardcoded in the repo — so a
 fresh checkout needs no API key and no network.  The mock data, by source:
 
 - **Companies House company data**
-- **The books** — example gnucash files from `libs/ixbrl/example_data/`
+- **The books** — example gnucash files from `example_data/`
 - **HMRC** — the Corporation Tax client tests run against an in-process
   GovTalk stub gateway (submit → acknowledge → poll → response → delete),
   so no HMRC credentials are ever needed.
@@ -230,7 +230,7 @@ the period can be left out and is resolved from Companies House):
     "authorised_date": "2021-02-01",
     "signed_by": "B Smith",
     "average_employees": { "2020": 2, "2019": 1 },
-    "signature_b64": "",      "...": "remaining accounts.* fields — copy them from libs/ixbrl/example_data/basic-1/input_config.jsonc"
+    "signature_b64": "",      "...": "remaining accounts.* fields — copy them from example_data/basic-1/input_config.jsonc"
   }
 }
 ```

@@ -71,7 +71,7 @@ tax").
 ### 5.2 Chart of accounts tree
 
 The demo data is now the **real GnuCash book** from
-`libs/ixbrl/example_data/basic-1/input.gnucash` (a SQLite GnuCash file), ported
+`example_data/basic-1/input.gnucash` (a SQLite GnuCash file), ported
 by a one-off generator script into `mock_data.ts`:
 
 - The **whole tree is kept in memory** as a recursive `AccountNode { name,

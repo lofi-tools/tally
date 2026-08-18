@@ -869,8 +869,10 @@ pub struct ParsedIxBrlFacts {
 }
 
 impl ParsedIxBrlFacts {
-    /// Render these facts as an ixbrl HTML document with CSS envelope.
-    pub fn to_html(&self) -> String {
+    /// Render these facts as an iXBRL HTML document with the given CSS
+    /// envelope.  The presentation stylesheet is caller-supplied — this
+    /// crate is presentation-agnostic and does not ship report CSS.
+    pub fn to_html(&self, css: &str) -> String {
         // Build the document structure
         let mut hidden = Vec::new();
 
@@ -931,11 +933,7 @@ impl ParsedIxBrlFacts {
         let doc = elt("html", HTML_ATTRS).children(vec![
             elt("head", &[]).children(vec![
                 elt_text("title", &[], "Corporation Tax Statement"),
-                elt_text(
-                    "style",
-                    &[("type", "text/css")],
-                    include_str!("reports/uk_frs105_corp_tax.css"),
-                ),
+                elt_text("style", &[("type", "text/css")], css),
             ]),
             elt("body", &[]).children(vec![
                 elt("div", &[("style", "display:none")]).child(header),

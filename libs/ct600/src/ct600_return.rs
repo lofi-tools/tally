@@ -1011,7 +1011,7 @@ mod tests {
     async fn basic_1_corp_tax() -> Frs105CorpTax {
         let company = basic_1_company();
         let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
-            "libs/ixbrl/example_data/basic-1/input.gnucash",
+            "example_data/basic-1/input.gnucash",
         ))
         .await
         .expect("open basic-1 gnucash");
@@ -1040,7 +1040,7 @@ mod tests {
     async fn basic_1_accounts() -> Frs105Accounts {
         let company = basic_1_company();
         let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
-            "libs/ixbrl/example_data/basic-1/input.gnucash",
+            "example_data/basic-1/input.gnucash",
         ))
         .await
         .expect("open basic-1 gnucash");
@@ -1240,7 +1240,7 @@ mod tests {
     async fn ctm03955_accounts() -> Frs105Accounts {
         let company = ctm03955_company();
         let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
-            "libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
+            "example_data/ctm03955-marginal-relief/input.gnucash",
         ))
         .await
         .expect("open ctm03955 gnucash");
@@ -1477,7 +1477,7 @@ mod tests {
         let company = ctm03955_company();
         let accounts = ctm03955_accounts_meta();
         let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
-            "libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
+            "example_data/ctm03955-marginal-relief/input.gnucash",
         ))
         .await
         .expect("open ctm03955 gnucash");

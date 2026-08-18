@@ -169,7 +169,7 @@ The user is guided through three steps, in order, at their own pace:
 4. Search returning nothing → inline empty state ("No company found — check the
    name or number").
 
-### 7.3 Fields: inferable vs not (grounded in `libs/ixbrl/example_data/*/input_config.jsonc`)
+### 7.3 Fields: inferable vs not (grounded in `example_data/*/input_config.jsonc`)
 Inferable from a Companies House search (prefilled, still editable):
 
 | Field | Config key |

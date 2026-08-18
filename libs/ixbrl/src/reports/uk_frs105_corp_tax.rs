@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::GnucashBook;
 use crate::calc_corp_tax::{CorporationTaxCalculation, for_fy};
 use core_model::{AccountingPeriod, AccountsMeta, Company};
-use crate::ixbrl_fmt::*;
+use ixbrl_ir::ixbrl_fmt::*;
 
 #[derive(Debug, Clone)]
 pub struct RdExpenditureItem {
@@ -1270,7 +1270,7 @@ impl Frs105CorpTax {
     }
 
     fn page_facts(&self, title: &str, fact_items: Vec<XmlNode>) -> XmlNode {
-        page(vec![crate::ixbrl_fmt::facts(
+        page(vec![facts(
             vec![h2(title)].into_iter().chain(fact_items).collect(),
         )])
     }
@@ -2434,7 +2434,7 @@ mod tests {
     #[tokio::test]
     async fn test_try_from_gnucash_file_xml() {
         let gnucash = crate::GnucashBook::try_from_gnucash_file(&crate::test_utils::repo_path(
-            "libs/ixbrl/example_data/basic-2/input.gnucash",
+            "example_data/basic-2/input.gnucash",
         ))
         .await
         .expect("open xml gnucash");
@@ -3505,7 +3505,7 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap(),
         );
         let book_from_file = crate::GnucashBook::try_from_gnucash_file(
-            &crate::test_utils::repo_path("libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash"),
+            &crate::test_utils::repo_path("example_data/ctm03955-marginal-relief/input.gnucash"),
         )
         .await
         .expect("open ctm03955 book");
@@ -3617,7 +3617,7 @@ mod tests {
     /// meaningful value.
     fn load_ctm03955() -> (Company, AccountsMeta) {
         let json = std::fs::read_to_string(crate::test_utils::repo_path(
-            "libs/ixbrl/example_data/ctm03955-marginal-relief/input_config.jsonc",
+            "example_data/ctm03955-marginal-relief/input_config.jsonc",
         ))
         .expect("read ctm03955 config");
         // Lenient parse (JSONC: comments / trailing commas allowed).
@@ -3676,7 +3676,7 @@ mod tests {
     fn test_ctm03955_book_matches_committed_fixture() {
         let generated = ctm03955_book().to_gnucash_xml();
         let committed = gunzip(&std::fs::read(crate::test_utils::repo_path(
-            "libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
+            "example_data/ctm03955-marginal-relief/input.gnucash",
         ))
         .expect("read the ctm03955 book"));
         assert_eq!(
@@ -3695,7 +3695,7 @@ mod tests {
     fn regenerate_ctm03955_book_fixture() {
         let data = gzip(ctm03955_book().to_gnucash_xml().as_bytes());
         std::fs::write(
-            crate::test_utils::repo_path("libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash"),
+            crate::test_utils::repo_path("example_data/ctm03955-marginal-relief/input.gnucash"),
             data,
         )
         .expect("write the ctm03955 book");

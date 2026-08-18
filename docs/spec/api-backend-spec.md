@@ -108,7 +108,7 @@ Split       id, ledger_id (BelongsTo<Ledger>), tx_guid, account_guid, value
 
 `Company` carries the union of what the CLI's config carries
 (`CompanyConfig` + `AccountsConfig`, see `apps/tally-cli/src/config.rs` and
-`libs/ixbrl/example_data/basic-1/input_config.jsonc`), so report generation
+`example_data/basic-1/input_config.jsonc`), so report generation
 can rebuild the library inputs without a config file:
 
 - identity: `name`, `tax_reference` (UTR), `company_number`, `registration_date`
@@ -362,7 +362,7 @@ catch-panic middleware and become `500 internal` with a `request_id`.
 
 - **Unit tests** (offline, no DB): period resolution, error mapping, auth
   token logic, report-input assembly. These mirror the repo's fully-offline
-  convention (fixtures from `libs/ixbrl/example_data/` and the ct600 test
+  convention (fixtures from `example_data/` and the ct600 test
   fixtures).
 - **Integration tests** (need Postgres) are compiled behind a cargo feature
   **`pg-tests`**, **on by default**:

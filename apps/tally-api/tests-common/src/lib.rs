@@ -71,7 +71,7 @@ pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
 /// The basic FRS 105 fixture book used by the upload/report tests, resolved
 /// from the repository root.
 pub static FIXTURE_GNUCASH: LazyLock<PathBuf> =
-    LazyLock::new(|| REPO.join("libs/ixbrl/example_data/basic-1/input.gnucash"));
+    LazyLock::new(|| REPO.join("example_data/basic-1/input.gnucash"));
 /// The per-upload size cap `setup()` uses (mirrors production `main.rs`).
 /// Tests that want to trip the 413 branch use
 /// [`setup_with_max_upload_bytes`](TestApp::setup_with_max_upload_bytes)

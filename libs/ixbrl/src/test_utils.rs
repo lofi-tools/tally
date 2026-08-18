@@ -77,7 +77,7 @@ impl TestData {
     /// solely to exercise XML-format parsing, so it has no map entry.
     pub fn accounts_path(company_number: &str) -> Option<String> {
         match company_number {
-            "12345678" => Some(repo_path("libs/ixbrl/example_data/basic-1/input.gnucash")),
+            "12345678" => Some(repo_path("example_data/basic-1/input.gnucash")),
             _ => None,
         }
     }
@@ -113,7 +113,7 @@ mod tests {
     fn accounts_path_maps_example_company() {
         assert_eq!(
             TestData::accounts_path(TestData::default_company_number()),
-            Some(repo_path("libs/ixbrl/example_data/basic-1/input.gnucash"))
+            Some(repo_path("example_data/basic-1/input.gnucash"))
         );
         assert_eq!(TestData::accounts_path("0"), None);
     }

@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use chrono::Datelike;
 
 use core_model::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
-use crate::ixbrl_fmt::*;
+use ixbrl_ir::ixbrl_fmt::*;
 use crate::GnucashBook;
 
 /// The report title written into the generated document (the title page and
@@ -1867,7 +1867,7 @@ mod tests {
     /// the company identity + profile, the report metadata and the
     /// logo/signature assets.
     fn load_example_data() -> ExampleCompanyData {
-        let json = std::fs::read_to_string(repo_path("libs/ixbrl/example_data/basic-1/input_config.jsonc"))
+        let json = std::fs::read_to_string(repo_path("example_data/basic-1/input_config.jsonc"))
             .expect("read example company data file");
         // Lenient parse (JSONC: comments / trailing commas allowed).
         serde_json_lenient::from_str(&json).expect("parse example company data file")
@@ -1988,7 +1988,7 @@ mod tests {
         .unwrap();
 
         let expected = std::fs::read_to_string(repo_path(
-            "libs/ixbrl/example_data/basic-1/output-accounts.html",
+            "example_data/basic-1/output-accounts.html",
         ))
         .expect("read reference fixture");
         assert_eq!(
