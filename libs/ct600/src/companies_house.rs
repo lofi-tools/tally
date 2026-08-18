@@ -96,8 +96,9 @@ pub enum CompaniesHouseClientType {
 /// * `COMPANIES_HOUSE_API_KEY` / `COMPANIES_HOUSE_SANDBOX_API_KEY` — the API
 ///   key for the live / sandbox Companies House API (live preferred by
 ///   [`Config::from_env`]);
-/// * `CT600_CACHE_DIR` — the response-cache directory (no disk cache when
-///   unset).
+/// * `CT600_CACHE_DIR` — the response-cache directory; when unset, test
+///   builds default to the repository's `.cache` and other builds have no
+///   disk cache.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The company registration number (`COMPANY_NUMBER`).
@@ -236,7 +237,8 @@ impl Config {
 
 impl Default for Config {
     /// The base configuration: no company number, no API key, and the
-    /// response cache from `CT600_CACHE_DIR` (none when unset).
+    /// response cache from `CT600_CACHE_DIR` (the repository's `.cache` in
+    /// test builds, none when unset).
     fn default() -> Self {
         Self::base_from_env()
     }
@@ -516,7 +518,8 @@ impl CompaniesHouseClient {
     }
 
     /// The configured response-cache directory: the per-client override, else
-    /// `CT600_CACHE_DIR`; `None` when caching is disabled.
+    /// `CT600_CACHE_DIR`, else (in test builds) the repository's `.cache`;
+    /// `None` when caching is disabled.
     pub fn cache_dir(&self) -> Option<&Path> {
         self.config.cache_dir()
     }
@@ -707,10 +710,22 @@ fn write_cache_file(cache_dir: &Path, file_name: &str, data: &[u8]) {
     }
 }
 
-/// The cache directory from `CT600_CACHE_DIR`, when set — `None` disables the
-/// disk cache (the client then always fetches from the API).
+/// The cache directory: `CT600_CACHE_DIR` when set; in test builds, the
+/// repository's `.cache` directory (resolved through [`test_utils::REPO`], so
+/// test clients share a warm cache across runs); `None` disables the disk
+/// cache (the client then always fetches from the API).
 fn cache_dir_from_env() -> Option<PathBuf> {
-    non_empty_env("CT600_CACHE_DIR").map(PathBuf::from)
+    if let Some(dir) = non_empty_env("CT600_CACHE_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    #[cfg(test)]
+    {
+        Some(test_utils::REPO.join(".cache"))
+    }
+    #[cfg(not(test))]
+    {
+        None
+    }
 }
 
 /// A non-empty environment variable, if set.
@@ -1842,6 +1857,20 @@ mod tests {
                 .with_company_number("")
                 .enrichment_number("", ""),
             None
+        );
+    }
+
+    /// In test builds the default cache dir is the repository's `.cache`,
+    /// resolved through `test_utils::REPO` (an ambient `CT600_CACHE_DIR`
+    /// would override it — pinned here; no other test mutates that var, so
+    /// this cannot race).
+    #[test]
+    fn default_cache_dir_is_repo_cache_in_tests() {
+        unsafe { std::env::remove_var("CT600_CACHE_DIR") };
+        let config = Config::default();
+        assert_eq!(
+            config.cache_dir(),
+            Some(test_utils::REPO.join(".cache").as_path())
         );
     }
 
