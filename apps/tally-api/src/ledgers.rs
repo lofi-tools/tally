@@ -132,7 +132,7 @@ pub async fn upload(
         tmp.write_all(&chunk).map_err(|e| AppError::Storage { source: e })?;
     }
     drop(tmp);
-    let file_sha256 = format!("{:x}", hasher.finalize());
+    let file_sha256 = hex::encode(hasher.finalize());
 
     // -- parse once --------------------------------------------------------------
     let book = GnucashBook::try_from_gnucash_file(&tmp_path.to_string_lossy())

@@ -297,7 +297,7 @@ pub fn verify_password(hash: &str, password: &str) -> bool {
 pub fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 /// A fresh session: returns `(plaintext, sha256-hex)`.
