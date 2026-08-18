@@ -1,0 +1,8 @@
+[package]
+name = "ixbrl-ir"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+quick-xml = "0.41.0"
+chrono = { workspace = true, features = ["serde"] }

@@ -28,8 +28,9 @@ chrono = { workspace = true, features = ["serde"] }
 # errors, logs
 snafu.workspace = true
 log = "0.4"
-# internal
-ixbrl = { path = "../../ixbrl" }
+# internal (shared leaves)
+core_model = { path = "../../core_model" }
+ixbrl-ir = { path = "../../ixbrl-ir" }
 
 [dev-dependencies]
 tempfile = "3.27.0"

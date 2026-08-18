@@ -10,6 +10,9 @@ chrono.workspace = true
 snafu.workspace = true
 tokio.workspace = true
 quick-xml = "0.41.0"
+# shared leaves: the company/accounting-period model and the iXBRL IR
+core_model = { path = "../core_model" }
+ixbrl-ir = { path = "../ixbrl-ir" }
 
 [dev-dependencies]
 tokio = { workspace = true }

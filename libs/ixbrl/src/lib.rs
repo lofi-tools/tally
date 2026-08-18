@@ -2,9 +2,15 @@ use std::fmt;
 
 use snafu::Snafu;
 
+// The company/accounting-period model and the iXBRL intermediate
+// representation moved to the shared leaf crates (`core_model`,
+// `ixbrl-ir`); re-export them at their historical paths so callers keep
+// working unchanged.
+pub use core_model::company;
+pub use core_model::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
+pub use ixbrl_ir::ixbrl_fmt;
+
 pub mod calc_corp_tax;
-pub mod company;
-pub mod ixbrl_fmt;
 pub mod reports {
     pub mod uk_frs105_accounts;
     pub mod uk_frs105_corp_tax;

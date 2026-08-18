@@ -15,11 +15,11 @@
 //! alongside the client.
 
 use chrono::{Datelike, Months, NaiveDate};
-use ixbrl::company::{AccountingPeriod, Company};
-use ixbrl::ixbrl_fmt::{ParsedIxBrlFacts, XmlNode, xbrl_context_dimensions};
+use core_model::{AccountingPeriod, Company};
+use ixbrl_ir::ixbrl_fmt::{ParsedIxBrlFacts, XmlNode, xbrl_context_dimensions};
 use serde::{Deserialize, Serialize};
 
-pub use ixbrl::reports::uk_frs105_accounts::PreviousYearFigures;
+pub use core_model::PreviousYearFigures;
 use snafu::Snafu;
 use std::env::VarError;
 use std::path::{Path, PathBuf};
@@ -1944,7 +1944,7 @@ pub mod test_utils {
     use chrono::NaiveDate;
     use snafu::Snafu;
 
-    use ixbrl::company::{AccountingPeriod, AccountsMeta};
+    use core_model::{AccountingPeriod, AccountsMeta};
 
     use super::{ApiResult, CompaniesHouseClient, CompaniesHouseError, CompanyProfile};
 

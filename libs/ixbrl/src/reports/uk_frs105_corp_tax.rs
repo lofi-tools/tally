@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::GnucashBook;
 use crate::calc_corp_tax::{CorporationTaxCalculation, for_fy};
-use crate::company::{AccountingPeriod, AccountsMeta, Company};
+use core_model::{AccountingPeriod, AccountsMeta, Company};
 use crate::ixbrl_fmt::*;
 
 #[derive(Debug, Clone)]

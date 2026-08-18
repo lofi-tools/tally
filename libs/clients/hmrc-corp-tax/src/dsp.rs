@@ -46,7 +46,7 @@ use crate::govtalk::{
     GovTalkSubmissionResponse,
 };
 use crate::{CT_NS, ENV_NS};
-use ixbrl::ixbrl_fmt::XmlNode;
+use ixbrl_ir::ixbrl_fmt::XmlNode;
 
 // ============================================================================
 // Endpoints

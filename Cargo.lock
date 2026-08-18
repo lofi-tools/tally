@@ -705,7 +705,8 @@ name = "companies-house"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "ixbrl",
+ "core_model",
+ "ixbrl-ir",
  "log",
  "reqwest",
  "serde",
@@ -761,6 +762,14 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "core_model"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+]
 
 [[package]]
 name = "cpubits"
@@ -1664,7 +1673,7 @@ dependencies = [
  "bergshamra-c14n",
  "chrono",
  "companies-house",
- "ixbrl",
+ "ixbrl-ir",
  "log",
  "quick-xml",
  "reqwest",
@@ -2120,13 +2129,23 @@ name = "ixbrl"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "core_model",
  "flate2",
+ "ixbrl-ir",
  "quick-xml",
  "rucash",
  "serde",
  "serde_json_lenient",
  "snafu",
  "tokio",
+]
+
+[[package]]
+name = "ixbrl-ir"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "quick-xml",
 ]
 
 [[package]]

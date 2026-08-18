@@ -24,9 +24,8 @@
 use std::collections::HashMap;
 
 use chrono::Datelike;
-use serde::{Deserialize, Serialize};
 
-use crate::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
+use core_model::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use crate::ixbrl_fmt::*;
 use crate::GnucashBook;
 
@@ -38,38 +37,10 @@ const REPORT_TITLE: &str = "Unaudited Micro-Entity Accounts";
 /// Previous-period balance-sheet figures — the comparative column of the
 /// statement of financial position when the ledger doesn't cover the
 /// previous period (e.g. sourced from the company's last filed accounts at
-/// Companies House). Mirrors the `Frs105Accounts` balance-sheet fields;
+/// Companies House).  Mirrors the `Frs105Accounts` balance-sheet fields;
 /// values in whole pounds with the iXBRL sign convention (creditor lines
 /// negative).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct PreviousYearFigures {
-    /// Tangible / fixed assets.
-    pub fixed_assets: f64,
-    /// Called-up share capital not paid — line A of the FRS 105
-    /// balance-sheet format (above fixed assets), when the filed accounts
-    /// disclosed it separately.
-    pub called_up_share_capital_not_paid: f64,
-    /// Current assets (debtors + VAT refund due + bank).
-    pub current_assets: f64,
-    /// Prepayments and accrued income.
-    pub prepayments_and_accrued_income: f64,
-    /// Creditors: amounts falling due within one year.
-    pub creditors_within_1_year: f64,
-    /// Net current assets / (liabilities).
-    pub net_current_assets: f64,
-    /// Total assets less current liabilities.
-    pub total_assets_less_liabilities: f64,
-    /// Creditors: amounts falling due after one year.
-    pub creditors_after_1_year: f64,
-    /// Provisions for liabilities.
-    pub provisions_for_liabilities: f64,
-    /// Accrued liabilities and deferred income.
-    pub accruals_and_deferred_income: f64,
-    /// Net assets.
-    pub net_assets: f64,
-    /// Capital and reserves.
-    pub capital_and_reserves: f64,
-}
+pub use core_model::PreviousYearFigures;
 
 /// The unaudited micro-entity accounts (FRS 105) statement of financial
 /// position.
