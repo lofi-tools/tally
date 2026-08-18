@@ -60,9 +60,10 @@ handle" below).
   base64), and supports External Test Service, live and Test-in-live
   configurations. Tested against an in-process GovTalk stub gateway.
 - **Companies House client** — `companies_house` resolves/enriches a
-  company (override → cached profile → live API), fetches and caches
-  company profiles under `.cache/api_responses/`, and derives the CT600
-  company header boxes from a profile.
+  company (override → cached profile → live API), fetches and optionally
+  caches company profiles (disk cache enabled by `CT600_CACHE_DIR` or
+  `with_cache_dir`), and derives the CT600 company header boxes from a
+  profile.
 
 ### Tests
 

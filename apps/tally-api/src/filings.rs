@@ -82,7 +82,7 @@ pub async fn fetch_and_store(
     }
 
     // 1. Complete filing history (all pages, newest first).
-    let history = cancelable(token, ch.filing_history_all(&company.company_number)).await?;
+    let history = cancelable(token, ch.refetch_filings(&company.company_number)).await?;
 
     // 2. Persist every item, idempotently (delete + reinsert of the full
     //    snapshot within one transaction; the unique index on

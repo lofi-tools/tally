@@ -3,8 +3,10 @@
 //! The client ([`CompaniesHouseClient`]) is a minimal client for the
 //! Companies House API (<https://developer.company-information.service.gov.uk/>),
 //! authenticated with HTTP basic access authentication (username = API key,
-//! empty password), with a layered [`Config`], a disk cache for fetched
-//! profiles, and the company-resolution / next-accounting-period chain.
+//! empty password), with a layered [`Config`] and an optional disk cache for
+//! fetched profiles (enabled by `CT600_CACHE_DIR` or
+//! [`Config::with_cache_dir`]), and the company-resolution /
+//! next-accounting-period chain.
 //!
 //! On top of the client, this module adds the CT600-specific derivations:
 //! the company header boxes ([`CompanyFormValues`]) from a profile + tax
@@ -94,16 +96,17 @@ pub enum CompaniesHouseClientType {
 /// * `COMPANIES_HOUSE_API_KEY` / `COMPANIES_HOUSE_SANDBOX_API_KEY` — the API
 ///   key for the live / sandbox Companies House API (live preferred by
 ///   [`Config::from_env`]);
-/// * `CT600_CACHE_DIR` — the response-cache directory, defaulting to the
-///   repository's `.cache/api_responses`.
+/// * `CT600_CACHE_DIR` — the response-cache directory (no disk cache when
+///   unset).
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The company registration number (`COMPANY_NUMBER`).
     company_number: Option<String>,
     /// The API key and its base URL (live or sandbox), if configured.
     api: Option<ApiConfig>,
-    /// The response-cache directory.
-    cache_dir: PathBuf,
+    /// The response-cache directory, when configured (`CT600_CACHE_DIR` or an
+    /// explicit [`Config::with_cache_dir`]); `None` disables the disk cache.
+    cache_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -171,9 +174,9 @@ impl Config {
         self
     }
 
-    /// Override the response-cache directory.
+    /// Override the response-cache directory, enabling the disk cache.
     pub fn with_cache_dir(mut self, cache_dir: impl Into<PathBuf>) -> Self {
-        self.cache_dir = cache_dir.into();
+        self.cache_dir = Some(cache_dir.into());
         self
     }
 
@@ -208,9 +211,9 @@ impl Config {
             .unwrap_or(API_BASE_URL)
     }
 
-    /// The response-cache directory.
-    pub fn cache_dir(&self) -> &Path {
-        &self.cache_dir
+    /// The response-cache directory, when configured.
+    pub fn cache_dir(&self) -> Option<&Path> {
+        self.cache_dir.as_deref()
     }
 
     /// Decide whether (and with which company number) to resolve from
@@ -233,7 +236,7 @@ impl Config {
 
 impl Default for Config {
     /// The base configuration: no company number, no API key, and the
-    /// default response-cache directory.
+    /// response cache from `CT600_CACHE_DIR` (none when unset).
     fn default() -> Self {
         Self::base_from_env()
     }
@@ -245,11 +248,11 @@ impl Default for Config {
 /// authentication (username = API key, empty password).
 ///
 /// All configuration — the API key / base URL, the company number used to
-/// resolve absent company details, and the response-cache directory — lives in
-/// a resolved [`Config`].  Company profiles fetched through
+/// resolve absent company details, and the optional response-cache directory —
+/// lives in a resolved [`Config`].  Company profiles fetched through
 /// [`Self::get_company_profile_cached`] are cached on disk
-/// (`companies-house-{number}.json`), so repeat lookups for the same company
-/// never touch the network.
+/// (`companies-house-{number}.json`) when a cache directory is configured, so
+/// repeat lookups for the same company never touch the network.
 #[derive(Debug, Clone)]
 pub struct CompaniesHouseClient {
     config: Config,
@@ -313,30 +316,35 @@ impl CompaniesHouseClient {
     /// its category, so previous *accounts* filings are the items with
     /// `category == "accounts"` (see [`FilingHistory::accounts`]).  Like the
     /// company profile, the response is cached on disk
-    /// (`companies-house-{number}-filing-history.json`).
+    /// (`companies-house-{number}-filing-history.json`) when a cache directory
+    /// is configured; without one it is always fetched from the API.
     pub async fn get_filing_history(&self, company_number: &str) -> ApiResult<FilingHistory> {
-        let cache_dir = self.config.cache_dir();
-        if let Some(history) = read_cached_filing_history(cache_dir, company_number) {
+        if let Some(cache_dir) = self.config.cache_dir()
+            && let Some(history) = read_cached_filing_history(cache_dir, company_number)
+        {
             return Ok(history);
         }
         let history: FilingHistory = self
             .get_json(&format!("/company/{company_number}/filing-history"))
             .await?;
-        write_cached_filing_history(cache_dir, company_number, &history);
+        if let Some(cache_dir) = self.config.cache_dir() {
+            write_cached_filing_history(cache_dir, company_number, &history);
+        }
         Ok(history)
     }
 
-    /// Fetch a company's **complete** filing history, following the
+    /// Fetch a company's **complete** filing history afresh, following the
     /// pagination until every filing is collected.
     ///
     /// `GET /company/{companyNumber}/filing-history?items_per_page=100&page=N`
     ///
-    /// Unlike [`Self::get_filing_history`], this merges every page into one
-    /// [`FilingHistory`] (newest first) and skips the disk cache — callers
-    /// that persist the result (e.g. the tally-api filings sync) own their
-    /// own storage. Stops early at an empty page, and caps at a sane number
-    /// of pages so a malformed response can't spin forever.
-    pub async fn get_filing_history_all(&self, company_number: &str) -> ApiResult<FilingHistory> {
+    /// Unlike [`Self::get_filing_history`], this always hits the API — the
+    /// disk cache is never consulted — and merges every page into one
+    /// [`FilingHistory`] (newest first).  Callers that persist the result
+    /// (e.g. the tally-api filings sync) own their own storage.  Stops early
+    /// at an empty page, and caps at a sane number of pages so a malformed
+    /// response can't spin forever.
+    pub async fn refetch_filings(&self, company_number: &str) -> ApiResult<FilingHistory> {
         const ITEMS_PER_PAGE: usize = 100;
         const MAX_PAGES: usize = 20; // 2,000 filings is well beyond any real company
 
@@ -387,16 +395,20 @@ impl CompaniesHouseClient {
     /// the current directors — the officers whose role is a director role
     /// and who have not resigned — are exposed via [`OfficerList::directors`].
     /// Like the company profile and the filing history, the response is
-    /// cached on disk (`companies-house-{number}-officers.json`).
+    /// cached on disk (`companies-house-{number}-officers.json`) when a cache
+    /// directory is configured; without one it is always fetched from the API.
     pub async fn get_officers(&self, company_number: &str) -> ApiResult<OfficerList> {
-        let cache_dir = self.config.cache_dir();
-        if let Some(officers) = read_cached_officers(cache_dir, company_number) {
+        if let Some(cache_dir) = self.config.cache_dir()
+            && let Some(officers) = read_cached_officers(cache_dir, company_number)
+        {
             return Ok(officers);
         }
         let officers: OfficerList = self
             .get_json(&format!("/company/{company_number}/officers"))
             .await?;
-        write_cached_officers(cache_dir, company_number, &officers);
+        if let Some(cache_dir) = self.config.cache_dir() {
+            write_cached_officers(cache_dir, company_number, &officers);
+        }
         Ok(officers)
     }
 
@@ -496,23 +508,23 @@ impl CompaniesHouseClient {
             .map_err(|source| CompaniesHouseError::RequestFailed { source })
     }
 
-    /// Point this client's response cache at a specific directory, overriding
-    /// `CT600_CACHE_DIR` and the repo default (`.cache/api_responses`).
+    /// Point this client's response cache at a specific directory, enabling
+    /// the disk cache (overriding `CT600_CACHE_DIR`).
     pub fn with_cache_dir(mut self, cache_dir: impl Into<PathBuf>) -> Self {
         self.config = self.config.with_cache_dir(cache_dir);
         self
     }
 
-    /// The directory cached company profiles are stored in: the per-client
-    /// override, else `CT600_CACHE_DIR`, else the repository's
-    /// `.cache/api_responses`.
-    pub fn cache_dir(&self) -> &Path {
+    /// The configured response-cache directory: the per-client override, else
+    /// `CT600_CACHE_DIR`; `None` when caching is disabled.
+    pub fn cache_dir(&self) -> Option<&Path> {
         self.config.cache_dir()
     }
 
     /// Fetch the company profile for the given company number, serving from
     /// the local response cache when available and falling back on the live
-    /// API otherwise (the response is cached for next time).
+    /// API otherwise (the response is cached for next time).  Without a
+    /// configured cache directory the profile is always fetched from the API.
     ///
     /// Cache reads are best-effort: a missing or corrupt cache entry falls
     /// back on the live API, and a failed cache write is non-fatal.
@@ -520,12 +532,15 @@ impl CompaniesHouseClient {
         &self,
         company_number: &str,
     ) -> ApiResult<CompanyProfile> {
-        let cache_dir = self.config.cache_dir();
-        if let Some(profile) = read_cached_profile(cache_dir, company_number) {
+        if let Some(cache_dir) = self.config.cache_dir()
+            && let Some(profile) = read_cached_profile(cache_dir, company_number)
+        {
             return Ok(profile);
         }
         let profile = self.get_company_profile(company_number).await?;
-        write_cached_profile(cache_dir, company_number, &profile);
+        if let Some(cache_dir) = self.config.cache_dir() {
+            write_cached_profile(cache_dir, company_number, &profile);
+        }
         Ok(profile)
     }
 
@@ -692,22 +707,10 @@ fn write_cache_file(cache_dir: &Path, file_name: &str, data: &[u8]) {
     }
 }
 
-/// The default cache directory: `CT600_CACHE_DIR` when set, else the
-/// repository's `.cache/api_responses` (the same location the offline test
-/// fixtures are served from), else a relative `.cache/api_responses`.
-fn cache_dir_from_env() -> PathBuf {
-    if let Ok(dir) = std::env::var("CT600_CACHE_DIR") {
-        return PathBuf::from(dir);
-    }
-    let repo_root = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|s| PathBuf::from(s.trim()));
-    repo_root
-        .map(|root| root.join(".cache/api_responses"))
-        .unwrap_or_else(|| PathBuf::from(".cache/api_responses"))
+/// The cache directory from `CT600_CACHE_DIR`, when set — `None` disables the
+/// disk cache (the client then always fetches from the API).
+fn cache_dir_from_env() -> Option<PathBuf> {
+    non_empty_env("CT600_CACHE_DIR").map(PathBuf::from)
 }
 
 /// A non-empty environment variable, if set.
@@ -1384,7 +1387,7 @@ pub mod test_utils {
         /// Build a client automatically from the environment with sensible
         /// defaults:
         ///
-        /// - `CT600_CACHE_DIR` (default `{repo}/.cache/api_responses`)
+        /// - a local cache directory (default `{repo}/.cache/api_responses`)
         /// - the optional live client is built from `COMPANIES_HOUSE_API_KEY`
         ///   (live API) or `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox), or `None`
         ///   when neither is set.

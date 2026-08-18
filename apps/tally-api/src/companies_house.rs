@@ -74,14 +74,15 @@ impl ChApi {
             .map_err(|e| map_ch_error(e, company_number, self.base_url.clone()))
     }
 
-    /// Fetch a company's complete filing history (all pages merged, newest
-    /// first). Unused cache — the filings sync persists its own copy.
-    pub async fn filing_history_all(
+    /// Fetch a company's complete filing history afresh (all pages merged,
+    /// newest first). Always refetches — never served from the cache; the
+    /// filings sync persists its own copy.
+    pub async fn refetch_filings(
         &self,
         company_number: &str,
     ) -> Result<ct600::companies_house::FilingHistory, AppError> {
         self.client
-            .get_filing_history_all(company_number)
+            .refetch_filings(company_number)
             .await
             .map_err(|e| map_ch_error(e, company_number, self.base_url.clone()))
     }

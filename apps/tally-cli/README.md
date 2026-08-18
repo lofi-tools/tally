@@ -183,9 +183,9 @@ resolution and HMRC submission (future features): `COMPANY_NUMBER`,
 and the `HMRC_CT_*` submission credentials.
 
 The Companies House client (`ct600::CompaniesHouseClient`) caches
-fetched company profiles under
-`.cache/api_responses/companies-house-<number>.json` (override with
-`CT600_CACHE_DIR`) and serves from the cache when available.  Company
+fetched company profiles (e.g. `companies-house-<number>.json`) in the
+`CT600_CACHE_DIR` directory when set and serves from the cache when
+available; without a cache directory every lookup hits the API.  Company
 resolution follows a strict order: a full company override wins, otherwise
 the cached response for the configured company number (`COMPANY_NUMBER`) is
 used, otherwise the profile is fetched from the live API.

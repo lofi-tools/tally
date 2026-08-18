@@ -65,7 +65,7 @@ Companies House resolution (client + config in `companies_house`) is opt-in:
   API fetch.
 - `COMPANIES_HOUSE_API_KEY` (live) or `COMPANIES_HOUSE_SANDBOX_API_KEY` (sandbox) —
   only needed for live lookups; without a key only cached profiles are served.
-- `CT600_CACHE_DIR` — profile cache directory (default `<repo>/.cache/api_responses`).
+- `CT600_CACHE_DIR` — optional profile cache directory; no disk cache when unset.
 
 ## Tests
 

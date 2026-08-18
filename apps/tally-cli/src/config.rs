@@ -1569,17 +1569,17 @@ mod live_tests {
     /// config) is enriched from the live profile and officers (name,
     /// registration date, next accounting period, and the descriptive
     /// profile: registered-office address, SIC codes, jurisdiction and the
-    /// current directors), and the resolved inputs are printed.  The profile
-    /// and officers land in the ambient cache directory (idempotent: a warm
-    /// cache simply skips the network); a second run with a placeholder key
-    /// proves the cache serves the response.
+    /// current directors), and the resolved inputs are printed.  A scratch
+    /// cache directory is configured for the run: the profile and officers
+    /// land there, and a second run with a placeholder key proves the cache
+    /// serves the response.
     #[tokio::test]
     #[cfg_attr(
         not(feature = "api_tests"),
         ignore = "requires a Companies House API key, COMPANY_NUMBER and COMPANY_UNIQUE_TAXPAYER_REF"
     )]
     async fn live_minimal_config_enriched_from_api_and_cached() {
-        let env = EnvVars::from_env();
+        let mut env = EnvVars::from_env();
         assert!(
             env.companies_house_api_key.is_some() || env.companies_house_sandbox_api_key.is_some(),
             "the api_tests feature needs COMPANIES_HOUSE_API_KEY (live) or \
@@ -1593,6 +1593,12 @@ mod live_tests {
             "the api_tests feature needs COMPANY_UNIQUE_TAXPAYER_REF (the Corporation \
                      Tax reference is never resolved from Companies House)",
         );
+
+        // A scratch cache directory for this run: the profile and officers
+        // are cached there, so the second run is served from it (and no
+        // ambient cache state leaks in).
+        let cache_dir = tempfile::tempdir().unwrap();
+        env.cache_dir = Some(cache_dir.path().to_path_buf());
 
         // The committed minimal config: no identity, no period, blank
         // profile — the identity and period come from the environment and
@@ -1676,7 +1682,7 @@ mod live_tests {
 
         // The profile and the officers are cached for the next run.
         let ch = env.ch_config();
-        let cache_dir = ch.cache_dir();
+        let cache_dir = ch.cache_dir().expect("the env configures a cache dir");
         let cache_file = cache_dir.join(format!("companies-house-{number}.json"));
         assert!(cache_file.exists(), "the fetched profile is cached on disk");
         let cached = std::fs::read_to_string(&cache_file).expect("read the cache file");
