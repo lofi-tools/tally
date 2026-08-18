@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use chrono::{Duration, Months, NaiveDate};
-use ixbrl::company::{AccountingPeriod, Company as LibCompany};
+use reports::company::{AccountingPeriod, Company as LibCompany};
 
 use crate::AppState;
 use crate::error::{AppError, FieldIssue};

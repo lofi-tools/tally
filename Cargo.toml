@@ -6,7 +6,7 @@ members = [
   # directory itself is excluded below, so its crates are listed explicitly)
   "libs/clients/companies-house",
   "libs/clients/hmrc-corp-tax",
-  # shared leaf crates (moved out of ixbrl so the client crates can be leaves)
+  # shared leaf crates (moved out of the reports crate so the clients can be leaves)
   "libs/core_model",
   "libs/ixbrl-ir",
   "apps/tally-api/tests-common",

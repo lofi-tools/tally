@@ -89,7 +89,7 @@ pub enum AppError {
 
     // -- parse / storage -----------------------------------------------------
     #[snafu(display("failed to parse the GnuCash ledger"))]
-    LedgerParse { source: ixbrl::GnucashError },
+    LedgerParse { source: reports::GnucashError },
     #[snafu(display("failed to store the uploaded file"))]
     Storage { source: std::io::Error },
 
@@ -419,7 +419,7 @@ mod tests {
             ),
             (
                 AppError::LedgerParse {
-                    source: ixbrl::GnucashError::Io {
+                    source: reports::GnucashError::Io {
                         source: std::io::Error::new(std::io::ErrorKind::InvalidData, "nope"),
                     },
                 },

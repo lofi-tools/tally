@@ -74,7 +74,7 @@ tokio-util = { workspace = true, features = ["rt"] }
 # CH iXBRL documents arrive zipped (src/filings.rs)
 zip.workspace = true
 # internal
-ixbrl = { path = "../../libs/ixbrl" }
+reports = { path = "../../libs/reports" }
 # default-features = false: ct600's only features are `cached_live_tests` /
 # `always_live_tests` (live Companies House integration tests).  Kept off so
 # `cargo test --workspace --no-default-features` runs fully offline.

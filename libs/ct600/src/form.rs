@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use chrono::NaiveDate;
 use companies_house::{CompanyProfile, CompanyType};
 use serde::Serialize;
-use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
+use reports::reports::uk_frs105_corp_tax::Frs105CorpTax;
 
 /// Every CT600 box as `(box number, description)`.
 ///
@@ -722,7 +722,7 @@ mod tests {
     #[test]
     fn test_to_map_associated_companies_without_straddle() {
         let mut tax = crate::test_utils::TestData::sample_tax();
-        tax.accounts.period = Some(ixbrl::company::AccountingPeriod {
+        tax.accounts.period = Some(reports::company::AccountingPeriod {
             start: NaiveDate::from_ymd_opt(2026, 4, 1).unwrap(),
             end: NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
         });

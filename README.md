@@ -119,7 +119,7 @@ Tax reference is never resolved from Companies House.)
 | Crate | Stage | Purpose |
 |-------|-------|---------|
 | [`apps/tally-cli`](apps/tally-cli/README.md) | 3–4 | CLI  for the libraries: `tally ct600` produces the CT600 message from a config file + GnuCash book (no submission yet) |
-| `libs/ixbrl` | 1, 3 | GnuCash parser + FRS-105 (micro-entity) iXBRL reports |
+| `libs/reports` | 1, 3 | GnuCash parser + FRS-105 (micro-entity) iXBRL reports |
 | `libs/ct600` | 4 | HMRC GovTalk XML message builder/parser for CT600 submission + Companies House client / company resolution (`companies_house`) |
 
 ### JavaScript workspace (web app + design system)

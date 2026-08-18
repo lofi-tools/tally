@@ -12,7 +12,7 @@
 
 use axum::http::{Method, StatusCode};
 use tally_tests_common::{assert_error, json_body, request, unique_email, TestApp};
-use ixbrl::reports::uk_frs105_accounts::PreviousYearFigures;
+use reports::reports::uk_frs105_accounts::PreviousYearFigures;
 use serde_json::json;
 use tally_api::models::{BalanceSheet, ChFormType, Filing, Job};
 
@@ -44,7 +44,7 @@ async fn seed_company(app: &TestApp, email: &str) -> (String, String) {
 /// the ixbrl lib so the assertion is independent of the backend's internals.
 fn schedule_ends_desc(reg: &str) -> Vec<String> {
     let today = chrono::Utc::now().date_naive();
-    let mut lib = ixbrl::company::Company::new("", "", String::new());
+    let mut lib = reports::company::Company::new("", "", String::new());
     lib.registration_date = chrono::NaiveDate::parse_from_str(reg, "%Y-%m-%d").unwrap();
     let mut ends: Vec<String> = Vec::new();
     let mut n = 0u32;

@@ -22,7 +22,7 @@ nothing:
 The user wants the financial-period **structure** visible immediately — the
 full list of financial years the company has had since incorporation, deduced
 from the registration-date ARD schedule (the same schedule `period.rs` /
-`ixbrl::company::Company::accounting_period_n` uses) — so the periods are
+`reports::company::Company::accounting_period_n` uses) — so the periods are
 available for calculation/report work even before any fetch. Each unconfirmed
 period is marked **provisional** and the UI signals that it still needs
 fetching.
@@ -39,7 +39,7 @@ fetching.
 
 ## 3. Current state (verified facts)
 
-- `ixbrl::company::Company::accounting_period_n(n)` walks the full schedule from
+- `reports::company::Company::accounting_period_n(n)` walks the full schedule from
   the registration date (`period.rs`, `filings.rs` both use it). Pure — no
   fetch needed.
 - `filings.rs::derive_periods(company, balance_sheets, filings)` today:
@@ -284,7 +284,7 @@ fixture to `flow.mjs` if it should exercise the provisional render).
 
 Decision (interview): the backend derives the periods **for now** — it is the
 single source of truth with one bug surface, and the schedule computation needs
-no fetch. Note for later: the rust library (`libs/ixbrl` company module) is
+no fetch. Note for later: the rust library (`libs/reports` company module) is
 planned to be compiled to **wasm** and run the period derivation in the
 frontend itself, removing the round-trip for this pure computation. The
 derivation must therefore stay a **pure function of (registration date, filed

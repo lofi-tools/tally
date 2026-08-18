@@ -1,7 +1,7 @@
 # tally-api
 
 The Tally web API: a Rust (axum) service exposing the compute capabilities of
-`libs/ixbrl` (GnuCash parsing, FRS 105 accounts / corporation-tax iXBRL) and
+`libs/reports` (GnuCash parsing, FRS 105 accounts / corporation-tax iXBRL) and
 `libs/ct600` (CT600 GovTalk, Companies House search / enrichment) over HTTP,
 with a stateful Postgres store (toasty).  Full contract: `docs/spec/api-backend-spec.md`.
 

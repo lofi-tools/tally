@@ -34,8 +34,8 @@ impl TestData {
     /// company number `9876543`, period 2025), including the numeric facts
     /// (profits, tax rates, allowances, R&D) so the derived form values are
     /// fully populated.
-    pub fn sample_tax() -> ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax {
-        let mut facts = ixbrl::ixbrl_fmt::ParsedIxBrlFacts::default();
+    pub fn sample_tax() -> reports::reports::uk_frs105_corp_tax::Frs105CorpTax {
+        let mut facts = reports::ixbrl_fmt::ParsedIxBrlFacts::default();
         facts
             .non_numeric
             .insert("ct-comp:CompanyName".to_string(), "Acme Ltd".to_string());
@@ -102,13 +102,13 @@ impl TestData {
         // profile served for it (by `tax.company_number()`) can never
         // disagree with the tax computation.
         let sample = companies_house::test_utils::TestData::sample_company();
-        let mut company = ixbrl::company::Company::new(
+        let mut company = reports::company::Company::new(
             &sample.company_name,
             "1234567890",
             &sample.company_number,
         );
         company.registration_date = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
-        ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax::from_parsed_facts(
+        reports::reports::uk_frs105_corp_tax::Frs105CorpTax::from_parsed_facts(
             &facts,
             &company,
             &test_utils::Fixtures::sample_accounts_meta(),

@@ -21,8 +21,8 @@ use axum::http::StatusCode;
 use axum::Json;
 use chrono::{Duration, Months, NaiveDate};
 use ct600::companies_house::{FilingHistoryItem, TypedFiling};
-use ixbrl::company::{AccountingPeriod, AccountsMeta, Company as LibCompany};
-use ixbrl::reports::uk_frs105_accounts::{Frs105Accounts, PreviousYearFigures};
+use reports::company::{AccountingPeriod, AccountsMeta, Company as LibCompany};
+use reports::reports::uk_frs105_accounts::{Frs105Accounts, PreviousYearFigures};
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 

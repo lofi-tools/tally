@@ -43,7 +43,7 @@ use ct600::companies_house::{
     CompanyProfile as ChProfile, OfficerList, next_accounting_period_from,
 };
 use ct600::{CompaniesHouseClient, CompaniesHouseClientType};
-use ixbrl::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
+use reports::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use serde::{Deserialize, Serialize};
 
 /// The repository root directory, for tests that read committed fixtures

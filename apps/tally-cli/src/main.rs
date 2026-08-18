@@ -30,9 +30,9 @@ use anyhow::{Context, Result, bail};
 use chrono::NaiveDate;
 use config::{CliArgs, ConfigBuilder};
 use ct600::{CompaniesHouseClientType, Ct600Return};
-use ixbrl::reports::uk_frs105_accounts::Frs105Accounts;
-use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
-use ixbrl::GnucashBook;
+use reports::reports::uk_frs105_accounts::Frs105Accounts;
+use reports::reports::uk_frs105_corp_tax::Frs105CorpTax;
+use reports::GnucashBook;
 
 /// The `tally` subcommands.
 enum Command {
@@ -161,8 +161,8 @@ async fn run_ct600(args: CliArgs) -> Result<()> {
     println!("  registration date: {registration_date}");
     let period = resolved.accounts.period();
     println!("  return period: {} to {}", period.start, period.end);
-    let fy1_calc = ixbrl::calc_corp_tax::for_fy(resolved.accounts.fy1_year);
-    let fy2_calc = ixbrl::calc_corp_tax::for_fy(resolved.accounts.fy2_year);
+    let fy1_calc = reports::calc_corp_tax::for_fy(resolved.accounts.fy1_year);
+    let fy2_calc = reports::calc_corp_tax::for_fy(resolved.accounts.fy2_year);
     println!(
         "  financial years: FY{} ({}), FY{} ({})",
         resolved.accounts.fy1_year,

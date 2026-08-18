@@ -25,7 +25,7 @@ tally ct600 --config-path <config> --book <book> --out <dir>
 It produces the return; it does **not** submit it (see "What it doesn't
 handle" below).
 
-### The `ixbrl` crate (`libs/ixbrl`)
+### The `reports` crate (`libs/reports`)
 
 - **GnuCash parsing** — loads `.gnucash` books (XML or SQLite) with
   `GnucashBook::try_from_gnucash_file()`, builds the account tree, computes

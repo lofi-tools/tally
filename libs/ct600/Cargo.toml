@@ -26,7 +26,7 @@ serde = { workspace = true, features = ["derive"] }
 chrono = { workspace = true, features = ["serde"] }
 base64.workspace = true
 # internal
-ixbrl = { path = "../ixbrl" }
+reports = { path = "../reports" }
 companies-house = { path = "../clients/companies-house" }
 hmrc-corp-tax = { path = "../clients/hmrc-corp-tax" }
 
@@ -34,7 +34,7 @@ hmrc-corp-tax = { path = "../clients/hmrc-corp-tax" }
 tempfile = "3.27.0"
 # Building ad-hoc ledgers (e.g. the loss-only book behind the ctm03955-marginal-relief
 # loss-company message) needs the `Num` value type; already in the lock via
-# the ixbrl crate's rucash dependency.
+# the reports crate's rucash dependency.
 rucash.workspace = true
 # Shared repo-root resolution + fixtures for the test suite.
 test_utils = { path = "../test_utils" }

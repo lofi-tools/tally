@@ -231,5 +231,5 @@ pipeline: the config-file / environment / flag merge, the company-identity
 resolution and the return-period fallbacks.  They run fully offline — the
 Companies House lookups are served from scratch cache fixtures.  The pipeline
 it drives is additionally covered by the library suites (`cargo test -p
-ixbrl`, `cargo test -p ct600`), which also run offline with zero
+reports`, `cargo test -p ct600`), which also run offline with zero
 configuration.

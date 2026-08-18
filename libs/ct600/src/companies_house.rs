@@ -21,7 +21,7 @@ pub use companies_house::{
 };
 
 use crate::form::CompanyFormValues;
-use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
+use reports::reports::uk_frs105_corp_tax::Frs105CorpTax;
 
 /// CT600 company-header enrichment over the Companies House client.
 ///

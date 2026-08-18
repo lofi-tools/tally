@@ -6,14 +6,14 @@ CT600 corporation-tax return builder, GovTalk messages, the HMRC Corporation Tax
 
 | Input | Produces |
 |---|---|
-| `Frs105CorpTax` + `Frs105Accounts` (from the `ixbrl` crate) | `Ct600Return::from_inputs()` → `Ct600Return::to_xml()` = the CT600 GovTalk message (round-trips via `from_xml()`) |
+| `Frs105CorpTax` + `Frs105Accounts` (from the `reports` crate) | `Ct600Return::from_inputs()` → `Ct600Return::to_xml()` = the CT600 GovTalk message (round-trips via `from_xml()`) |
 | `Company` (name/number may be empty) | `companies_house::CompaniesHouseClient::resolve_company()` / `enrich_company()` → `Company` with the absent name/number filled (registration date too when no details at all; override → cache → live API) |
 | `Frs105CorpTax` | `companies_house::CompaniesHouseFormValues::company_form_values()` → `CompanyFormValues` (CT600 company header boxes) |
 | `GovTalkParams` | `govtalk::GovTalkSubmissionRequest` / `…Acknowledgement` / `…Poll` / `…Error` / `…Response` / `…DeleteRequest` / `…DeleteResponse`; `decode_govtalk_message()` parses responses |
 | `CompanyProfile` | cached fetch via `companies_house::CompaniesHouseClient::get_company_profile_cached()` → `companies-house-{number}.json` |
 | Filing id (from a `FilingHistoryItem`'s `links.self`) | `companies_house::CompaniesHouseClient::download_filing(company_number, filing_id)` → the raw document bytes, cache-first in the `filings_downloads/` subdirectory as `{number}-{period_end}-{filing_id}` |
 | `FilingHistoryItem` / `FilingHistory` | typed parse via `companies_house::TypedFiling::try_from(&item)` / `FilingHistory::typed()` → the kind-specific structs: `AccountsFiling` (period), `ConfirmationStatementFiling` (`made_on`), `IncorporationFiling`, `OtherFiling`; the code classifier `FormType::from_code` is the single source of truth for the code table (ARD changes and officer changes return `Unimplemented` for now) |
-| Filed accounts document (the iXBRL a `download_filing` returns) | `companies_house::parse_filed_accounts(html)` → `FiledBalanceSheet` (period + `PreviousYearFigures`): a generic iXBRL pass into the shared fact IR (`ixbrl::ixbrl_fmt`), then an accounts-specific pass resolving the FRC taxonomy facts (both the `core:` and `uk-core:` renderings) in the current-period context |
+| Filed accounts document (the iXBRL a `download_filing` returns) | `companies_house::parse_filed_accounts(html)` → `FiledBalanceSheet` (period + `PreviousYearFigures`): a generic iXBRL pass into the shared fact IR (`reports::ixbrl_fmt`), then an accounts-specific pass resolving the FRC taxonomy facts (both the `core:` and `uk-core:` renderings) in the current-period context |
 | `Ct600Return` + `HmrcCorpTaxConfig` | `clients::HmrcCorpTaxClient::submit_and_poll()` → the full Document Submission Protocol lifecycle: submit → acknowledge → poll → response → delete |
 
 ## Filing with HMRC
@@ -87,7 +87,7 @@ tests are then reported as ignored):
   `Acme Ltd`, created `2020-01-01` (the company paired with
   `TestData::sample_tax()`, period 2025). A cache entry shadows the fixture;
   the live API is only hit when an API key is set.
-- The return is built from the ixbrl basic-1 gnucash fixture: `Example Biz
+- The return is built from the reports basic-1 gnucash fixture: `Example Biz
   Ltd.`, UTR `8596148860`, period `2020-01-01 → 2020-12-31`; envelope/contact
   values as above.
 - The element-structure check compares against `.cache/py-ct600/ct600.xml`

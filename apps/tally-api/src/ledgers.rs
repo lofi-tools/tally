@@ -13,7 +13,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::Json;
 use chrono::NaiveDateTime;
-use ixbrl::{AccountType, GnucashBook};
+use reports::{AccountType, GnucashBook};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

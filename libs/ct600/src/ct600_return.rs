@@ -19,9 +19,9 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{Local, NaiveDate, NaiveDateTime};
 use hmrc_corp_tax::{SubmissionEnvelope, SubmissionMessage};
-use ixbrl::ixbrl_fmt::{el, elt, elt_text, XmlNode};
-use ixbrl::reports::uk_frs105_accounts::Frs105Accounts;
-use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
+use reports::ixbrl_fmt::{el, elt, elt_text, XmlNode};
+use reports::reports::uk_frs105_accounts::Frs105Accounts;
+use reports::reports::uk_frs105_corp_tax::Frs105CorpTax;
 
 use crate::form::Ct600FormValues;
 use crate::{CT_NS, ENV_NS};
@@ -971,7 +971,7 @@ fn parse_yesno(raw: &str, path: &str) -> Result<bool, String> {
 mod tests {
     use super::*;
     use crate::test_utils::{REPO, cache_dir, cache_path};
-    use ixbrl::company::CompanyProfile;
+    use reports::company::CompanyProfile;
     use std::collections::HashMap;
 
     /// An `example_data` path resolved from the repository root (the
@@ -980,9 +980,9 @@ mod tests {
         REPO.join(rel).to_string_lossy().into_owned()
     }
 
-    fn basic_1_company() -> ixbrl::company::Company {
+    fn basic_1_company() -> reports::company::Company {
         let mut company =
-            ixbrl::company::Company::new("Example Biz Ltd.", "8596148860", "12345678");
+            reports::company::Company::new("Example Biz Ltd.", "8596148860", "12345678");
         // Anchored on the return-period start, matching the historical
         // constructor default used by this fixture.
         company.registration_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
@@ -993,9 +993,9 @@ mod tests {
     /// period, the default financial-year tax parameters and the report
     /// metadata (title, dates, employee counts; the ct600 message only uses
     /// these for the attached accounts iXBRL rendering).
-    fn basic_1_accounts_meta() -> ixbrl::company::AccountsMeta {
-        ixbrl::company::AccountsMeta {
-            period: Some(ixbrl::company::AccountingPeriod {
+    fn basic_1_accounts_meta() -> reports::company::AccountsMeta {
+        reports::company::AccountsMeta {
+            period: Some(reports::company::AccountingPeriod {
                 start: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
                 end: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
             }),
@@ -1004,13 +1004,13 @@ mod tests {
             incorporation_date: NaiveDate::from_ymd_opt(2017, 4, 5).unwrap(),
             signed_by: "B Smith".into(),
             average_employees: HashMap::from([("2020".to_string(), 2), ("2019".to_string(), 1)]),
-            ..ixbrl::company::AccountsMeta::default()
+            ..reports::company::AccountsMeta::default()
         }
     }
 
     async fn basic_1_corp_tax() -> Frs105CorpTax {
         let company = basic_1_company();
-        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
+        let gnucash = reports::GnucashBook::try_from_gnucash_file(&gnucash(
             "example_data/basic-1/input.gnucash",
         ))
         .await
@@ -1039,7 +1039,7 @@ mod tests {
 
     async fn basic_1_accounts() -> Frs105Accounts {
         let company = basic_1_company();
-        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
+        let gnucash = reports::GnucashBook::try_from_gnucash_file(&gnucash(
             "example_data/basic-1/input.gnucash",
         ))
         .await
@@ -1091,62 +1091,62 @@ mod tests {
     /// A loss-making book: spends `loss` on sundries with no income — the
     /// mirror of `sales_only_book` in the ixbrl tests — used to build the
     /// previous period's computation with a trading loss to carry forward.
-    fn loss_only_book(loss: i64, date: chrono::NaiveDate) -> ixbrl::GnucashBook {
+    fn loss_only_book(loss: i64, date: chrono::NaiveDate) -> reports::GnucashBook {
         let raw_accounts = vec![
-            ixbrl::RawAccount {
+            reports::RawAccount {
                 guid: "root".into(),
                 name: "Root Account".into(),
                 r#type: "ROOT".into(),
                 parent_guid: String::new(),
             },
-            ixbrl::RawAccount {
+            reports::RawAccount {
                 guid: "expenses".into(),
                 name: "Expenses".into(),
                 r#type: "EXPENSE".into(),
                 parent_guid: "root".into(),
             },
-            ixbrl::RawAccount {
+            reports::RawAccount {
                 guid: "vat-purchases".into(),
                 name: "VAT Purchases".into(),
                 r#type: "EXPENSE".into(),
                 parent_guid: "expenses".into(),
             },
-            ixbrl::RawAccount {
+            reports::RawAccount {
                 guid: "sundries".into(),
                 name: "Sundries".into(),
                 r#type: "EXPENSE".into(),
                 parent_guid: "vat-purchases".into(),
             },
-            ixbrl::RawAccount {
+            reports::RawAccount {
                 guid: "bank".into(),
                 name: "Bank".into(),
                 r#type: "BANK".into(),
                 parent_guid: "root".into(),
             },
         ];
-        let raw_txns = vec![ixbrl::RawTransaction {
+        let raw_txns = vec![reports::RawTransaction {
             guid: "txn-loss".into(),
             post_datetime: date.and_hms_opt(12, 0, 0).unwrap(),
             description: String::new(),
         }];
         let raw_splits = vec![
-            ixbrl::RawSplit {
+            reports::RawSplit {
                 tx_guid: "txn-loss".into(),
                 account_guid: "sundries".into(),
                 value: rucash::Num::from(-loss),
             },
-            ixbrl::RawSplit {
+            reports::RawSplit {
                 tx_guid: "txn-loss".into(),
                 account_guid: "bank".into(),
                 value: rucash::Num::from(loss),
             },
         ];
-        ixbrl::GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
+        reports::GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
     }
 
-    fn ctm03955_company() -> ixbrl::company::Company {
+    fn ctm03955_company() -> reports::company::Company {
         let mut company =
-            ixbrl::company::Company::new("Example Biz Ltd.", "8596148860", "12345678");
+            reports::company::Company::new("Example Biz Ltd.", "8596148860", "12345678");
         // The registration date is not in the config (resolved from
         // Companies House in the CLI); use the accounts' incorporation date,
         // as the ixbrl crate's `load_ctm03955()` does.
@@ -1159,9 +1159,9 @@ mod tests {
     /// associated companies (the HMRC CTM03955 group), and the report
     /// metadata (the ct600 message only uses these for the attached accounts
     /// iXBRL rendering).
-    fn ctm03955_accounts_meta() -> ixbrl::company::AccountsMeta {
-        ixbrl::company::AccountsMeta {
-            period: Some(ixbrl::company::AccountingPeriod {
+    fn ctm03955_accounts_meta() -> reports::company::AccountsMeta {
+        reports::company::AccountsMeta {
+            period: Some(reports::company::AccountingPeriod {
                 start: NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
                 end: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
             }),
@@ -1173,7 +1173,7 @@ mod tests {
             incorporation_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             signed_by: "B Smith".into(),
             average_employees: HashMap::from([("2023".to_string(), 2), ("2022".to_string(), 1)]),
-            ..ixbrl::company::AccountsMeta::default()
+            ..reports::company::AccountsMeta::default()
         }
     }
 
@@ -1182,14 +1182,14 @@ mod tests {
     /// which the example carries forward into 2023.
     fn ctm03955_prev_loss() -> Frs105CorpTax {
         let company = ctm03955_company();
-        let prev_accounts = ixbrl::company::AccountsMeta {
-            period: Some(ixbrl::company::AccountingPeriod {
+        let prev_accounts = reports::company::AccountsMeta {
+            period: Some(reports::company::AccountingPeriod {
                 start: NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(),
                 end: NaiveDate::from_ymd_opt(2022, 12, 31).unwrap(),
             }),
             fy1_year: 2021,
             fy2_year: 2022,
-            ..ixbrl::company::AccountsMeta::default()
+            ..reports::company::AccountsMeta::default()
         };
         let prev = Frs105CorpTax::builder(
             &loss_only_book(50_000, NaiveDate::from_ymd_opt(2022, 6, 15).unwrap()),
@@ -1239,7 +1239,7 @@ mod tests {
 
     async fn ctm03955_accounts() -> Frs105Accounts {
         let company = ctm03955_company();
-        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
+        let gnucash = reports::GnucashBook::try_from_gnucash_file(&gnucash(
             "example_data/ctm03955-marginal-relief/input.gnucash",
         ))
         .await
@@ -1476,7 +1476,7 @@ mod tests {
     async fn ct600_ctm03955_loss_company_message_generates() {
         let company = ctm03955_company();
         let accounts = ctm03955_accounts_meta();
-        let gnucash = ixbrl::GnucashBook::try_from_gnucash_file(&gnucash(
+        let gnucash = reports::GnucashBook::try_from_gnucash_file(&gnucash(
             "example_data/ctm03955-marginal-relief/input.gnucash",
         ))
         .await

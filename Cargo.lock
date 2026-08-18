@@ -915,7 +915,7 @@ dependencies = [
  "chrono",
  "companies-house",
  "hmrc-corp-tax",
- "ixbrl",
+ "reports",
  "rucash",
  "serde",
  "tempfile",
@@ -2125,23 +2125,6 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
-
-[[package]]
-name = "ixbrl"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "core_model",
- "flate2",
- "ixbrl-ir",
- "quick-xml",
- "rucash",
- "serde",
- "serde_json_lenient",
- "snafu",
- "test_utils",
- "tokio",
-]
 
 [[package]]
 name = "ixbrl-ir"
@@ -3481,6 +3464,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "reports"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "core_model",
+ "flate2",
+ "ixbrl-ir",
+ "quick-xml",
+ "rucash",
+ "serde",
+ "serde_json_lenient",
+ "snafu",
+ "test_utils",
+ "tokio",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4415,13 +4415,13 @@ dependencies = [
  "hex",
  "http-body",
  "include_dir",
- "ixbrl",
  "logforth",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "rand 0.10.2",
  "rand_core 0.6.4",
+ "reports",
  "reqwest",
  "rust_decimal",
  "serde",
@@ -4452,8 +4452,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "ct600",
- "ixbrl",
  "log",
+ "reports",
  "serde",
  "serde_json",
  "serde_json_lenient",

@@ -37,7 +37,7 @@ log = "0.4"
 # would re-activate ct600's default features during workspace feature
 # unification.
 ct600 = { path = "../../libs/ct600", default-features = false }
-ixbrl = { path = "../../libs/ixbrl" }
+reports = { path = "../../libs/reports" }
 
 [dev-dependencies]
 tempfile = "3.27.0"

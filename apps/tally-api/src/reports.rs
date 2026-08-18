@@ -20,10 +20,10 @@ use axum::http::header;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Json;
 use chrono::NaiveDate;
-use ixbrl::company::{AccountingPeriod, AccountsMeta, Company as LibCompany, CompanyProfile};
-use ixbrl::reports::uk_frs105_accounts::Frs105Accounts;
-use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
-use ixbrl::{GnucashBook, RawAccount, RawSplit, RawTransaction};
+use reports::company::{AccountingPeriod, AccountsMeta, Company as LibCompany, CompanyProfile};
+use reports::reports::uk_frs105_accounts::Frs105Accounts;
+use reports::reports::uk_frs105_corp_tax::Frs105CorpTax;
+use reports::{GnucashBook, RawAccount, RawSplit, RawTransaction};
 use serde::Deserialize;
 use serde_json::json;
 

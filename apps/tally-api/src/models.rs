@@ -311,7 +311,7 @@ pub struct BalanceSheet {
     /// The `filings` row this balance sheet was parsed from.
     pub source_filing_id: Option<uuid::Uuid>,
     #[column(type = json)]
-    pub figures: toasty::Json<ixbrl::reports::uk_frs105_accounts::PreviousYearFigures>,
+    pub figures: toasty::Json<reports::reports::uk_frs105_accounts::PreviousYearFigures>,
     /// The downloaded document, as received (zipped iXBRL, HTML, or PDF).
     pub raw_document: Option<Vec<u8>>,
     /// The parsed iXBRL document (the `.html` extracted from the download).

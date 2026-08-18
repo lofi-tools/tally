@@ -340,7 +340,7 @@ let _ = worker.await; // already draining via the token
   `balance_sheets` row (opening anchor) + the effect of the company's ledger
   transactions with `post_datetime > balance_sheet.period_end`, mapped to
   balance-sheet lines with the existing account-type logic
-  (`is_balance_sheet_type` in `ledgers.rs` / `account_path` in the ixbrl lib).
+  (`is_balance_sheet_type` in `ledgers.rs` / `account_path` in the reports lib).
 - **Report integration**: when a `balance_sheets` row exists, the accounts (and
   CT600) handlers apply its figures to the comparative/previous-year column via
   `Frs105Accounts::with_previous_year(...)` — CH wins when present, ledger-derived
@@ -375,7 +375,7 @@ explicitly so a future full-accounts parse round-trips honestly). The `BalanceSh
 model maps the column as `toasty::Json<PreviousYearFigures>`.
 
 The report's comparative column is then injected with a consuming builder on
-`Frs105Accounts` (see Changes — `libs/ixbrl`); `new()` is unchanged, so the CLI and
+`Frs105Accounts` (see Changes — `libs/reports`); `new()` is unchanged, so the CLI and
 the ct600 test helpers compile untouched and only the tally-api handlers opt in.
 
 ### 7. Tests
@@ -385,7 +385,7 @@ the ct600 test helpers compile untouched and only the tally-api handlers opt in.
   pattern).
 - **filings persistence**: upsert idempotency on refetch; balance-sheet upsert
   keyed on `(company_id, period_end)`.
-- **Document parse**: `from_ixbrl` on a committed fixture iXBRL document (libs/ixbrl
+- **Document parse**: `from_ixbrl` on a committed fixture iXBRL document (libs/reports
   already round-trips; add a fixture if none is committed).
 - **pg integration**: `POST /companies/{id}/filings/refresh` without a CH key →
   `companies_house_key_missing`; with a stubbed CH source → filings + balance sheet
@@ -404,9 +404,9 @@ the ct600 test helpers compile untouched and only the tally-api handlers opt in.
   downloading step.
 - Keep the existing disk-cache behaviour (`CT600_CACHE_DIR`).
 
-## Changes — `libs/ixbrl`
+## Changes — `libs/reports`
 
-- New `PreviousYearFigures` struct (in `libs/ixbrl/src/reports/uk_frs105_accounts.rs`)
+- New `PreviousYearFigures` struct (in `libs/reports/src/reports/uk_frs105_accounts.rs`)
   mirroring the twelve `Frs105Accounts` balance-sheet fields as `f64` (single
   period), deriving `Debug, Clone, Default, PartialEq, Serialize, Deserialize`:
 

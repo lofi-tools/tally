@@ -2,7 +2,7 @@
 
 Status: **spec** (no code yet)
 Scope: new Rust API service in `apps/tally-api`, exposing the useful methods of
-`libs/ixbrl` and `libs/ct600` over HTTP, with a stateful Postgres store (toasty).
+`libs/reports` and `libs/ct600` over HTTP, with a stateful Postgres store (toasty).
 
 This document records the decisions gathered from the interview. It is the
 contract for implementation.
@@ -12,8 +12,8 @@ contract for implementation.
 ## 1. Goals
 
 - A stateful HTTP API in Rust (axum) that exposes the compute capabilities of
-  `libs/ixbrl` and `libs/ct600`:
-  - **ixbrl**: GnuCash parsing, ledger views, FRS 105 accounts (balance sheet)
+  `libs/reports` and `libs/ct600`:
+  - **reports**: GnuCash parsing, ledger views, FRS 105 accounts (balance sheet)
     iXBRL, FRS 105 corporation-tax computations + iXBRL.
   - **ct600**: CT600 GovTalk message generation, Companies House search /
     lookup / enrichment.
@@ -54,7 +54,7 @@ contract for implementation.
 
 Workspace deps already present and reused: `serde`, `serde_json`,
 `serde_json_lenient`, `chrono` (serde), `anyhow`, `snafu`,
-`uuid`, `futures`, `rucash`, `ixbrl` (path), `ct600` (path, `default-features
+`uuid`, `futures`, `rucash`, `reports` (path), `ct600` (path, `default-features
 = false` like tally-cli).
 
 New deps (in `apps/tally-api/Cargo.toml`, workspace-shared where sensible):
@@ -297,7 +297,7 @@ for AppError` is the single place where status/code mapping lives.
 
 Lib-error mapping (all in `error.rs`):
 
-- `ixbrl::GnucashError::{Io, Rucash}` → `LedgerParse` — a file that
+- `reports::GnucashError::{Io, Rucash}` → `LedgerParse` — a file that
   streamed in but is not a valid book is a 422 (client's input), not a 500.
 - `ct600::CompaniesHouseError::{RequestFailed, HttpStatus, DecodeFailed}` →
   `CompaniesHouseUpstream`, except `HttpStatus { status: 404 }` →
