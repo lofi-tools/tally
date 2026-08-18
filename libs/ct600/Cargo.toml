@@ -5,12 +5,17 @@ edition = "2024"
 
 [features]
 # Live Companies House API integration tests (in `src/companies_house.rs`,
-# the `live_tests` module).  Enabled by default so `cargo test` exercises the
-# real (or sandbox) API (needs a key + `COMPANY_NUMBER`); disable with
+# the `live_tests` module).  `cached_live_tests` (the default) runs them
+# against the repository's `.cache`: the first, cold run fetches from the
+# real (or sandbox) API and warms it, repeat runs are served from disk and
+# never touch the API.  Enabling `always_live_tests` instead uses a scratch
+# tempdir cache so every run really hits the network (e.g. to refresh the
+# cache or re-validate against the API).  Disable both with
 # `cargo test -p ct600 --no-default-features` to run fully offline — the
 # live tests are then reported as ignored.
-default = ["api_tests"]
-api_tests = []
+default = ["cached_live_tests"]
+cached_live_tests = []
+always_live_tests = []
 
 [dependencies]
 # async, web

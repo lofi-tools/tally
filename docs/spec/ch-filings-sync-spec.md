@@ -630,7 +630,7 @@ shows:
   persistence with a stubbed CH source); existing 47 tests stay green.
 - `cargo check -p tally-api --no-default-features` (offline build).
 - `cargo test -p ct600` for the new pagination + document-fetch paths (offline
-  unless `api_tests`).
+  unless `cached_live_tests` / `always_live_tests`).
 - `pnpm --filter @tally/web typecheck` after the Filings view wiring.
 - Manual: add a company with the key set → job runs → filings + balance sheet
   appear; refresh re-runs; kill the API mid-job → restart re-claims and finishes.

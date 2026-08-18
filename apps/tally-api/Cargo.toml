@@ -7,7 +7,7 @@ edition = "2024"
 # `pg-tests` feature, on by default.  First-clone / DB-less runs use
 # `cargo test -p tally-api --no-default-features` (the pg-gated tests are
 # then reported as ignored), matching the workspace's offline convention
-# (tally-cli's `api_tests`, ct600's `api_tests`).
+# (tally-cli's `api_tests`, ct600's `cached_live_tests` / `always_live_tests`).
 [features]
 default = ["pg-tests"]
 pg-tests = []
@@ -75,8 +75,8 @@ tokio-util = { workspace = true, features = ["rt"] }
 zip.workspace = true
 # internal
 ixbrl = { path = "../../libs/ixbrl" }
-# default-features = false: ct600's only feature is `api_tests` (live
-# Companies House integration tests).  Kept off so
+# default-features = false: ct600's only features are `cached_live_tests` /
+# `always_live_tests` (live Companies House integration tests).  Kept off so
 # `cargo test --workspace --no-default-features` runs fully offline.
 ct600 = { path = "../../libs/ct600", default-features = false }
 

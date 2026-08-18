@@ -95,8 +95,11 @@ The tests that hit the live Companies House API live in
 `libs/ct600/src/companies_house.rs` (the `live_tests` module) and in
 `apps/tally-cli/src/config.rs` (a live enrichment test: it resolves a
 minimum config from the API and checks the cache is served on the second
-run).  Both are part of the **default-enabled** `api_tests` feature — plain
-`cargo test -p ct600` / `cargo test -p tally-cli` run them:
+run).  ct600's live tests are part of the **default-enabled**
+`cached_live_tests` feature (they use the repository's `.cache`, so only
+the first, cold run hits the API — `always_live_tests` forces a fresh run)
+and tally-cli's enrichment test is part of its default-enabled `api_tests`
+feature — plain `cargo test -p ct600` / `cargo test -p tally-cli` run them:
 
 ```bash
 export COMPANIES_HOUSE_API_KEY="your-api-key"             # or COMPANIES_HOUSE_SANDBOX_API_KEY

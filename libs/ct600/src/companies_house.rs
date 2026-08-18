@@ -14,7 +14,7 @@
 //! for those boxes.
 //!
 //! The offline test fixtures ([`test_utils`]) and the live API tests
-//! ([`live_tests`], part of the default-enabled `api_tests` feature) live
+//! ([`live_tests`], part of the default-enabled `cached_live_tests` feature) live
 //! alongside the client.
 
 use crate::form::CompanyFormValues;
@@ -2487,16 +2487,21 @@ mod tests {
 }
 
 // ============================================================================
-// Live API tests (part of the default-enabled `api_tests` feature)
+// Live API tests (part of the default-enabled `cached_live_tests` feature)
 // ============================================================================
 
 /// Live Companies House API tests.
 ///
 /// These tests exercise the real (or sandbox) Companies House API and are
-/// part of the default-enabled `api_tests` feature, so a plain
-/// `cargo test -p ct600` runs them.  They need an API key and (for most of
-/// them) a `COMPANY_NUMBER` — the period and past-filings tests default to
-/// the real company `14510633`.  Without them they fail with a clear message:
+/// part of the default-enabled `cached_live_tests` feature, so a plain
+/// `cargo test -p ct600` runs them.  The client is pointed at the
+/// repository's `.cache` — the first (cold) run fetches from the API and
+/// warms it; repeat runs are served from disk and never touch the API.
+/// Enabling the `always_live_tests` feature instead uses a scratch tempdir
+/// cache, so every run really hits the network (e.g. to refresh the cache).
+///
+/// The cold run needs an API key and (for most tests) a `COMPANY_NUMBER` —
+/// the period and past-filings tests default to the real company `14510633`:
 ///
 /// ```bash
 /// export COMPANIES_HOUSE_API_KEY="your-api-key"           # live API
@@ -2506,47 +2511,68 @@ mod tests {
 /// cargo test -p ct600
 /// ```
 ///
-/// To run fully offline (a fresh clone without a key), disable the feature
+/// To run fully offline (a fresh clone without a key), disable the features
 /// with `cargo test -p ct600 --no-default-features`: the tests are then
-/// reported as ignored with the reason "requires a Companies House API key
-/// and COMPANY_NUMBER".
+/// reported as ignored.
 #[cfg(test)]
 mod live_tests {
     use super::*;
-    use std::path::Path;
+
+    /// The cache directory the live tests use: a scratch tempdir when
+    /// `always_live_tests` is enabled, else the repository's `.cache` (the
+    /// `cached_live_tests` default).
+    fn live_cache_dir() -> PathBuf {
+        #[cfg(feature = "always_live_tests")]
+        {
+            tempfile::tempdir().unwrap().keep()
+        }
+        #[cfg(not(feature = "always_live_tests"))]
+        {
+            test_utils::REPO.join(".cache")
+        }
+    }
 
     /// A client for the live API, or the sandbox when only the sandbox key is
-    /// set (mirroring [`test_utils::TestClient`]), pointed at a scratch cache
-    /// so every run really hits the network.
-    fn live_client(cache_dir: &Path) -> CompaniesHouseClient {
-        CompaniesHouseClient::live_from_env()
-            .or_else(|_| CompaniesHouseClient::test_client_from_env())
-            .expect(
-                "the api_tests feature needs COMPANIES_HOUSE_API_KEY (live) or \
-                 COMPANIES_HOUSE_SANDBOX_API_KEY (sandbox)",
-            )
-            .with_cache_dir(cache_dir)
+    /// set (mirroring [`test_utils::TestClient`]), pointed at the mode's cache
+    /// directory (see [`live_cache_dir`]).
+    ///
+    /// With `cached_live_tests` (the default) a missing key is tolerated when
+    /// the cache is warm — the client never reaches the network — but the
+    /// first, cold run needs a key.  With `always_live_tests` a key is
+    /// mandatory.
+    fn live_client() -> CompaniesHouseClient {
+        let client = CompaniesHouseClient::live_from_env()
+            .or_else(|_| CompaniesHouseClient::test_client_from_env());
+        #[cfg(feature = "always_live_tests")]
+        let client = client.expect(
+            "the always_live_tests feature needs COMPANIES_HOUSE_API_KEY (live) or \
+             COMPANIES_HOUSE_SANDBOX_API_KEY (sandbox)",
+        );
+        #[cfg(not(feature = "always_live_tests"))]
+        let client = client.unwrap_or_else(|_| CompaniesHouseClient::new(Config::default()));
+        client.with_cache_dir(live_cache_dir())
     }
 
     /// The company number to look up: `COMPANY_NUMBER`.
     fn company_number() -> String {
         std::env::var("COMPANY_NUMBER").expect(
-            "the api_tests feature needs COMPANY_NUMBER: use a real company for \
+            "the live-tests features need COMPANY_NUMBER: use a real company for \
              the live API, a sandbox test company for the sandbox API",
         )
     }
 
-    /// A real company profile round-trips through `GET /company/{number}`.
+    /// A real company profile round-trips through the cache-first profile
+    /// fetch: a cold cache resolves from `GET /company/{number}` and warms
+    /// the cache; a warm cache serves the same profile from disk.
     #[tokio::test]
     #[cfg_attr(
-        not(feature = "api_tests"),
-        ignore = "requires a Companies House API key and COMPANY_NUMBER"
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key (cold cache) and COMPANY_NUMBER"
     )]
     async fn live_profile_round_trip() {
-        let cache_dir = tempfile::tempdir().unwrap();
         let number = company_number();
-        let profile = live_client(cache_dir.path())
-            .get_company_profile(&number)
+        let profile = live_client()
+            .get_company_profile_cached(&number)
             .await
             .expect("fetch the company profile");
 
@@ -2565,13 +2591,12 @@ mod live_tests {
     /// surfaces the previous accounts filings with their registration dates.
     #[tokio::test]
     #[cfg_attr(
-        not(feature = "api_tests"),
-        ignore = "requires a Companies House API key and COMPANY_NUMBER"
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key (cold cache) and COMPANY_NUMBER"
     )]
     async fn live_filing_history_decodes() {
-        let cache_dir = tempfile::tempdir().unwrap();
         let number = company_number();
-        let history = live_client(cache_dir.path())
+        let history = live_client()
             .get_filing_history(&number)
             .await
             .expect("fetch the filing history");
@@ -2594,19 +2619,19 @@ mod live_tests {
     /// reaching today).
     #[tokio::test]
     #[cfg_attr(
-        not(feature = "api_tests"),
-        ignore = "requires a Companies House API key"
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key for a cold cache"
     )]
     async fn live_profile_periods() {
-        let cache_dir = tempfile::tempdir().unwrap();
         let number =
             std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
-        let client = live_client(cache_dir.path());
+        let client = live_client();
 
-        // The client's company-details method: the profile carries the
-        // registration date that anchors the period schedule.
+        // The client's cache-first company-details method: the profile
+        // carries the registration date that anchors the period schedule
+        // (a warm cache serves it without touching the API).
         let profile = client
-            .get_company_profile(&number)
+            .get_company_profile_cached(&number)
             .await
             .expect("fetch the company profile");
         assert_eq!(profile.company_number, number);
@@ -2669,14 +2694,13 @@ mod live_tests {
     /// each filing covers and when it was filed.
     #[tokio::test]
     #[cfg_attr(
-        not(feature = "api_tests"),
-        ignore = "requires a Companies House API key"
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key for a cold cache"
     )]
     async fn live_past_filings_print_dates() {
-        let cache_dir = tempfile::tempdir().unwrap();
         let number =
             std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
-        let client = live_client(cache_dir.path());
+        let client = live_client();
 
         let history = client
             .get_filing_history(&number)
@@ -2712,13 +2736,12 @@ mod live_tests {
     /// read off them.
     #[tokio::test]
     #[cfg_attr(
-        not(feature = "api_tests"),
-        ignore = "requires a Companies House API key and COMPANY_NUMBER"
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key (cold cache) and COMPANY_NUMBER"
     )]
     async fn live_officers_decode() {
-        let cache_dir = tempfile::tempdir().unwrap();
         let number = company_number();
-        let officers = live_client(cache_dir.path())
+        let officers = live_client()
             .get_officers(&number)
             .await
             .expect("fetch the officers");
@@ -2741,15 +2764,14 @@ mod live_tests {
     /// coherent dates and deadlines.
     #[tokio::test]
     #[cfg_attr(
-        not(feature = "api_tests"),
-        ignore = "requires a Companies House API key and COMPANY_NUMBER"
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key (cold cache) and COMPANY_NUMBER"
     )]
     async fn live_next_accounting_period() {
-        let cache_dir = tempfile::tempdir().unwrap();
         let number = company_number();
         let mut company = Company::new("", "", &number);
         company.registration_date = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
-        let next = live_client(cache_dir.path())
+        let next = live_client()
             .next_accounting_period(&company)
             .await
             .expect("resolve the next accounting period");

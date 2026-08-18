@@ -30,11 +30,12 @@ anyhow.workspace = true
 # logs (best-effort enrichment warnings)
 log = "0.4"
 # internal
-# default-features = false: ct600's only feature is `api_tests` (live
-# Companies House integration tests, a default of ct600 itself).  Kept off
-# here so `cargo test --workspace --no-default-features` runs fully offline
-# — otherwise this dependency would re-activate ct600's default features
-# during workspace feature unification.
+# default-features = false: ct600's only features are `cached_live_tests` /
+# `always_live_tests` (live Companies House integration tests, defaults of
+# ct600 itself).  Kept off here so `cargo test --workspace
+# --no-default-features` runs fully offline — otherwise this dependency
+# would re-activate ct600's default features during workspace feature
+# unification.
 ct600 = { path = "../../libs/ct600", default-features = false }
 ixbrl = { path = "../../libs/ixbrl" }
 
