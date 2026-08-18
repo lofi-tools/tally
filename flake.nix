@@ -342,8 +342,8 @@
             ${l.mkZmux [
               {
                 name = "db";
-                command = "docker compose up db";
-                cleanup = "docker compose stop db 2>/dev/null || true";
+                command = "docker compose up api-db";
+                cleanup = "docker compose stop api-db 2>/dev/null || true";
               }
               {
                 name = "api";
@@ -587,15 +587,15 @@
 
           # The tally-api dev database: start the compose postgres and wait
           # for its healthcheck (`--wait` needs docker compose v2).  Standalone
-          # use, or from `apitest`.
-          dev-db = ''cd "${wd}"; docker compose up -d --wait db'';
+          # use, or from `test-api`.
+          dev-db = ''cd "${wd}"; docker compose up -d --wait api-db'';
           db-down = ''cd "${wd}"; docker compose down'';
 
           # Wait until the compose postgres reports healthy — used by the `dev`
           # api tab so `cargo run` starts only once the db is ready.  Read-only
           # (`docker compose ps` + `docker inspect`, never `up`): unlike
           # dev-db it cannot create a container, so it can't race the db tab's
-          # foreground `docker compose up db` over the container name.
+          # foreground `docker compose up api-db` over the container name.
           await-db = ''
             cd "${wd}"
             command -v docker >/dev/null 2>&1 || {
@@ -604,7 +604,7 @@
             }
             UP=0
             for i in $(seq 1 90); do
-              CID=$(docker compose ps -q db 2>/dev/null | head -1)
+              CID=$(docker compose ps -q api-db 2>/dev/null | head -1)
               if [ -n "$CID" ] && [ "$(docker inspect -f '{{.State.Health.Status}}' "$CID" 2>/dev/null)" = healthy ]; then
                 UP=1; break
               fi
@@ -623,8 +623,8 @@
             cd "${wd}"
             docker compose down -v --remove-orphans
             # force-remove any leftover container/volume that compose couldn't clean up
-            docker rm -f accounting-db-1 2>/dev/null || true
-            docker volume rm tally-pg 2>/dev/null || true
+            docker rm -f accounting-api-db-1 2>/dev/null || true
+            docker volume rm api-db-pg 2>/dev/null || true
             rm -rf "${wd}/.cache/tally-api/uploads"
           '';
 
@@ -636,15 +636,14 @@
             cargo run -p tally-api
           '';
 
-          # The tally-api suites.  `test-api` is self-sufficient: it first
-          # ensures the compose Postgres is up (`docker compose up -d --wait db`
-          # is idempotent), then runs the full suite.  If docker isn't
-          # available the pg-gated tests print a notice and skip rather than
-          # failing; `test-api-offline` is the first-clone / DB-less variant.
-          apitest = ''
+          # The tally-api suites.  `test-api` is self-sufficient: the test
+          # harness auto-starts the compose `test-api-db` service (profiled,
+          # so plain `docker compose up` never starts it), waits for it, and
+          # re-initialises the shared `tally_test` DB once per run.  If docker
+          # / the DB can't be reached the pg-gated tests FAIL rather than
+          # skip; `test-api-offline` is the first-clone / DB-less variant.
+          test-api = ''
             cd "${wd}"
-            docker compose up -d --wait db 2>/dev/null \
-              || echo "warning: docker db not available; pg-gated tests will skip"
             cargo test -p tally-api
           '';
           test-api-offline = ''cargo test -p tally-api --no-default-features'';

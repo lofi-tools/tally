@@ -1,5 +1,5 @@
 //! Company CRUD + ownership integration tests (spec §5).  Gated behind
-//! `pg-tests` (on by default); the harness auto-starts the `test-postgres`
+//! `pg-tests` (on by default); the harness auto-starts the `test-api-db`
 //! container and fails hard when the database can't be reached.
 #![cfg(feature = "pg-tests")]
 

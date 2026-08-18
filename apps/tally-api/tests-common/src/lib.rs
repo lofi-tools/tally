@@ -1,6 +1,6 @@
 //! Shared harness for tally-api's pg-gated integration tests.
 //!
-//! Tests share one database — the docker-compose `test-postgres` service on
+//! Tests share one database — the docker-compose `test-api-db` service on
 //! `localhost:5433/tally_test` (`TEST_DATABASE_URL` overrides).  The harness
 //! auto-starts the container when it is not running, waits for readiness, and
 //! re-initialises the schema once per run (guarded by a Postgres advisory
@@ -38,12 +38,12 @@ use tempfile::TempDir;
 use tokio_postgres::NoTls;
 use tower::ServiceExt;
 
-/// The shared test database: the docker-compose `test-postgres` service
+/// The shared test database: the docker-compose `test-api-db` service
 /// (separate from the dev `db` on 5432), overridable with `TEST_DATABASE_URL`.
 pub const DEFAULT_TEST_DB_URL: &str = "postgres://tally:tally@localhost:5433/tally_test";
 
 /// The shared test database URL: `TEST_DATABASE_URL` when set, else the
-/// docker-compose `test-postgres` default.
+/// docker-compose `test-api-db` default.
 pub fn test_db_url() -> String {
     std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string())
@@ -117,7 +117,7 @@ pub struct TestApp {
 
 impl TestApp {
     /// Build the app on the shared test database (auto-starting + waiting on
-    /// the `test-postgres` container when it is not running), with the
+    /// the `test-api-db` container when it is not running), with the
     /// default upload cap.
     ///
     /// The database is re-initialised once per run (see [`reinit_if_needed`])
@@ -206,7 +206,7 @@ impl TestApp {
 const REINIT_LOCK_KEY: i64 = 0x7461_6C6C_795F_7067; // "tally_pg"
 
 /// Make sure the shared test database is reachable: when it is not, start
-/// the `test-postgres` docker-compose service and wait for it to come up.
+/// the `test-api-db` docker-compose service and wait for it to come up.
 /// A database that cannot be started is a hard failure — the pg-tests must
 /// not silently skip.
 pub async fn ensure_test_db(url: &str) {
@@ -214,15 +214,15 @@ pub async fn ensure_test_db(url: &str) {
         return;
     }
 
-    // Not running: try the project's own docker-compose `test-postgres`.
+    // Not running: try the project's own docker-compose `test-api-db`.
     let status = std::process::Command::new("docker")
-        .args(["compose", "up", "-d", "--wait", "test-postgres"])
+        .args(["compose", "up", "-d", "--wait", "test-api-db"])
         .current_dir(REPO.as_path())
         .status();
     match status {
         Ok(status) if status.success() => {}
         Ok(status) => panic!(
-            "`docker compose up -d test-postgres` exited with {status}; the pg-tests need the \
+            "`docker compose up -d test-api-db` exited with {status}; the pg-tests need the \
              test database at {url} — start it manually or disable the `pg-tests` feature"
         ),
         Err(source) => panic!(
@@ -241,7 +241,7 @@ pub async fn ensure_test_db(url: &str) {
     }
     panic!(
         "the test database at {url} did not become reachable after `docker compose up -d \
-         test-postgres` (is the docker daemon running?)"
+         test-api-db` (is the docker daemon running?)"
     );
 }
 

@@ -1,15 +1,19 @@
 # Local development services for the tally workspace.
 #
-#   nix develop -c dev-db      # or: docker compose up -d --wait db
+#   nix develop -c dev-db      # or: docker compose up -d --wait api-db
 #   cargo run -p tally-api     # connects via DATABASE_URL (default below)
 #
-# The pg-gated integration tests auto-start `test-postgres` when it is not
+# The pg-gated integration tests auto-start `test-api-db` when it is not
 # running (the shared `tally_test` DB on port 5433), so the dev DB on 5432
 # stays separate.
 #
-# Optional tooling (not started by default): `docker compose --profile tools up adminer`.
+# Services with profiles are NOT started by plain `docker compose up`:
+#   - `test-api-db` (profile `test`) — the tests start it themselves via
+#     `docker compose up -d --wait test-api-db` (explicitly naming a
+#     service starts it regardless of profile)
+#   - `adminer` (profile `tools`) — `docker compose --profile tools up adminer`
 services:
-  db:
+  api-db:
     image: postgres:16
     environment:
       POSTGRES_USER: tally
@@ -18,7 +22,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - tally-pg:/var/lib/postgresql/data
+      - api-db-pg:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tally -d tally"]
       interval: 2s
@@ -28,8 +32,11 @@ services:
   # The shared database for the tally-api integration tests (pg-tests
   # feature): tests reuse this one DB (not one per test), and the harness
   # auto-starts it, waits for readiness, and re-initialises it once per run.
-  test-postgres:
+  test-api-db:
     image: postgres:16
+    # Not started by plain `docker compose up` — the test harness starts this
+    # service itself (explicit name, so the profile is ignored).
+    profiles: ["test"]
     environment:
       POSTGRES_USER: tally
       POSTGRES_PASSWORD: tally
@@ -37,7 +44,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - tally-test-pg:/var/lib/postgresql/data
+      - test-api-db-pg:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tally -d tally_test"]
       interval: 2s
@@ -50,8 +57,8 @@ services:
     ports:
       - "8082:8080"
     depends_on:
-      - db
+      - api-db
 
 volumes:
-  tally-pg:
-  tally-test-pg:
+  api-db-pg:
+  test-api-db-pg:

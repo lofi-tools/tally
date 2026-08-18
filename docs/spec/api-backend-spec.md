@@ -368,23 +368,34 @@ catch-panic middleware and become `500 internal` with a `request_id`.
   **`pg-tests`**, **on by default**:
   - First-clone / DB-less test command documented everywhere:
     `cargo test -p tally-api --no-default-features`.
-  - `nix develop -c test-api` runs the full suite against the compose DB.
-  - As a safety net, pg-gated tests also **skip (ignored)** when
-    `DATABASE_URL` is unreachable, so `cargo test` without the DB fails
-    gracefully rather than erroring.
-- DB lifecycle for tests: start the compose postgres, run toasty's schema
-  sync, run the suite (each test gets a fresh schema or truncates).
+  - `nix develop -c test-api` (or plain `cargo test -p tally-api`) runs the
+    full suite; the harness is self-sufficient (see DB lifecycle below).
+  - An unreachable database is a **hard failure**, never a silent skip:
+    if docker/Postgres isn't available the pg-gated tests panic with
+    instructions (start the DB or disable `pg-tests`).
+- DB lifecycle for tests: the tests use a **shared** database — the
+  docker-compose `test-api-db` service (port 5433, `tally_test`, profiled
+  so plain `docker compose up` never starts it).  The harness auto-starts
+  the container (`docker compose up -d --wait test-api-db`), waits for
+  readiness, and re-initialises the schema **once per run** under a
+  Postgres advisory lock, but only when the committed migrations changed
+  (a checksum marker).  Tests arrange their own data (unique emails/guest
+  ids) so the shared DB has minimal effects between tests and across runs.
 
 ## 13. Dev environment (flake + docker)
 
-- `docker-compose.yml` at the repo root: `postgres:16` (named volume,
-  healthcheck, `tally`/`tally`/`tally` db), plus an optional `adminer`
-  service (commented or separate profile).
-- New flake scripts:
-  - `dev-db` — `docker compose up -d db` (+ wait for health)
+- `docker-compose.yml` at the repo root: `postgres:16` for the dev DB
+  (named volume, healthcheck, `tally`/`tally`/`tally` db) plus a profiled
+  `test-api-db` service (port 5433, `tally_test` DB) for the integration
+  tests — profiled services are never started by plain `docker compose up`;
+  the tests start `test-api-db` themselves.  `adminer` is also profiled
+  (`docker compose --profile tools up adminer`).
+- Flake scripts:
+  - `dev-db` — `docker compose up -d api-db` (+ wait for health)
   - `db-down` — `docker compose down`
   - `api` — `cargo run -p tally-api` (env from `.env` / defaults)
-  - `test-api` — full suite against the compose DB
+  - `test-api` — full suite; the harness owns the test DB lifecycle
+    (auto-starts `test-api-db`, reinit once per run, fail-hard)
   - `test-api-offline` — `cargo test -p tally-api --no-default-features`
 - `apps/tally-api/README.md` documents the quickstart and the first-clone
   test command.

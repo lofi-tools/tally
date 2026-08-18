@@ -1,6 +1,6 @@
 //! Filings sync integration tests (spec: ch-filings-sync-spec.md §5, §7).
 //! Gated behind `pg-tests` (on by default); the harness auto-starts the
-//! `test-postgres` container and fails hard when the database can't be reached.
+//! `test-api-db` container and fails hard when the database can't be reached.
 //!
 //! The harness builds `AppState { ch: None }` (no CH key), so these tests
 //! cover the no-key paths: the refresh endpoint's `companies_house_key_missing`,

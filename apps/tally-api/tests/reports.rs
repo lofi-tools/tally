@@ -1,5 +1,5 @@
 //! Report generation integration tests (spec §6).  Gated behind `pg-tests`
-//! (on by default); the harness auto-starts the `test-postgres` container
+//! (on by default); the harness auto-starts the `test-api-db` container
 //! and fails hard when the database can't be reached.
 //!
 //! Reports need a company with the required dates (`report_date`,

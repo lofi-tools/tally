@@ -65,17 +65,27 @@ spec); `5xx` responses echo `X-Request-Id` in `details.request_id`.
 ## Testing
 
 ```sh
-# Full suite — `test-api` first ensures the compose Postgres is up, then
-# runs everything:
-nix develop -c test-api
+# Full suite — self-sufficient: the harness auto-starts the compose
+# `test-api-db` service when it's not running, waits for it, and
+# re-initialises the shared `tally_test` DB once per run:
+nix develop -c test-api          # or plain: cargo test -p tally-api
 
 # First-clone / DB-less (integration tests compile away):
 cargo test -p tally-api --no-default-features
 # (or: nix develop -c test-api-offline)
 ```
 
-Without docker/Postgres the pg-gated tests print a notice and skip (pass)
-rather than failing, so plain `cargo test -p tally-api` is safe either way.
+The pg-gated integration tests (feature `pg-tests`, on by default) use a
+**shared** test database: the docker-compose `test-api-db` service
+(port 5433, `tally_test` DB — separate from the dev DB on 5432, and
+profiled so plain `docker compose up` never starts it).  The harness
+auto-starts the container via `docker compose up -d --wait test-api-db`
+and re-initialises the schema once per run (under an advisory lock, only
+when the committed migrations changed).  Tests keep their own data
+(unique emails/guest ids), so one shared DB works across parallel runs.
+An unreachable database is a **hard failure** — the tests never silently
+skip.  If you're developing without docker, run the offline variant
+above (`--no-default-features`).
 
 ## Schema migrations
 
