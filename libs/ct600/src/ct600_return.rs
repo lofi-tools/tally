@@ -970,7 +970,7 @@ fn parse_yesno(raw: &str, path: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::REPO;
+    use crate::test_utils::{REPO, cache_dir, cache_path};
     use ixbrl::company::CompanyProfile;
     use std::collections::HashMap;
 
@@ -1497,9 +1497,9 @@ mod tests {
         let xml = filing.to_xml();
 
         // Write the generated message for the CT-schema validation.
-        std::fs::create_dir_all(REPO.join(".cache/ct600-rs-tests")).unwrap();
+        std::fs::create_dir_all(cache_dir("ct600-rs-tests")).unwrap();
         std::fs::write(
-            REPO.join(".cache/ct600-rs-tests/ct600-ctm03955-losses.xml"),
+            cache_path("ct600-rs-tests", "ct600-ctm03955-losses.xml"),
             &xml,
         )
         .unwrap();
@@ -1526,8 +1526,8 @@ mod tests {
 
         // Write the generated message to .cache/ct600-rs-tests for
         // inspection / the LTS.
-        std::fs::create_dir_all(REPO.join(".cache/ct600-rs-tests")).unwrap();
-        std::fs::write(REPO.join(".cache/ct600-rs-tests/ct600-basic-1.xml"), &xml)
+        std::fs::create_dir_all(cache_dir("ct600-rs-tests")).unwrap();
+        std::fs::write(cache_path("ct600-rs-tests", "ct600-basic-1.xml"), &xml)
             .unwrap();
 
         // -- envelope --------------------------------------------------------
@@ -1591,7 +1591,7 @@ mod tests {
 
         // -- element structure matches the reference ct600.xml ---------------
         // (modulo the three schema fixes, which are stripped from both sides)
-        if let Ok(reference) = std::fs::read_to_string(REPO.join(".cache/py-ct600/ct600.xml")) {
+        if let Ok(reference) = std::fs::read_to_string(cache_path("py-ct600", "ct600.xml")) {
             let ref_node = XmlNode::from_xml_string(&reference).expect("parse reference");
             assert_eq!(
                 skeleton(&strip_fixes(&ref_node)),

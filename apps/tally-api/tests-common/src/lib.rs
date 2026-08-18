@@ -24,7 +24,6 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use axum::body::Body;
@@ -56,22 +55,13 @@ pub fn unique_email(prefix: &str) -> String {
     format!("{prefix}-{}@example.com", uuid::Uuid::new_v4().simple())
 }
 
-/// The repository root directory.
-pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
-    let path_bytes = Command::new("git")
-        .arg("rev-parse")
-        .arg("--show-toplevel")
-        .output()
-        .unwrap()
-        .stdout;
-    let path_str = std::str::from_utf8(&path_bytes).unwrap().trim();
-    PathBuf::from(path_str)
-});
+/// The repository root directory (from the shared `test_utils` crate).
+pub use test_utils::REPO;
 
-/// The basic FRS 105 fixture book used by the upload/report tests, resolved
-/// from the repository root.
-pub static FIXTURE_GNUCASH: LazyLock<PathBuf> =
-    LazyLock::new(|| REPO.join("example_data/basic-1/input.gnucash"));
+/// The basic FRS 105 fixture book used by the upload/report tests (the
+/// shared `test_utils::Fixtures::basic_book`), resolved from the repository
+/// root.
+pub static FIXTURE_GNUCASH: LazyLock<PathBuf> = LazyLock::new(test_utils::Fixtures::basic_book);
 /// The per-upload size cap `setup()` uses (mirrors production `main.rs`).
 /// Tests that want to trip the 413 branch use
 /// [`setup_with_max_upload_bytes`](TestApp::setup_with_max_upload_bytes)

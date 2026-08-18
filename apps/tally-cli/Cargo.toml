@@ -41,3 +41,5 @@ ixbrl = { path = "../../libs/ixbrl" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# Shared repo-root resolution for the test suite.
+test_utils = { path = "../../libs/test_utils" }

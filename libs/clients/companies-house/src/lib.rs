@@ -842,7 +842,7 @@ fn cache_dir_from_env() -> Option<PathBuf> {
     }
     #[cfg(test)]
     {
-        Some(test_utils::REPO.join(".cache/api_responses"))
+        Some(test_utils::cache_dir("api_responses"))
     }
     #[cfg(not(test))]
     {
@@ -1938,30 +1938,19 @@ pub struct CompanyLinks {
 /// only exist when this crate itself is built for tests).
 pub mod test_utils {
     use std::path::{Path, PathBuf};
-    use std::process::Command;
-    use std::sync::LazyLock;
 
-    use chrono::NaiveDate;
     use snafu::Snafu;
 
-    use core_model::{AccountingPeriod, AccountsMeta};
+    use core_model::AccountsMeta;
 
     use super::{ApiResult, CompaniesHouseClient, CompaniesHouseError, CompanyProfile};
 
-    /// The repository root directory.
-    pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
-        let path_bytes = Command::new("git")
-            .arg("rev-parse")
-            .arg("--show-toplevel")
-            .output()
-            .unwrap()
-            .stdout;
-        let path_str = std::str::from_utf8(&path_bytes).unwrap().trim();
-        PathBuf::from(path_str)
-    });
+    /// The repository root and `.cache` helpers (from the shared
+    /// `test_utils` crate).
+    pub use test_utils::{REPO, cache_dir, cache_root};
 
     fn default_cache_dir() -> PathBuf {
-        REPO.join(".cache/api_responses")
+        cache_dir("api_responses")
     }
 
     /// A client that serves company profiles from a local JSON cache, falling
@@ -1979,7 +1968,7 @@ pub mod test_utils {
         /// Create a cached client with the default cache directory (the
         /// repo's `.cache`, resolved from the repository root).
         pub fn new(inner: CompaniesHouseClient) -> Self {
-            Self::with_cache_dir(inner, REPO.join(".cache"))
+            Self::with_cache_dir(inner, cache_root())
         }
 
         /// Create a cached client with the given cache directory.
@@ -2131,9 +2120,10 @@ pub mod test_utils {
     pub struct TestData;
 
     impl TestData {
-        /// The company number of the fictional default test company.
+        /// The company number of the fictional default test company (the
+        /// shared `test_utils::Fixtures` fixture).
         pub fn default_company_number() -> &'static str {
-            "12345678"
+            test_utils::Fixtures::default_company_number()
         }
 
         /// Build a fictional company profile with the common fixture fields
@@ -2172,9 +2162,10 @@ pub mod test_utils {
             )
         }
 
-        /// The company number of the sample company.
+        /// The company number of the sample company (the shared
+        /// `test_utils::Fixtures` fixture).
         pub fn sample_company_number() -> &'static str {
-            "9876543"
+            test_utils::Fixtures::sample_company_number()
         }
 
         /// The company profile of the sample company (company number
@@ -2184,16 +2175,11 @@ pub mod test_utils {
         }
 
         /// The sample company's set of accounts: the 2026 return period and
-        /// the default financial-year parameters — the `accounts` the sample
-        /// tax computation is built on.
+        /// the default financial-year parameters (the shared
+        /// `test_utils::Fixtures` fixture) — the `accounts` the sample tax
+        /// computation is built on.
         pub fn sample_accounts_meta() -> AccountsMeta {
-            AccountsMeta {
-                period: Some(AccountingPeriod {
-                    start: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-                    end: NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
-                }),
-                ..AccountsMeta::default()
-            }
+            test_utils::Fixtures::sample_accounts_meta()
         }
 
         /// The hardcoded fixtures: the fictional company profiles for the known
@@ -2453,7 +2439,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(
             config.cache_dir(),
-            Some(test_utils::REPO.join(".cache/api_responses").as_path())
+            Some(test_utils::cache_dir("api_responses").as_path())
         );
     }
 
@@ -3494,7 +3480,7 @@ mod live_tests {
         }
         #[cfg(not(feature = "always_live_tests"))]
         {
-            test_utils::REPO.join(".cache/api_responses")
+            test_utils::cache_dir("api_responses")
         }
     }
 

@@ -17,6 +17,8 @@ toasty.workspace = true
 tower.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+# Shared repo-root resolution (fixture books, .cache paths).
+test_utils = { path = "../../../libs/test_utils" }
 # Test-only database administration (create/drop per-test databases).
 tokio-postgres = "0.7"
 # The app under test: the harness builds its router / AppState and runs its

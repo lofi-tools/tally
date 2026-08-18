@@ -2,10 +2,12 @@
 //! Test utilities for the ct600 crate.
 //!
 //! [`TestData::sample_tax`] is the shared sample FRS 105 tax computation
-//! (the company fixtures it builds on live in the
-//! [`companies_house::test_utils`] module of the client crate), [`sample_values`]
-//! derives the CT600 form values from it, and [`REPO`] resolves the
-//! repository root (the live-tests cache lives under `.cache/api_responses`).
+//! (the company profile it builds on lives in the
+//! [`companies_house::test_utils`] module of the client crate; the company
+//! number and accounts metadata come from the shared `test_utils` crate),
+//! [`sample_values`] derives the CT600 form values from it, and [`REPO`]
+//! (from the shared `test_utils` crate) resolves the repository root (the
+//! live-tests cache lives under `.cache/api_responses`).
 
 use crate::ct600_return::{
     CompanyInformation, Ct600Return, Declaration, EnvelopeConfig, FinancialYear,
@@ -20,17 +22,9 @@ pub fn sample_values() -> Ct600FormValues {
     Ct600FormValues::from_tax(&TestData::sample_tax())
 }
 
-/// The repository root directory.
-pub static REPO: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
-    let path_bytes = std::process::Command::new("git")
-        .arg("rev-parse")
-        .arg("--show-toplevel")
-        .output()
-        .unwrap()
-        .stdout;
-    let path_str = std::str::from_utf8(&path_bytes).unwrap().trim();
-    std::path::PathBuf::from(path_str)
-});
+/// The repository root and `.cache` helpers (from the shared `test_utils`
+/// crate).
+pub use test_utils::{REPO, cache_dir, cache_path};
 
 /// Hardcoded test data: the shared sample tax computation.
 pub struct TestData;
@@ -117,7 +111,7 @@ impl TestData {
         ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax::from_parsed_facts(
             &facts,
             &company,
-            &companies_house::test_utils::TestData::sample_accounts_meta(),
+            &test_utils::Fixtures::sample_accounts_meta(),
         )
     }
 

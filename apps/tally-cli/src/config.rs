@@ -47,23 +47,11 @@ use ixbrl::company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use serde::{Deserialize, Serialize};
 
 /// The repository root directory, for tests that read committed fixtures
-/// and write to `.cache` without depending on the working directory.
+/// and write to `.cache` without depending on the working directory
+/// (from the shared `test_utils` crate).
 #[cfg(test)]
 mod test_utils {
-    use std::path::PathBuf;
-    use std::process::Command;
-    use std::sync::LazyLock;
-
-    pub static REPO: LazyLock<PathBuf> = LazyLock::new(|| {
-        let path_bytes = Command::new("git")
-            .arg("rev-parse")
-            .arg("--show-toplevel")
-            .output()
-            .unwrap()
-            .stdout;
-        let path_str = std::str::from_utf8(&path_bytes).unwrap().trim();
-        PathBuf::from(path_str)
-    });
+    pub use test_utils::{REPO, cache_dir};
 }
 
 /// The values `tally` reads from the environment, captured once via
@@ -1620,7 +1608,7 @@ mod live_tests {
         // The repository's `.cache/api_responses`: the profile and officers
         // are cached there, so the second run is served from it and repeat
         // runs of the suite don't keep hitting the API.
-        env.cache_dir = Some(test_utils::REPO.join(".cache/api_responses"));
+        env.cache_dir = Some(test_utils::cache_dir("api_responses"));
 
         // The committed minimal config: no identity, no period, blank
         // profile — the identity and period come from the environment and

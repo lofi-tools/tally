@@ -713,6 +713,7 @@ dependencies = [
  "serde_json",
  "snafu",
  "tempfile",
+ "test_utils",
  "tokio",
 ]
 
@@ -918,6 +919,7 @@ dependencies = [
  "rucash",
  "serde",
  "tempfile",
+ "test_utils",
  "tokio",
 ]
 
@@ -2137,6 +2139,7 @@ dependencies = [
  "serde",
  "serde_json_lenient",
  "snafu",
+ "test_utils",
  "tokio",
 ]
 
@@ -4455,6 +4458,7 @@ dependencies = [
  "serde_json",
  "serde_json_lenient",
  "tempfile",
+ "test_utils",
  "tokio",
 ]
 
@@ -4466,6 +4470,7 @@ dependencies = [
  "serde_json",
  "tally-api",
  "tempfile",
+ "test_utils",
  "toasty",
  "tokio",
  "tokio-postgres",
@@ -4639,6 +4644,14 @@ dependencies = [
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "test_utils"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "core_model",
 ]
 
 [[package]]

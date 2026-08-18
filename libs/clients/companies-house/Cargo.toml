@@ -30,6 +30,7 @@ snafu.workspace = true
 log = "0.4"
 # internal (shared leaves)
 core_model = { path = "../../core_model" }
+test_utils = { path = "../../test_utils" }
 ixbrl-ir = { path = "../../ixbrl-ir" }
 
 [dev-dependencies]

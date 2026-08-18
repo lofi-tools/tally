@@ -1828,7 +1828,7 @@ pub const ACCTS_HTML_ATTRS: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{REPO, TestData, repo_path};
+    use crate::test_utils::{TestData, cache_dir, cache_path, repo_path};
 
     async fn load_example() -> (Company, GnucashBook) {
         let company = example_company();
@@ -1980,9 +1980,9 @@ mod tests {
         let out = accounts.to_ixbrl();
 
         // Write the Rust output for external validation (arelle).
-        std::fs::create_dir_all(REPO.join(".cache/ixbrl-rs-tests")).unwrap();
+        std::fs::create_dir_all(cache_dir("ixbrl-rs-tests")).unwrap();
         std::fs::write(
-            REPO.join(".cache/ixbrl-rs-tests/accts-micro-basic-1.html"),
+            cache_path("ixbrl-rs-tests", "accts-micro-basic-1.html"),
             &out,
         )
         .unwrap();
@@ -2087,9 +2087,9 @@ mod tests {
         let accounts = Frs105Accounts::new(&gnucash, &company, &example_profile(), &example_accounts_meta());
         let html = accounts.to_ixbrl();
 
-        std::fs::create_dir_all(REPO.join(".cache/ixbrl-rs-tests")).unwrap();
+        std::fs::create_dir_all(cache_dir("ixbrl-rs-tests")).unwrap();
         std::fs::write(
-            REPO.join(".cache/ixbrl-rs-tests/accts-micro-roundtrip-basic-1.html"),
+            cache_path("ixbrl-rs-tests", "accts-micro-roundtrip-basic-1.html"),
             &html,
         )
         .unwrap();

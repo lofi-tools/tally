@@ -101,7 +101,7 @@ mod live_tests {
         }
         #[cfg(not(feature = "always_live_tests"))]
         {
-            crate::test_utils::REPO.join(".cache/api_responses")
+            crate::test_utils::cache_dir("api_responses")
         }
     }
 
