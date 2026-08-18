@@ -1,4 +1,4 @@
-//! HMRC Corporation Tax online service client.
+//! HMRC Corporation Tax online service client (Document Submission Protocol).
 //!
 //! CT600 returns are filed with HMRC through the *Transaction Engine* using
 //! the Document Submission Protocol (DSP): a GovTalk XML message is POSTed to
@@ -6,6 +6,12 @@
 //! poll interval, the client polls a response endpoint until the final
 //! response (success or error) arrives, and a delete request closes the
 //! conversation.
+//!
+//! The client is generic over the submission type ([`SubmissionMessage`]):
+//! the ct600 crate implements the trait for its `Ct600Return`, so the
+//! envelope credentials ([`SubmissionEnvelope`]) and the IRmark are supplied
+//! by the return, while the DSP lifecycle (submit → poll → delete) lives
+//! here.
 //!
 //! Endpoints (from the official "How to use the test service" guidance and
 //! the Transaction Engine DSP):
@@ -23,17 +29,21 @@
 
 use std::time::Duration;
 
-use crate::companies_house::Config as IxbrlConfig;
 use base64::{Engine as _, engine::general_purpose};
-use chrono::Local;
+use chrono::{DateTime, Local};
 use reqwest::StatusCode;
 use sha1::{Digest, Sha1};
 use snafu::Snafu;
 
-use crate::ct600_return::{Ct600Return, EnvelopeConfig};
+pub use companies_house::Config as IxbrlConfig;
 use crate::govtalk::{
-    GovTalkDeleteRequest, GovTalkMessage, GovTalkParams, GovTalkSubmissionPoll, Message,
-    decode_govtalk_message,
+    Ct600Error, GovTalkDeleteRequest, GovTalkMessage, GovTalkParams, GovTalkSubmissionPoll,
+    Message, decode_govtalk_message,
+};
+#[cfg(test)]
+use crate::govtalk::{
+    GovTalkDeleteResponse, GovTalkSubmissionAcknowledgement, GovTalkSubmissionError,
+    GovTalkSubmissionResponse,
 };
 use crate::{CT_NS, ENV_NS};
 use ixbrl::ixbrl_fmt::XmlNode;
@@ -279,6 +289,52 @@ impl HmrcCorpTaxConfig {
     }
 }
 
+// ============================================================================
+// Submission envelope + message trait
+// ============================================================================
+
+/// The envelope credentials a submission is built with: the client's
+/// resolved config (message class, gateway credentials, software identity,
+/// test flag), handed to [`SubmissionMessage::build_submission_xml`] so the
+/// return type can embed them in its message.
+#[derive(Debug, Clone)]
+pub struct SubmissionEnvelope {
+    /// `Class` — message class, e.g. `HMRC-CT-CT600`.
+    pub class: String,
+    /// `Qualifier` — e.g. `request`.
+    pub qualifier: String,
+    /// `Function` — e.g. `submit`.
+    pub function: String,
+    /// `GatewayTest` — `"1"` for the test gateway.
+    pub gateway_test: String,
+    /// `SenderID` — the HMRC gateway username.
+    pub username: String,
+    /// `Authentication` `Value` — the gateway password.
+    pub password: String,
+    /// `Channel` `URI` — the vendor id.
+    pub vendor_id: String,
+    /// `Channel` `Product` — the software product name.
+    pub software: String,
+    /// `Channel` `Version` — the software version.
+    pub software_version: String,
+    /// `ChannelRouting` `Timestamp`.
+    pub timestamp: DateTime<Local>,
+}
+
+/// A submission type the DSP client can file.
+///
+/// The return's own envelope is overridden with the given [`SubmissionEnvelope`]
+/// (the client's resolved credentials), and the IRmark is computed and
+/// injected into the message body — the returned string is the complete
+/// submission message to POST.
+///
+/// The error is a `String` (a human-readable failure reason); the client
+/// wraps it into its [`HmrcCorpTaxError::BuildFailed`].
+pub trait SubmissionMessage {
+    /// Build the full submission message XML for the given envelope.
+    fn build_submission_xml(&self, envelope: &SubmissionEnvelope) -> Result<String, String>;
+}
+
 /// A non-empty environment variable, or a default.
 fn env_or(name: &str, default: String) -> String {
     std::env::var(name)
@@ -322,12 +378,12 @@ pub enum HmrcCorpTaxError {
     #[snafu(display("failed to decode GovTalk response from {url}: {source}"))]
     DecodeFailed {
         url: String,
-        source: crate::govtalk::Ct600Error,
+        source: Ct600Error,
     },
 
     /// The submission message could not be built.
     #[snafu(display("failed to build submission message: {source}"))]
-    BuildFailed { source: crate::govtalk::Ct600Error },
+    BuildFailed { source: Ct600Error },
 
     /// The gateway returned a submission error.
     #[snafu(display("HMRC rejected the submission: error {number} ({kind}) {text}"))]
@@ -387,10 +443,10 @@ pub struct SubmissionOutcome {
 /// steps ([`Self::submit`] → [`Self::poll`] → [`Self::delete`]) and as a
 /// single [`Self::submit_and_poll`] convenience method.
 ///
-/// The submission message is built from a [`Ct600Return`] (its envelope
-/// credentials are overridden with this client's config), the IRmark is
-/// computed from the message body, and the message is POSTed to the
-/// submission endpoint.
+/// The submission message is built from the submission type's
+/// [`SubmissionMessage`] implementation (its envelope credentials are
+/// overridden with this client's config), the IRmark is computed from the
+/// message body, and the message is POSTed to the submission endpoint.
 #[derive(Debug, Clone)]
 pub struct HmrcCorpTaxClient {
     config: HmrcCorpTaxConfig,
@@ -422,12 +478,12 @@ impl HmrcCorpTaxClient {
 
     /// Step 1: submit the return and receive the acknowledgement.
     ///
-    /// The return's envelope is overridden with the client's credentials, the
-    /// IRmark is computed and injected, and the message is POSTed to the
+    /// The submission's envelope is overridden with the client's credentials,
+    /// the IRmark is computed and injected, and the message is POSTed to the
     /// submission endpoint.  Returns the receipt (correlation ID, response
     /// endpoint, poll interval) for polling.
-    pub async fn submit(&self, ct600: &Ct600Return) -> HmrcResult<SubmissionReceipt> {
-        let xml = self.build_submission_xml(ct600)?;
+    pub async fn submit<T: SubmissionMessage>(&self, submission: &T) -> HmrcResult<SubmissionReceipt> {
+        let xml = self.build_submission_xml(submission)?;
         let body = self.post(&self.config.submission_url, &xml).await?;
         self.receipt_from_response(&body)
     }
@@ -483,7 +539,7 @@ impl HmrcCorpTaxClient {
                 other => {
                     return Err(HmrcCorpTaxError::DecodeFailed {
                         url: receipt.response_endpoint.clone(),
-                        source: crate::govtalk::Ct600Error::XmlError {
+                        source: Ct600Error::XmlError {
                             message: format!("unexpected poll response: {}", message_kind(&other)),
                         },
                     });
@@ -512,7 +568,7 @@ impl HmrcCorpTaxClient {
             }),
             other => Err(HmrcCorpTaxError::DecodeFailed {
                 url: receipt.response_endpoint.clone(),
-                source: crate::govtalk::Ct600Error::XmlError {
+                source: Ct600Error::XmlError {
                     message: format!("unexpected delete response: {}", message_kind(&other)),
                 },
             }),
@@ -523,8 +579,11 @@ impl HmrcCorpTaxClient {
     ///
     /// The conversation is closed with a best-effort delete whether polling
     /// succeeds or fails (matching the reference tool).
-    pub async fn submit_and_poll(&self, ct600: &Ct600Return) -> HmrcResult<SubmissionOutcome> {
-        let receipt = self.submit(ct600).await?;
+    pub async fn submit_and_poll<T: SubmissionMessage>(
+        &self,
+        submission: &T,
+    ) -> HmrcResult<SubmissionOutcome> {
+        let receipt = self.submit(submission).await?;
         let outcome = self.poll(&receipt).await;
         let _ = self.delete(&receipt).await;
         outcome
@@ -532,12 +591,14 @@ impl HmrcCorpTaxClient {
 
     // -- message building ---------------------------------------------------
 
-    /// Build the submission XML: the [`Ct600Return`] message with the
+    /// Build the submission XML: the submission type's message with the
     /// client's envelope credentials and a computed IRmark.
-    pub fn build_submission_xml(&self, ct600: &Ct600Return) -> HmrcResult<String> {
+    pub fn build_submission_xml<T: SubmissionMessage>(
+        &self,
+        submission: &T,
+    ) -> HmrcResult<String> {
         let config = &self.config;
-        let mut ct600 = ct600.clone();
-        ct600.envelope = EnvelopeConfig {
+        let envelope = SubmissionEnvelope {
             class: config.class.clone(),
             qualifier: "request".to_string(),
             function: "submit".to_string(),
@@ -547,14 +608,13 @@ impl HmrcCorpTaxClient {
             vendor_id: config.vendor_id.clone(),
             software: config.software.clone(),
             software_version: config.software_version.clone(),
-            timestamp: Local::now().naive_local(),
+            timestamp: Local::now(),
         };
-        let mut xml = ct600.to_xml();
-        let irmark = compute_irmark(&xml).map_err(|e| HmrcCorpTaxError::BuildFailed {
-            source: crate::govtalk::Ct600Error::XmlError { message: e },
-        })?;
-        inject_irmark(&mut xml, &irmark);
-        Ok(xml)
+        submission
+            .build_submission_xml(&envelope)
+            .map_err(|message| HmrcCorpTaxError::BuildFailed {
+                source: Ct600Error::XmlError { message },
+            })
     }
 
     /// The poll / delete message parameters for a correlation ID.
@@ -655,7 +715,7 @@ impl HmrcCorpTaxClient {
             }),
             other => Err(HmrcCorpTaxError::DecodeFailed {
                 url: self.config.submission_url.clone(),
-                source: crate::govtalk::Ct600Error::XmlError {
+                source: Ct600Error::XmlError {
                     message: format!("unexpected submit response: {}", message_kind(&other)),
                 },
             }),
@@ -676,7 +736,7 @@ impl HmrcCorpTaxClient {
 /// fresh `<Body>` root carrying the `xmlns` / `xmlns:ct` declarations, then
 /// canonicalises that — so the body is hashed with its namespace context
 /// intact.
-fn compute_irmark(xml: &str) -> Result<String, String> {
+pub fn compute_irmark(xml: &str) -> Result<String, String> {
     let node = XmlNode::from_xml_string(xml)?;
     let body = find_child(&node, "Body").ok_or("no <Body> element")?;
     let mut body = body.clone();
@@ -756,7 +816,7 @@ fn message_kind(message: &GovTalkMessage) -> &'static str {
 }
 
 /// Inject a computed IRmark into every `ct:IRmark` element of a message.
-fn inject_irmark(xml: &mut String, irmark: &str) {
+pub fn inject_irmark(xml: &mut String, irmark: &str) {
     if let Ok(mut node) = XmlNode::from_xml_string(xml) {
         set_irmarks(&mut node, irmark);
         if let XmlNode::Elem { .. } = node {
@@ -792,6 +852,141 @@ fn set_irmarks(node: &mut XmlNode, irmark: &str) {
 }
 
 // ============================================================================
+// An in-process GovTalk stub gateway
+// ============================================================================
+
+/// A minimal in-process stand-in for the HMRC Transaction Engine.
+///
+/// Accepts submission requests (replying with an acknowledgement), responds
+/// to polls with either a success response or a gateway error (controlled by
+/// [`Self::reject_polls`]), and counts delete requests.  The client is pointed
+/// at it with `HmrcCorpTaxConfig::with_submission_url` / `with_poll_url`.
+#[cfg(test)]
+struct StubGateway {
+    /// The base URL (`http://host:port`) of the stub.
+    base: String,
+    /// When set, polls are answered with a gateway error instead of a
+    /// success response.
+    reject_polls: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    deletions: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[cfg(test)]
+impl StubGateway {
+    /// Bind a listener on an ephemeral port and serve requests in the
+    /// background.
+    async fn spawn() -> Self {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind stub");
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let reject_polls = std::sync::Arc::new(AtomicBool::new(false));
+        let deletions = std::sync::Arc::new(AtomicUsize::new(0));
+        let reject = reject_polls.clone();
+        let del = deletions.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => break,
+                };
+                let reject = reject.clone();
+                let del = del.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 16384];
+                    let n = match socket.read(&mut buf).await {
+                        Ok(n) if n > 0 => n,
+                        _ => return,
+                    };
+                    let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let response = route(&request, reject.load(Ordering::Relaxed), &del);
+                    let _ = socket
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                response.len(),
+                                response
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                });
+            }
+        });
+
+        Self {
+            base,
+            reject_polls,
+            deletions,
+        }
+    }
+
+    /// Whether a delete request has been received.
+    fn deleted(&self) -> bool {
+        self.deletions.load(std::sync::atomic::Ordering::Relaxed) > 0
+    }
+}
+
+/// Route a raw HTTP request body to a GovTalk response.
+#[cfg(test)]
+fn route(request: &str, reject_polls: bool, deletions: &std::sync::atomic::AtomicUsize) -> String {
+    if request.contains("Qualifier>request") && request.contains("Function>submit") {
+        // Submission request -> acknowledgement with a correlation ID.
+        let params = GovTalkParams {
+            class: CLASS_LIVE.to_string(),
+            function: "submit".to_string(),
+            qualifier: "acknowledgement".to_string(),
+            correlation_id: "CORR-1".to_string(),
+            response_endpoint: String::new(),
+            poll_interval: "1".to_string(),
+            ..Default::default()
+        };
+        GovTalkSubmissionAcknowledgement::new(params)
+            .to_xml()
+            .expect("ack")
+    } else if request.contains("Qualifier>poll") {
+        if reject_polls {
+            let params = GovTalkParams {
+                class: CLASS_LIVE.to_string(),
+                function: "submit".to_string(),
+                qualifier: "error".to_string(),
+                correlation_id: "CORR-1".to_string(),
+                error_number: "1001".to_string(),
+                error_type: "business".to_string(),
+                error_text: "Box 145 is invalid".to_string(),
+                ..Default::default()
+            };
+            GovTalkSubmissionError::new(params).to_xml().expect("error")
+        } else {
+            let params = GovTalkParams {
+                class: CLASS_LIVE.to_string(),
+                function: "submit".to_string(),
+                qualifier: "response".to_string(),
+                correlation_id: "CORR-1".to_string(),
+                success_response_message: "Submission processed successfully".to_string(),
+                ..Default::default()
+            };
+            GovTalkSubmissionResponse::new(params).to_xml().expect("response")
+        }
+    } else if request.contains("Function>delete") {
+        deletions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let params = GovTalkParams {
+            class: CLASS_LIVE.to_string(),
+            function: "delete".to_string(),
+            qualifier: "response".to_string(),
+            correlation_id: "CORR-1".to_string(),
+            ..Default::default()
+        };
+        GovTalkDeleteResponse::new(params).to_xml().expect("delete")
+    } else {
+        String::new()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -799,15 +994,86 @@ fn set_irmarks(node: &mut XmlNode, irmark: &str) {
 mod tests {
     use super::*;
     use crate::govtalk::{GovTalkSubmissionAcknowledgement, GovTalkSubmissionError};
-    use crate::test_utils::{StubGateway, TestData};
 
-    /// The built message carries the configured credentials, the test gateway
-    /// flag, and a non-empty IRmark injected into every `ct:IRmark` element.
+    /// A minimal submission type for the protocol tests: its message is
+    /// built exactly like the real return's (a `GovTalkMessage` whose
+    /// `Body` carries a `ct:IRenvelope` with `ct:`-prefixed `ct:IRmark`
+    /// elements, the shape [`inject_irmark`] fills), with a body that can
+    /// be varied (to test IRmark body sensitivity).
+    struct TestSubmission {
+        body: String,
+    }
+
+    impl TestSubmission {
+        fn new(body: &str) -> Self {
+            Self {
+                body: body.to_string(),
+            }
+        }
+    }
+
+    impl SubmissionMessage for TestSubmission {
+        fn build_submission_xml(&self, envelope: &SubmissionEnvelope) -> Result<String, String> {
+            // A full return-shaped envelope (matching the ct600 crate's
+            // `to_xml`), with an empty IRmark the client's injection fills
+            // and a content element that varies with the submission (inside
+            // the hashed `<Body>`).
+            let ir_envelope = elt("ct:IRenvelope", &[]).children(vec![
+                elt("ct:IRheader", &[]).children(vec![elt("ct:IRmark", &[])]),
+                elt("ct:IRmark", &[]),
+                elt_text("ct:TestData", &[], &self.body),
+            ]);
+            let root = elt(
+                "GovTalkMessage",
+                &[("xmlns", ENV_NS), ("xmlns:ct", CT_NS)],
+            )
+            .children(vec![
+                elt_text("EnvelopeVersion", &[], "2.0"),
+                elt("Header", &[]).children(vec![elt("MessageDetails", &[]).children(vec![
+                    elt_text("Class", &[], &envelope.class),
+                    elt_text("Qualifier", &[], &envelope.qualifier),
+                    elt_text("Function", &[], &envelope.function),
+                    elt_text("GatewayTest", &[], &envelope.gateway_test),
+                    elt_text("SenderID", &[], &envelope.username),
+                    elt_text("Value", &[], &envelope.password),
+                    elt_text("URI", &[], &envelope.vendor_id),
+                ])]),
+                elt("Body", &[]).child(ir_envelope),
+            ]);
+            let mut xml = root.to_xml_string();
+            let irmark = compute_irmark(&xml).map_err(|e| e.to_string())?;
+            inject_irmark(&mut xml, &irmark);
+            Ok(xml)
+        }
+    }
+
+    fn elt(name: &str, attrs: &[(&str, &str)]) -> XmlNode {
+        XmlNode::Elem {
+            name: name.to_string(),
+            attributes: attrs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            children: Vec::new(),
+        }
+    }
+
+    fn elt_text(name: &str, attrs: &[(&str, &str)], text: &str) -> XmlNode {
+        let mut node = elt(name, attrs);
+        if let XmlNode::Elem { children, .. } = &mut node {
+            children.push(XmlNode::Text(text.to_string()));
+        }
+        node
+    }
+
+    /// The built message carries the configured credentials and the test
+    /// gateway flag, and the IRmark is computed and injected into every
+    /// `ct:IRmark` element.
     #[test]
     fn build_submission_xml_overrides_envelope_and_injects_irmark() {
-        let client = HmrcCorpTaxClient::new(TestData::test_config().with_unreachable_endpoints());
+        let client = HmrcCorpTaxClient::new(test_config().with_unreachable_endpoints());
         let xml = client
-            .build_submission_xml(&TestData::sample_return())
+            .build_submission_xml(&TestSubmission::new("hi"))
             .expect("build");
 
         assert!(xml.contains("<Class>HMRC-CT-CT600</Class>"));
@@ -841,32 +1107,19 @@ mod tests {
     /// message body changes.
     #[test]
     fn irmark_is_deterministic_and_body_sensitive() {
-        let client = HmrcCorpTaxClient::new(TestData::test_config().with_unreachable_endpoints());
+        let client = HmrcCorpTaxClient::new(test_config().with_unreachable_endpoints());
         let xml1 = client
-            .build_submission_xml(&TestData::sample_return())
+            .build_submission_xml(&TestSubmission::new("same"))
             .expect("build");
         let xml2 = client
-            .build_submission_xml(&TestData::sample_return())
+            .build_submission_xml(&TestSubmission::new("same"))
             .expect("build");
         assert_eq!(irmark_of(&xml1), irmark_of(&xml2));
 
-        let mut other = TestData::sample_return();
-        other.turnover += 1.0;
-        let xml3 = client.build_submission_xml(&other).expect("build");
-        assert_ne!(irmark_of(&xml1), irmark_of(&xml3));
-    }
-
-    /// The IRmark for the sample return matches the value produced by the
-    /// reference `ct600` Python tool's `get_irmark` / `irmark.compute`
-    /// (verified by running that algorithm on the built message with lxml).
-    /// The envelope timestamp is in the header, so the body hash is stable.
-    #[test]
-    fn irmark_matches_reference_tool() {
-        let client = HmrcCorpTaxClient::new(TestData::test_config().with_unreachable_endpoints());
-        let xml = client
-            .build_submission_xml(&TestData::sample_return())
+        let xml3 = client
+            .build_submission_xml(&TestSubmission::new("different"))
             .expect("build");
-        assert_eq!(irmark_of(&xml), "FFRGJ9wKKopilSidXDMBBZ5AXAY=");
+        assert_ne!(irmark_of(&xml1), irmark_of(&xml3));
     }
 
     fn irmark_of(xml: &str) -> String {
@@ -964,13 +1217,13 @@ mod tests {
         let stub = StubGateway::spawn().await;
 
         let client = HmrcCorpTaxClient::new(
-            TestData::test_config()
+            test_config()
                 .with_submission_url(format!("{}/submission", stub.base))
                 .with_poll_url(format!("{}/poll", stub.base)),
         );
 
         let outcome = client
-            .submit_and_poll(&TestData::sample_return())
+            .submit_and_poll(&TestSubmission::new("hello"))
             .await
             .expect("lifecycle");
         assert_eq!(outcome.correlation_id, "CORR-1");
@@ -986,14 +1239,14 @@ mod tests {
             .store(true, std::sync::atomic::Ordering::Relaxed);
 
         let client = HmrcCorpTaxClient::new(
-            TestData::test_config()
+            test_config()
                 .with_submission_url(format!("{}/submission", stub.base))
                 .with_poll_url(format!("{}/poll", stub.base))
                 .with_poll_timeout(Duration::from_secs(10)),
         );
 
         let receipt = client
-            .submit(&TestData::sample_return())
+            .submit(&TestSubmission::new("hello"))
             .await
             .expect("submit");
         match client.poll(&receipt).await {
@@ -1003,4 +1256,13 @@ mod tests {
             other => panic!("expected SubmissionError, got {other:?}"),
         }
     }
+
+    /// A `HmrcCorpTaxConfig` with fixed test credentials.
+    fn test_config() -> HmrcCorpTaxConfig {
+        HmrcCorpTaxConfig::test_from_env()
+            .with_username("testuser")
+            .with_password("testpass")
+            .with_vendor_id("1234")
+    }
 }
+

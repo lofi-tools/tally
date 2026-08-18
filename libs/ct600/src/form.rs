@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
+use companies_house::{CompanyProfile, CompanyType};
 use serde::Serialize;
 use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
 
@@ -370,6 +371,24 @@ pub struct CompanyFormValues {
 }
 
 impl CompanyFormValues {
+    /// Build the CT600 company header boxes from a Companies House profile
+    /// and the tax computation.
+    pub fn from_profile_and_tax(profile: &CompanyProfile, tax: &Frs105CorpTax) -> Self {
+        Self {
+            company_name: profile.company_name.clone(),
+            company_number: profile.company_number.clone(),
+            tax_reference: tax.tax_reference().to_string(),
+            type_of_company: profile
+                .company_type
+                .as_deref()
+                .and_then(CompanyType::parse_str)
+                .map(CompanyType::code)
+                .unwrap_or(0),
+            start: tax.start(),
+            end: tax.end(),
+        }
+    }
+
     /// Derive the company header boxes from a computed [`Frs105CorpTax`].
     pub fn from_tax(tax: &Frs105CorpTax) -> Self {
         Self {
@@ -689,7 +708,7 @@ mod tests {
     /// for the period, boxes 327/328 for each straddling financial year.
     #[test]
     fn test_to_map_associated_companies_group_count() {
-        let mut tax = crate::companies_house::test_utils::TestData::sample_tax();
+        let mut tax = crate::test_utils::TestData::sample_tax();
         tax.accounts.associated_companies = 2;
         let map = Ct600FormValues::from_tax(&tax).to_map();
 
@@ -702,7 +721,7 @@ mod tests {
     /// only: boxes 327/328 (per financial year) stay unset.
     #[test]
     fn test_to_map_associated_companies_without_straddle() {
-        let mut tax = crate::companies_house::test_utils::TestData::sample_tax();
+        let mut tax = crate::test_utils::TestData::sample_tax();
         tax.accounts.period = Some(ixbrl::company::AccountingPeriod {
             start: NaiveDate::from_ymd_opt(2026, 4, 1).unwrap(),
             end: NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
@@ -754,7 +773,7 @@ mod tests {
     /// net (155 minus 160).
     #[test]
     fn test_to_map_losses_brought_forward_boxes() {
-        let mut tax = crate::companies_house::test_utils::TestData::sample_tax();
+        let mut tax = crate::test_utils::TestData::sample_tax();
         tax.adjusted_trading_profit = 5000.0;
         tax.trading_losses_brought_forward = -2000.0;
         tax.net_trading_profits = 3000.0;

@@ -1,35 +1,126 @@
 #![cfg(test)]
 //! Test utilities for the ct600 crate.
 //!
-//! The company fixtures and offline test clients live in
-//! `crate::companies_house::test_utils`; [`sample_values`] derives the CT600
-//! form values from the shared sample tax computation and [`TestData`] hosts
-//! the hardcoded fixtures for the HMRC client tests (a sample return and a
-//! test config), so tests run with zero configuration on a fresh checkout.
+//! [`TestData::sample_tax`] is the shared sample FRS 105 tax computation
+//! (the company fixtures it builds on live in the
+//! [`companies_house::test_utils`] module of the client crate), [`sample_values`]
+//! derives the CT600 form values from it, and [`REPO`] resolves the
+//! repository root (the live-tests cache lives under `.cache/api_responses`).
 
-use crate::clients::HmrcCorpTaxConfig;
-use crate::clients::hmrc_corp_tax::CLASS_LIVE;
 use crate::ct600_return::{
     CompanyInformation, Ct600Return, Declaration, EnvelopeConfig, FinancialYear,
     ReturnInfoSummary,
 };
 use crate::form::Ct600FormValues;
-use crate::govtalk::{
-    GovTalkDeleteResponse, GovTalkParams, GovTalkSubmissionAcknowledgement, GovTalkSubmissionError,
-    GovTalkSubmissionResponse, Message,
-};
 use chrono::NaiveDate;
 
 /// The CT600 form values derived from the shared sample tax computation
-/// (`crate::companies_house::test_utils::TestData::sample_tax`).
+/// ([`TestData::sample_tax`]).
 pub fn sample_values() -> Ct600FormValues {
-    Ct600FormValues::from_tax(&crate::companies_house::test_utils::TestData::sample_tax())
+    Ct600FormValues::from_tax(&TestData::sample_tax())
 }
 
-/// Hardcoded test data for the HMRC Corporation Tax client tests.
+/// The repository root directory.
+pub static REPO: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
+    let path_bytes = std::process::Command::new("git")
+        .arg("rev-parse")
+        .arg("--show-toplevel")
+        .output()
+        .unwrap()
+        .stdout;
+    let path_str = std::str::from_utf8(&path_bytes).unwrap().trim();
+    std::path::PathBuf::from(path_str)
+});
+
+/// Hardcoded test data: the shared sample tax computation.
 pub struct TestData;
 
 impl TestData {
+    /// A sample FRS 105 tax computation for a fictional company (Acme Ltd,
+    /// company number `9876543`, period 2025), including the numeric facts
+    /// (profits, tax rates, allowances, R&D) so the derived form values are
+    /// fully populated.
+    pub fn sample_tax() -> ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax {
+        let mut facts = ixbrl::ixbrl_fmt::ParsedIxBrlFacts::default();
+        facts
+            .non_numeric
+            .insert("ct-comp:CompanyName".to_string(), "Acme Ltd".to_string());
+        facts
+            .non_numeric
+            .insert("ct-comp:TaxReference".to_string(), "1234567890".to_string());
+        facts.non_numeric.insert(
+            "ct-comp:FinancialYear1CoveredByTheReturn".to_string(),
+            "2025".to_string(),
+        );
+        facts.non_numeric.insert(
+            "ct-comp:FinancialYear2CoveredByTheReturn".to_string(),
+            "2026".to_string(),
+        );
+        facts.non_numeric.insert(
+            "ct-comp:PeriodOfAccountStartDate".to_string(),
+            "1 January 2026".to_string(),
+        );
+        facts.non_numeric.insert(
+            "ct-comp:PeriodOfAccountEndDate".to_string(),
+            "31 December 2026".to_string(),
+        );
+        for (name, ctx, v) in [
+            (
+                "ct-comp:AdjustedTradingProfitOfThisPeriod",
+                "ctxt-3",
+                12345.0,
+            ),
+            ("ct-comp:NetTradingProfits", "ctxt-3", 12345.0),
+            (
+                "ct-comp:FY1AmountOfProfitChargeableAtFirstRate",
+                "ctxt-3",
+                6000.0,
+            ),
+            (
+                "ct-comp:FY2AmountOfProfitChargeableAtFirstRate",
+                "ctxt-3",
+                6345.0,
+            ),
+            ("ct-comp:FY1FirstRateOfTax", "ctxt-1", 19.0),
+            ("ct-comp:FY2FirstRateOfTax", "ctxt-1", 19.0),
+            ("ct-comp:FY1TaxAtFirstRate", "ctxt-3", 1140.0),
+            ("ct-comp:FY2TaxAtFirstRate", "ctxt-3", 1205.55),
+            ("ct-comp:CorporationTaxChargeable", "ctxt-3", 2345.55),
+            ("ct-comp:TaxChargeable", "ctxt-3", 2345.55),
+            ("ct-comp:TaxPayable", "ctxt-3", 2345.55),
+            (
+                "ct-comp:MainPoolAnnualInvestmentAllowance",
+                "ctxt-2",
+                1000.0,
+            ),
+            (
+                "ct-comp:AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+                "ctxt-4",
+                5000.0,
+            ),
+        ] {
+            facts
+                .numeric_by_ctx
+                .insert((name.to_string(), ctx.to_string()), v);
+        }
+
+        // The company is built from the client crate's sample company so the
+        // profile served for it (by `tax.company_number()`) can never
+        // disagree with the tax computation.
+        let sample = companies_house::test_utils::TestData::sample_company();
+        let mut company = ixbrl::company::Company::new(
+            &sample.company_name,
+            "1234567890",
+            &sample.company_number,
+        );
+        company.registration_date = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+        ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax::from_parsed_facts(
+            &facts,
+            &company,
+            &companies_house::test_utils::TestData::sample_accounts_meta(),
+        )
+    }
+
     /// A minimal but complete `Ct600Return` for message-building tests.
     pub fn sample_return() -> Ct600Return {
         Ct600Return {
@@ -88,143 +179,5 @@ impl TestData {
             computation_document: Some("<html/>".to_string()),
             accounts_document: Some("<html/>".to_string()),
         }
-    }
-
-    /// A `HmrcCorpTaxConfig` with fixed test credentials.
-    pub fn test_config() -> HmrcCorpTaxConfig {
-        HmrcCorpTaxConfig::test_from_env()
-            .with_username("testuser")
-            .with_password("testpass")
-            .with_vendor_id("1234")
-    }
-}
-
-// ============================================================================
-// An in-process GovTalk stub gateway
-// ============================================================================
-
-/// A minimal in-process stand-in for the HMRC Transaction Engine.
-///
-/// Accepts submission requests (replying with an acknowledgement), responds
-/// to polls with either a success response or a gateway error (controlled by
-/// [`Self::reject_polls`]), and counts delete requests.  The client is pointed
-/// at it with `HmrcCorpTaxConfig::with_submission_url` / `with_poll_url`.
-pub(crate) struct StubGateway {
-    /// The base URL (`http://host:port`) of the stub.
-    pub(crate) base: String,
-    /// When set, polls are answered with a gateway error instead of a
-    /// success response.
-    pub(crate) reject_polls: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    deletions: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-}
-
-impl StubGateway {
-    /// Bind a listener on an ephemeral port and serve requests in the
-    /// background.
-    pub(crate) async fn spawn() -> Self {
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind stub");
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let reject_polls = std::sync::Arc::new(AtomicBool::new(false));
-        let deletions = std::sync::Arc::new(AtomicUsize::new(0));
-        let reject = reject_polls.clone();
-        let del = deletions.clone();
-
-        tokio::spawn(async move {
-            loop {
-                let (mut socket, _) = match listener.accept().await {
-                    Ok(pair) => pair,
-                    Err(_) => break,
-                };
-                let reject = reject.clone();
-                let del = del.clone();
-                tokio::spawn(async move {
-                    let mut buf = vec![0u8; 16384];
-                    let n = match socket.read(&mut buf).await {
-                        Ok(n) if n > 0 => n,
-                        _ => return,
-                    };
-                    let request = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let response = route(&request, reject.load(Ordering::Relaxed), &del);
-                    let _ = socket
-                        .write_all(
-                            format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                                response.len(),
-                                response
-                            )
-                            .as_bytes(),
-                        )
-                        .await;
-                });
-            }
-        });
-
-        Self {
-            base,
-            reject_polls,
-            deletions,
-        }
-    }
-
-    /// Whether a delete request has been received.
-    pub(crate) fn deleted(&self) -> bool {
-        self.deletions.load(std::sync::atomic::Ordering::Relaxed) > 0
-    }
-}
-
-/// Route a raw HTTP request body to a GovTalk response.
-fn route(request: &str, reject_polls: bool, deletions: &std::sync::atomic::AtomicUsize) -> String {
-    if request.contains("Qualifier>request") && request.contains("Function>submit") {
-        // Submission request -> acknowledgement with a correlation ID.
-        let params = GovTalkParams {
-            class: CLASS_LIVE.to_string(),
-            function: "submit".to_string(),
-            qualifier: "acknowledgement".to_string(),
-            correlation_id: "CORR-1".to_string(),
-            response_endpoint: String::new(),
-            poll_interval: "1".to_string(),
-            ..Default::default()
-        };
-        GovTalkSubmissionAcknowledgement::new(params).to_xml().expect("ack")
-    } else if request.contains("Qualifier>poll") {
-        if reject_polls {
-            let params = GovTalkParams {
-                class: CLASS_LIVE.to_string(),
-                function: "submit".to_string(),
-                qualifier: "error".to_string(),
-                correlation_id: "CORR-1".to_string(),
-                error_number: "1001".to_string(),
-                error_type: "business".to_string(),
-                error_text: "Box 145 is invalid".to_string(),
-                ..Default::default()
-            };
-            GovTalkSubmissionError::new(params).to_xml().expect("error")
-        } else {
-            let params = GovTalkParams {
-                class: CLASS_LIVE.to_string(),
-                function: "submit".to_string(),
-                qualifier: "response".to_string(),
-                correlation_id: "CORR-1".to_string(),
-                success_response_message: "Submission processed successfully".to_string(),
-                ..Default::default()
-            };
-            GovTalkSubmissionResponse::new(params).to_xml().expect("response")
-        }
-    } else if request.contains("Function>delete") {
-        deletions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let params = GovTalkParams {
-            class: CLASS_LIVE.to_string(),
-            function: "delete".to_string(),
-            qualifier: "response".to_string(),
-            correlation_id: "CORR-1".to_string(),
-            ..Default::default()
-        };
-        GovTalkDeleteResponse::new(params).to_xml().expect("delete")
-    } else {
-        String::new()
     }
 }

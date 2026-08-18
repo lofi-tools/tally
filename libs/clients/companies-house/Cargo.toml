@@ -1,0 +1,35 @@
+[package]
+name = "companies-house"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+# Live Companies House API integration tests (in `src/lib.rs`, the
+# `live_tests` module).  `cached_live_tests` (the default) runs them against
+# the repository's `.cache/api_responses`: the first, cold run fetches from
+# the real (or sandbox) API and warms it, repeat runs are served from disk
+# and never touch the API.  Enabling `always_live_tests` instead uses a
+# scratch tempdir cache so every run really hits the network (e.g. to refresh
+# the cache or re-validate against the API).  Disable both with
+# `cargo test -p companies-house --no-default-features` to run fully offline —
+# the live tests are then reported as ignored.
+default = ["cached_live_tests"]
+cached_live_tests = []
+always_live_tests = []
+
+[dependencies]
+# async, web
+tokio = { workspace = true, features = ["full"] }
+reqwest = { workspace = true, features = ["json"] }
+# formats, serde
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+# errors, logs
+snafu.workspace = true
+log = "0.4"
+# internal
+ixbrl = { path = "../../ixbrl" }
+
+[dev-dependencies]
+tempfile = "3.27.0"

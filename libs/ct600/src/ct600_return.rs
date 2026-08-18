@@ -18,6 +18,7 @@
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{Local, NaiveDate, NaiveDateTime};
+use hmrc_corp_tax::{SubmissionEnvelope, SubmissionMessage};
 use ixbrl::ixbrl_fmt::{el, elt, elt_text, XmlNode};
 use ixbrl::reports::uk_frs105_accounts::Frs105Accounts;
 use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
@@ -811,6 +812,36 @@ impl Ct600Return {
 }
 
 // ============================================================================
+// DSP submission message
+// ============================================================================
+
+/// The return is a DSP submission message: the envelope credentials from the
+/// client's config are embedded, the message serialised, and the IRmark
+/// computed and injected (see the `hmrc-corp-tax` crate's
+/// [`SubmissionMessage`] trait).
+impl SubmissionMessage for Ct600Return {
+    fn build_submission_xml(&self, envelope: &SubmissionEnvelope) -> Result<String, String> {
+        let mut ct600 = self.clone();
+        ct600.envelope = EnvelopeConfig {
+            class: envelope.class.clone(),
+            qualifier: envelope.qualifier.clone(),
+            function: envelope.function.clone(),
+            gateway_test: envelope.gateway_test.clone(),
+            username: envelope.username.clone(),
+            password: envelope.password.clone(),
+            vendor_id: envelope.vendor_id.clone(),
+            software: envelope.software.clone(),
+            software_version: envelope.software_version.clone(),
+            timestamp: envelope.timestamp.naive_local(),
+        };
+        let mut xml = ct600.to_xml();
+        let irmark = hmrc_corp_tax::compute_irmark(&xml)?;
+        hmrc_corp_tax::inject_irmark(&mut xml, &irmark);
+        Ok(xml)
+    }
+}
+
+// ============================================================================
 // Serialisation helpers
 // ============================================================================
 
@@ -939,7 +970,7 @@ fn parse_yesno(raw: &str, path: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::companies_house::test_utils::REPO;
+    use crate::test_utils::REPO;
     use ixbrl::company::CompanyProfile;
     use std::collections::HashMap;
 

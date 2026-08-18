@@ -1,8 +1,17 @@
 [workspace]
-members = ["apps/*", "libs/*", "apps/tally-api/tests-common"]
+members = [
+  "apps/*",
+  "libs/*",
+  # the external-service API clients live under libs/clients (the container
+  # directory itself is excluded below, so its crates are listed explicitly)
+  "libs/clients/companies-house",
+  "libs/clients/hmrc-corp-tax",
+  "apps/tally-api/tests-common",
+]
 # JS-only packages that live under apps/* but are not Cargo crates
-# (cargo requires every workspace-member glob match to be a crate).
-exclude = ["apps/design-system-showcase", "apps/tally-web"]
+# (cargo requires every workspace-member glob match to be a crate), plus the
+# libs/clients container directory (its crates are listed as members above).
+exclude = ["apps/design-system-showcase", "apps/tally-web", "libs/clients"]
 resolver = "2"
 
 [workspace.dependencies]

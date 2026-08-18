@@ -21,29 +21,14 @@ always_live_tests = []
 [dependencies]
 # async, web
 tokio = { workspace = true, features = ["full"] }
-futures.workspace = true
-reqwest = { workspace = true, features = ["json", "multipart"] }
 # formats, serde
 serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-serde_yaml = "0.9"
-quick-xml = { version = "0.41.0", features = ["serialize"] }
-serde_with = "3.22.0"
 chrono = { workspace = true, features = ["serde"] }
 base64.workspace = true
-url = "2.5"
-uuid = { workspace = true, features = ["v4"] }
-# errors, logs
-anyhow.workspace = true
-snafu.workspace = true
-log = "0.4"
-env_logger = "0.11.11"
-# crypto
-sha1 = "^0.11"
-bergshamra-c14n = "0.8.0"
-uppsala = "0.9"
 # internal
 ixbrl = { path = "../ixbrl" }
+companies-house = { path = "../clients/companies-house" }
+hmrc-corp-tax = { path = "../clients/hmrc-corp-tax" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
