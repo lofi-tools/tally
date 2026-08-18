@@ -818,6 +818,7 @@ mod tests {
             category: Some("accounts".into()),
             form_type: Some("AA".into()),
             description: Some("micro company accounts".into()),
+            description_values: Default::default(),
             links: Some(ct600::companies_house::FilingHistoryLinks {
                 self_link: Some("/company/00445790/filing-history/MzA1OTg4NDcwMDY5".into()),
                 document_metadata: None,
@@ -833,6 +834,7 @@ mod tests {
             category: Some("accounts".into()),
             form_type: Some("AA".into()),
             description: Some("x".into()),
+            description_values: Default::default(),
             links: None,
         };
         assert_eq!(ch_transaction_id(&item), "accounts|AA|2024-03-31");

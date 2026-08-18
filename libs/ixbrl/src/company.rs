@@ -448,6 +448,89 @@ mod tests {
         assert_eq!(p2.end, NaiveDate::from_ymd_opt(2026, 5, 31).unwrap());
     }
 
+    /// All periods from a fixed registration date (2022-11-28): the early
+    /// periods are asserted exactly, and the whole run from incorporation to
+    /// today is asserted coherent (ordered, contiguous, the last period the
+    /// one containing today).
+    #[test]
+    fn test_accounting_periods_all_from_2022_11_28() {
+        let mut c = Company::new("Co", "tax", "num");
+        c.registration_date = NaiveDate::from_ymd_opt(2022, 11, 28).unwrap();
+
+        // The anchors for this registration date: the first ARD is the last
+        // day of the anniversary month (gov.uk rule) — 30 Nov 2023.
+        assert_eq!(c.first_ard(), NaiveDate::from_ymd_opt(2023, 11, 30).unwrap());
+        assert_eq!(
+            c.accounting_period_n(0),
+            AccountingPeriod {
+                start: NaiveDate::from_ymd_opt(2022, 11, 28).unwrap(),
+                end: NaiveDate::from_ymd_opt(2023, 11, 27).unwrap(),
+            }
+        );
+        assert_eq!(
+            c.accounting_period_n(1),
+            AccountingPeriod {
+                start: NaiveDate::from_ymd_opt(2023, 11, 28).unwrap(),
+                end: NaiveDate::from_ymd_opt(2023, 11, 30).unwrap(),
+            }
+        );
+        // n >= 2 run from the day after the ARD in full years (ARD 30 Nov).
+        assert_eq!(
+            c.accounting_period_n(2),
+            AccountingPeriod {
+                start: NaiveDate::from_ymd_opt(2023, 12, 1).unwrap(),
+                end: NaiveDate::from_ymd_opt(2024, 11, 30).unwrap(),
+            }
+        );
+        assert_eq!(
+            c.accounting_period_n(3),
+            AccountingPeriod {
+                start: NaiveDate::from_ymd_opt(2024, 12, 1).unwrap(),
+                end: NaiveDate::from_ymd_opt(2025, 11, 30).unwrap(),
+            }
+        );
+
+        // Every period from incorporation to today.
+        let today = chrono::Utc::now().date_naive();
+        let mut periods = Vec::new();
+        let mut n = 0u32;
+        loop {
+            let period = c.accounting_period_n(n);
+            if period.start > today {
+                break;
+            }
+            periods.push(period);
+            n += 1;
+        }
+
+        assert!(
+            periods.len() >= 4,
+            "a 2022 incorporation has at least the periods 0..=3 by now"
+        );
+        assert_eq!(
+            periods[0].start,
+            NaiveDate::from_ymd_opt(2022, 11, 28).unwrap(),
+            "the first period starts at incorporation"
+        );
+        assert!(
+            periods.last().unwrap().end >= today,
+            "the last period reaches today"
+        );
+        for window in periods.windows(2) {
+            assert_eq!(
+                window[1].start,
+                window[0].end + chrono::Duration::days(1),
+                "periods are contiguous"
+            );
+            assert!(window[0].start < window[0].end, "periods are ordered");
+        }
+        assert_eq!(
+            *periods.last().unwrap(),
+            c.accounting_period_containing(today),
+            "the last period is the one containing today"
+        );
+    }
+
     #[test]
     fn test_accounting_period_containing() {
         let mut c = Company::new("Co", "tax", "num");

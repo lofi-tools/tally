@@ -893,6 +893,11 @@ pub struct FilingHistoryItem {
     /// Human-readable description of the filing.
     #[serde(default)]
     pub description: Option<String>,
+    /// Key/value description values from the API (e.g. an accounts filing's
+    /// `made_up_date` / `period_start_on` / `period_end_on`), used to read
+    /// the period a filing covers.
+    #[serde(default)]
+    pub description_values: std::collections::BTreeMap<String, String>,
     /// Resource links for the filing.
     #[serde(default)]
     pub links: Option<FilingHistoryLinks>,
@@ -938,6 +943,52 @@ impl FilingHistory {
         self.items
             .iter()
             .filter(|item| item.category.as_deref() == Some("accounts"))
+    }
+
+    /// The filings parsed into typed dates ([`ParsedFiling`]): each filing's
+    /// registration date and, when the API reports one, the period it covers
+    /// (see [`ParsedFiling::from`]).
+    pub fn parsed(&self) -> impl Iterator<Item = ParsedFiling> {
+        self.items.iter().map(ParsedFiling::from)
+    }
+}
+
+/// A past filing parsed into typed dates: when it was registered and the
+/// period it covers (when the API reports one — e.g. the accounts filings'
+/// `made_up_date` / `period_start_on` / `period_end_on` description values).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParsedFiling {
+    /// When the filing was registered with Companies House.
+    pub filed_on: Option<NaiveDate>,
+    /// The start of the period the filing covers, when reported.
+    pub period_start: Option<NaiveDate>,
+    /// The end of the period the filing covers, when reported.
+    pub period_end: Option<NaiveDate>,
+    /// Filing category, e.g. `accounts`, `confirmation-statement`.
+    pub category: Option<String>,
+    /// Form type code, e.g. `AA` (accounts), `CS01` (confirmation statement).
+    pub form_type: Option<String>,
+    /// Human-readable description of the filing.
+    pub description: Option<String>,
+}
+
+impl From<&FilingHistoryItem> for ParsedFiling {
+    fn from(item: &FilingHistoryItem) -> Self {
+        let parse = |key: &str| {
+            item.description_values
+                .get(key)
+                .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        };
+        Self {
+            filed_on: item.filed_on(),
+            period_start: parse("period_start_on"),
+            period_end: parse("period_end_on")
+                .or_else(|| parse("made_up_to"))
+                .or_else(|| parse("made_up_date")),
+            category: item.category.clone(),
+            form_type: item.form_type.clone(),
+            description: item.description.clone(),
+        }
     }
 }
 
@@ -2040,6 +2091,10 @@ mod tests {
                     category: Some("accounts".to_string()),
                     form_type: Some("AA02".to_string()),
                     description: Some("micro-entity accounts".to_string()),
+                    description_values: std::collections::BTreeMap::from([
+                        ("period_start_on".to_string(), "2024-07-01".to_string()),
+                        ("made_up_date".to_string(), "2025-06-30".to_string()),
+                    ]),
                     links: None,
                 },
                 FilingHistoryItem {
@@ -2047,6 +2102,7 @@ mod tests {
                     category: Some("confirmation-statement".to_string()),
                     form_type: Some("CS01".to_string()),
                     description: None,
+                    description_values: Default::default(),
                     links: None,
                 },
                 FilingHistoryItem {
@@ -2054,6 +2110,10 @@ mod tests {
                     category: Some("accounts".to_string()),
                     form_type: Some("AA02".to_string()),
                     description: Some("micro-entity accounts".to_string()),
+                    description_values: std::collections::BTreeMap::from([
+                        ("period_start_on".to_string(), "2023-07-01".to_string()),
+                        ("made_up_date".to_string(), "2024-06-30".to_string()),
+                    ]),
                     links: None,
                 },
             ],
@@ -2077,6 +2137,73 @@ mod tests {
             accounts[1].filed_on(),
             Some(NaiveDate::from_ymd_opt(2024, 6, 30).unwrap())
         );
+    }
+
+    /// The cached raw filing history parses into typed dates: each filing's
+    /// registration date and, for the accounts filings, the period they cover
+    /// (from the `description_values`).
+    #[tokio::test]
+    async fn parsed_filings_from_cached_history() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let client = CompaniesHouseClient::offline().with_cache_dir(cache_dir.path());
+
+        let history = FilingHistory {
+            total_count: Some(2),
+            items: vec![
+                FilingHistoryItem {
+                    date: Some("2025-06-30".to_string()),
+                    category: Some("accounts".to_string()),
+                    form_type: Some("AA02".to_string()),
+                    description: Some("micro-entity accounts".to_string()),
+                    description_values: std::collections::BTreeMap::from([
+                        ("period_start_on".to_string(), "2024-07-01".to_string()),
+                        ("made_up_date".to_string(), "2025-06-30".to_string()),
+                    ]),
+                    links: None,
+                },
+                FilingHistoryItem {
+                    date: Some("2025-06-01".to_string()),
+                    category: Some("confirmation-statement".to_string()),
+                    form_type: Some("CS01".to_string()),
+                    description: None,
+                    description_values: Default::default(),
+                    links: None,
+                },
+            ],
+        };
+        seed_filing_history(cache_dir.path(), "12345678", &history);
+
+        let fetched = client
+            .get_filing_history("12345678")
+            .await
+            .expect("serving from cache should succeed");
+        assert_eq!(fetched.total_count, Some(2));
+
+        let filings: Vec<_> = fetched.parsed().collect();
+        assert_eq!(filings.len(), 2);
+
+        let accounts = &filings[0];
+        assert_eq!(accounts.category.as_deref(), Some("accounts"));
+        assert_eq!(
+            accounts.filed_on,
+            Some(NaiveDate::from_ymd_opt(2025, 6, 30).unwrap())
+        );
+        assert_eq!(
+            accounts.period_start,
+            Some(NaiveDate::from_ymd_opt(2024, 7, 1).unwrap())
+        );
+        assert_eq!(
+            accounts.period_end,
+            Some(NaiveDate::from_ymd_opt(2025, 6, 30).unwrap())
+        );
+
+        let cs = &filings[1];
+        assert_eq!(
+            cs.filed_on,
+            Some(NaiveDate::from_ymd_opt(2025, 6, 1).unwrap())
+        );
+        assert_eq!(cs.period_start, None);
+        assert_eq!(cs.period_end, None);
     }
 
     /// A company with registration 2024-01-01, whose cached profile announces
@@ -2335,8 +2462,9 @@ mod tests {
 ///
 /// These tests exercise the real (or sandbox) Companies House API and are
 /// part of the default-enabled `api_tests` feature, so a plain
-/// `cargo test -p ct600` runs them.  They need an API key and a
-/// `COMPANY_NUMBER`; without them they fail with a clear message:
+/// `cargo test -p ct600` runs them.  They need an API key and (for most of
+/// them) a `COMPANY_NUMBER` — the period and past-filings tests default to
+/// the real company `14510633`.  Without them they fail with a clear message:
 ///
 /// ```bash
 /// export COMPANIES_HOUSE_API_KEY="your-api-key"           # live API
@@ -2423,6 +2551,127 @@ mod live_tests {
             assert!(
                 item.filed_on().is_some(),
                 "an accounts filing carries a registration date: {item:?}"
+            );
+        }
+    }
+
+    /// The company profile of a real company (default `14510633`, overridable
+    /// with `COMPANY_NUMBER`) drives the accounting-period schedule: every
+    /// period from incorporation to today is asserted coherent (ordered,
+    /// contiguous, the first starting at the registration date and the last
+    /// reaching today).
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "api_tests"),
+        ignore = "requires a Companies House API key"
+    )]
+    async fn live_profile_periods() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let number =
+            std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
+        let client = live_client(cache_dir.path());
+
+        // The client's company-details method: the profile carries the
+        // registration date that anchors the period schedule.
+        let profile = client
+            .get_company_profile(&number)
+            .await
+            .expect("fetch the company profile");
+        assert_eq!(profile.company_number, number);
+        let registration_date = profile
+            .date_of_creation
+            .as_deref()
+            .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .expect("the profile carries a parseable date of creation");
+
+        let mut company = Company::new("", "", &number);
+        company.registration_date = registration_date;
+        let today = chrono::Utc::now().date_naive();
+
+        // All periods from incorporation to today.
+        let mut periods = Vec::new();
+        let mut n = 0u32;
+        loop {
+            let period = company.accounting_period_n(n);
+            if period.start > today {
+                break;
+            }
+            periods.push(period);
+            n += 1;
+        }
+
+        println!(
+            "company {number} ({}) — periods from {registration_date} to {today}:",
+            profile.company_name
+        );
+        for (i, period) in periods.iter().enumerate() {
+            println!("  period {i}: {} → {}", period.start, period.end);
+        }
+
+        assert!(!periods.is_empty(), "at least the period containing today");
+        assert_eq!(
+            periods[0].start, registration_date,
+            "the first period starts at incorporation"
+        );
+        assert!(
+            periods.last().unwrap().end >= today,
+            "the last period reaches today"
+        );
+        for window in periods.windows(2) {
+            assert_eq!(
+                window[1].start,
+                window[0].end + chrono::Duration::days(1),
+                "periods are contiguous"
+            );
+            assert!(window[0].start < window[0].end, "periods are ordered");
+        }
+        assert_eq!(
+            *periods.last().unwrap(),
+            company.accounting_period_containing(today),
+            "the last period is the one containing today"
+        );
+    }
+
+    /// The past filings of a real company (default `14510633`, overridable
+    /// with `COMPANY_NUMBER`) parse into typed dates — printed: the period
+    /// each filing covers and when it was filed.
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "api_tests"),
+        ignore = "requires a Companies House API key"
+    )]
+    async fn live_past_filings_print_dates() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let number =
+            std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
+        let client = live_client(cache_dir.path());
+
+        let history = client
+            .get_filing_history(&number)
+            .await
+            .expect("fetch the filing history");
+        let filings: Vec<_> = history.parsed().collect();
+        println!(
+            "past filings for {number} ({} total):",
+            history.total_count.unwrap_or(filings.len())
+        );
+        for item in &filings {
+            let filed = item
+                .filed_on
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "—".to_string());
+            let start = item
+                .period_start
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "—".to_string());
+            let end = item
+                .period_end
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "—".to_string());
+            println!(
+                "  filed {filed}  period {start} → {end}  {}  {}",
+                item.form_type.as_deref().unwrap_or(""),
+                item.description.as_deref().unwrap_or("")
             );
         }
     }
