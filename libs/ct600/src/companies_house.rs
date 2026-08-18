@@ -20,7 +20,8 @@
 use crate::form::CompanyFormValues;
 use chrono::{Datelike, Months, NaiveDate};
 use ixbrl::company::{AccountingPeriod, Company};
-use ixbrl::reports::uk_frs105_accounts::Frs105Accounts;
+use ixbrl::ixbrl_fmt::{ParsedIxBrlFacts, XmlNode, xbrl_context_dimensions};
+use ixbrl::reports::uk_frs105_accounts::PreviousYearFigures;
 use ixbrl::reports::uk_frs105_corp_tax::Frs105CorpTax;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -1472,6 +1473,237 @@ pub struct OtherFiling {
     pub description: Option<String>,
     /// The raw form type code (e.g. `AD01`).
     pub form_type: Option<String>,
+}
+
+// ============================================================================
+// Filed document parsing (two passes: generic iXBRL -> IR -> filing-specific)
+// ============================================================================
+
+/// A balance sheet parsed from a filed accounts document (an `AA`-family
+/// filing). The figures are the filed period's line items in the
+/// [`PreviousYearFigures`] shape (whole pounds; creditor lines negative),
+/// and the period is recovered from the document itself.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiledBalanceSheet {
+    /// ISO-8601 — the start of the period the accounts cover.
+    pub period_start: NaiveDate,
+    /// ISO-8601 — the end of the period the accounts cover.
+    pub period_end: NaiveDate,
+    /// The balance-sheet line items for the filed period.
+    pub figures: PreviousYearFigures,
+}
+
+/// Parse a filed accounts document (the iXBRL HTML/XML CH serves) into a
+/// [`FiledBalanceSheet`].
+///
+/// Two passes, as for every filed-document type: first the **generic** iXBRL
+/// pass ([`XmlNode::from_xml_string`] + [`ParsedIxBrlFacts::from_node`], the
+/// shared fact IR), then this **accounts-filing-specific** pass over the IR.
+/// It resolves the FRC UK-taxonomy balance-sheet facts in the current-period
+/// context (the instant context at the period end; the two creditor lines
+/// sit in the `WithinOneYear` / `AfterOneYear` dimension contexts) and
+/// applies the reports' sign convention (creditor lines negative).  Both CH
+/// renderings are tolerated: the FRC 2023 taxonomy (`uk-core:`, ISO period
+/// dates, no comparatives) and the FRC 2024 one (`core:`, `DD.MM.YY` period
+/// dates, comparatives present) — the figures reported are always the filed
+/// (current) period.
+///
+/// Fails when the document is not a parseable accounts iXBRL file (PDFs,
+/// zips, other taxonomies).
+pub fn parse_filed_accounts(html: &str) -> Result<FiledBalanceSheet, String> {
+    let node = XmlNode::from_xml_string(html)?;
+    let facts = ParsedIxBrlFacts::from_node(&node);
+    let dims = xbrl_context_dimensions(&node);
+    let periods = context_periods(&node);
+
+    let period_date = |key: &str| -> Result<NaiveDate, String> {
+        let raw = facts
+            .non_numeric
+            .get(key)
+            .ok_or_else(|| format!("the document carries no {key} fact"))?;
+        parse_filed_date(raw).ok_or_else(|| format!("the document's {key} is not a parseable date"))
+    };
+    let period_start = period_date("uk-bus:StartDateForPeriodCoveredByReport")?;
+    let period_end = period_date("uk-bus:EndDateForPeriodCoveredByReport")?;
+
+    // The current-period instant contexts: those whose instant is the period
+    // end (comparatives, when present, sit at the earlier instant and are
+    // excluded).
+    let mut at_end: Vec<&str> = periods
+        .iter()
+        .filter(|(_, p)| p.instant == Some(period_end))
+        .map(|(id, _)| id.as_str())
+        .collect();
+    at_end.sort_unstable();
+
+    // The default current context holds most lines: the no-dimension instant
+    // context at the period end carrying the most balance-sheet facts (CH
+    // renders exactly one — `icur1` / `CY_END` — the heuristic keeps the
+    // choice deterministic).
+    let figure_stems = [
+        "FixedAssets",
+        "CurrentAssets",
+        "NetCurrentAssetsLiabilities",
+        "TotalAssetsLessCurrentLiabilities",
+        "NetAssetsLiabilities",
+        "Equity",
+    ];
+    let default = at_end
+        .iter()
+        .copied()
+        .filter(|ctx| dims.get(*ctx).map(|d| d.is_empty()).unwrap_or(true))
+        .max_by_key(|ctx| {
+            figure_stems
+                .iter()
+                .filter(|stem| has_fact(&facts, ctx, stem))
+                .count()
+        });
+
+    // Fact lookups try both taxonomies' prefixes (FRC 2024 `core:`, FRC
+    // 2023 `uk-core:`); dimension members likewise (`core:WithinOneYear` vs
+    // `uk-core:WithinOneYear`).
+    let num = |ctx: Option<&str>, stem: &str| -> f64 {
+        ctx.and_then(|c| {
+            ["core:", "uk-core:"]
+                .iter()
+                .find_map(|prefix| {
+                    facts
+                        .numeric_by_ctx
+                        .get(&(format!("{prefix}{stem}"), c.to_string()))
+                        .copied()
+                })
+        })
+        .unwrap_or(0.0)
+    };
+    let num_dim = |stem: &str, member: &str| -> f64 {
+        let ctx = at_end.iter().copied().find(|ctx| {
+            dims.get(*ctx).is_some_and(|d| {
+                d.values()
+                    .any(|v| v == member || v == &format!("uk-{member}"))
+            })
+        });
+        num(ctx, stem)
+    };
+    let current = |stem: &str| num(default, stem);
+
+    Ok(FiledBalanceSheet {
+        period_start,
+        period_end,
+        figures: PreviousYearFigures {
+            fixed_assets: current("FixedAssets"),
+            current_assets: current("CurrentAssets"),
+            prepayments_and_accrued_income: current(
+                "PrepaymentsAccruedIncomeNotExpressedWithinCurrentAssetSubtotal",
+            ),
+            // Creditor lines are stored negative (the reports' convention).
+            creditors_within_1_year: -num_dim("Creditors", "core:WithinOneYear"),
+            net_current_assets: current("NetCurrentAssetsLiabilities"),
+            total_assets_less_liabilities: current("TotalAssetsLessCurrentLiabilities"),
+            creditors_after_1_year: -num_dim("Creditors", "core:AfterOneYear"),
+            provisions_for_liabilities: current("ProvisionsForLiabilitiesBalanceSheetSubtotal"),
+            accruals_and_deferred_income: current(
+                "AccruedLiabilitiesNotExpressedWithinCreditorsSubtotal",
+            ),
+            net_assets: current("NetAssetsLiabilities"),
+            capital_and_reserves: current("Equity"),
+        },
+    })
+}
+
+/// Whether the IR holds a numeric fact for `stem` (either taxonomy prefix)
+/// in the given context.
+fn has_fact(facts: &ParsedIxBrlFacts, ctx: &str, stem: &str) -> bool {
+    ["core:", "uk-core:"].iter().any(|prefix| {
+        facts
+            .numeric_by_ctx
+            .contains_key(&(format!("{prefix}{stem}"), ctx.to_string()))
+    })
+}
+
+/// Parse a date fact: CH renders the period dates ISO (`2023-11-30`) in the
+/// 2023 taxonomy and `1.12.23` (`ixt2:datedaymonthyear`) in the 2024 one.
+fn parse_filed_date(value: &str) -> Option<NaiveDate> {
+    ["%Y-%m-%d", "%d.%m.%y", "%d.%m.%Y"]
+        .iter()
+        .find_map(|fmt| NaiveDate::parse_from_str(value.trim(), fmt).ok())
+}
+
+/// A context's period: an instant (balance-sheet dates) or a duration
+/// (start → end), as the FRC taxonomy renders them.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct ContextPeriod {
+    instant: Option<NaiveDate>,
+    start: Option<NaiveDate>,
+    end: Option<NaiveDate>,
+}
+
+/// Collect every `xbrli:context`'s period dates: id → instant | start..end.
+fn context_periods(node: &XmlNode) -> std::collections::HashMap<String, ContextPeriod> {
+    let mut out = std::collections::HashMap::new();
+    collect_context_periods(node, &mut out);
+    out
+}
+
+fn collect_context_periods(
+    node: &XmlNode,
+    out: &mut std::collections::HashMap<String, ContextPeriod>,
+) {
+    if let XmlNode::Elem {
+        name,
+        attributes,
+        children,
+    } = node
+    {
+        if name == "xbrli:context"
+            && let Some(id) = attributes
+                .iter()
+                .find(|(k, _)| k == "id")
+                .map(|(_, v)| v.clone())
+        {
+            let mut period = ContextPeriod::default();
+            collect_period_dates(children, &mut period);
+            out.insert(id, period);
+        }
+        for child in children {
+            collect_context_periods(child, out);
+        }
+    }
+}
+
+/// Read the `xbrli:instant` / `xbrli:startDate` / `xbrli:endDate` dates from
+/// a context's subtree (the period element nests below the context).
+fn collect_period_dates(nodes: &[XmlNode], period: &mut ContextPeriod) {
+    for node in nodes {
+        if let XmlNode::Elem {
+            name,
+            children,
+            ..
+        } = node
+        {
+            if matches!(
+                name.as_str(),
+                "xbrli:instant" | "xbrli:startDate" | "xbrli:endDate"
+            ) {
+                let value = children.iter().map(text_of).collect::<String>();
+                let date = NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok();
+                match name.as_str() {
+                    "xbrli:instant" => period.instant = date,
+                    "xbrli:startDate" => period.start = date,
+                    "xbrli:endDate" => period.end = date,
+                    _ => {}
+                }
+            }
+            collect_period_dates(children, period);
+        }
+    }
+}
+
+/// The concatenated text of a node tree (element text or a text node).
+fn text_of(node: &XmlNode) -> String {
+    match node {
+        XmlNode::Text(t) => t.clone(),
+        XmlNode::Elem { children, .. } => children.iter().map(text_of).collect(),
+    }
 }
 
 /// The metadata of a filed document (`GET` on the document API).
@@ -2944,6 +3176,150 @@ mod tests {
         assert_eq!(FormType::Accounts.as_code(), "AA");
     }
 
+    /// A minimal CH WebFiling micro-entity iXBRL document (the FRC UK
+    /// taxonomy) — the shape the real 14510633 accounts filings use:
+    /// `uk-bus:` period facts (ISO dates), `uk-core:` balance-sheet facts in
+    /// the no-dimension instant context (`icur1`), the two `Creditors` lines
+    /// in the `WithinOneYear` / `AfterOneYear` dimension contexts, `zerodash`
+    /// (`-`) for blank figures, no comparatives.
+    fn ch_micro_entity_ixbrl() -> String {
+        let ctx = |id: &str, dim: Option<&str>| {
+            let segment = dim
+                .map(|m| format!(
+                    "<xbrldi:segment><xbrldi:explicitMember dimension=\"uk-core:CreditorsPeriod\">{m}</xbrldi:explicitMember></xbrldi:segment>"
+                ))
+                .unwrap_or_default();
+            format!(
+                "<xbrli:context id=\"{id}\"><xbrli:entity><xbrli:identifier scheme=\"http://www.companieshouse.gov.uk/company\">12345678</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>2023-11-30</xbrli:instant></xbrli:period>{segment}</xbrli:context>"
+            )
+        };
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"
+  xmlns:ix="http://www.xbrl.org/2013/inlineXBRL"
+  xmlns:xbrli="http://www.xbrl.org/2003/instance"
+  xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+  xmlns:uk-bus="http://xbrl.frc.org.uk/cd/2023-01-01/business"
+  xmlns:uk-core="http://xbrl.frc.org.uk/fr/2023-01-01/core">
+<head><title>micro-entity accounts</title></head>
+<body><ix:header><ix:hidden>
+  <ix:nonNumeric contextRef="icur1" name="uk-bus:StartDateForPeriodCoveredByReport">2022-11-28</ix:nonNumeric>
+  <ix:nonNumeric contextRef="icur1" name="uk-bus:EndDateForPeriodCoveredByReport">2023-11-30</ix:nonNumeric>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:zerodash" name="uk-core:FixedAssets" unitRef="GBP">-</ix:nonFraction>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:CurrentAssets" unitRef="GBP">68,946</ix:nonFraction>
+  <ix:nonFraction contextRef="icur9" decimals="2" format="ixt2:numdotdecimal" name="uk-core:Creditors" unitRef="GBP">570</ix:nonFraction>
+  <ix:nonFraction contextRef="icur11" decimals="2" format="ixt2:numdotdecimal" name="uk-core:Creditors" unitRef="GBP">0</ix:nonFraction>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:NetCurrentAssetsLiabilities" unitRef="GBP">68,376</ix:nonFraction>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:TotalAssetsLessCurrentLiabilities" unitRef="GBP">68,376</ix:nonFraction>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:ProvisionsForLiabilitiesBalanceSheetSubtotal" unitRef="GBP">0</ix:nonFraction>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:AccruedLiabilitiesNotExpressedWithinCreditorsSubtotal" unitRef="GBP">0</ix:nonFraction>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:NetAssetsLiabilities" unitRef="GBP">68,376</ix:nonFraction>
+  <ix:nonFraction contextRef="icur1" decimals="2" format="ixt2:numdotdecimal" name="uk-core:Equity" unitRef="GBP">68,376</ix:nonFraction>
+</ix:hidden></ix:header>
+{}{}{}
+<div>report body</div>
+</body></html>"#,
+            ctx("icur1", None),
+            ctx("icur9", Some("uk-core:WithinOneYear")),
+            ctx("icur11", Some("uk-core:AfterOneYear")),
+        )
+    }
+
+    /// A minimal FRC 2024-taxonomy iXBRL document — the newer CH renderer:
+    /// `core:` prefixes (no `uk-`), `DD.MM.YY` period dates, comparatives
+    /// present (`PY_END` at the earlier instant) — to pin the tolerance of
+    /// the second pass (both taxonomies' prefixes, both date formats, the
+    /// comparatives excluded from the reported figures).
+    fn ch_micro_entity_ixbrl_2024() -> String {
+        let ctx = |id: &str, instant: &str, dim: Option<&str>| {
+            let segment = dim
+                .map(|m| format!(
+                    "<xbrldi:segment><xbrldi:explicitMember dimension=\"core:CreditorsPeriod\">{m}</xbrldi:explicitMember></xbrldi:segment>"
+                ))
+                .unwrap_or_default();
+            format!(
+                "<xbrli:context id=\"{id}\"><xbrli:entity><xbrli:identifier scheme=\"http://www.companieshouse.gov.uk/company\">12345678</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>{instant}</xbrli:instant></xbrli:period>{segment}</xbrli:context>"
+            )
+        };
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"
+  xmlns:ix="http://www.xbrl.org/2013/inlineXBRL"
+  xmlns:xbrli="http://www.xbrl.org/2003/instance"
+  xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+  xmlns:uk-bus="http://xbrl.frc.org.uk/cd/2024-01-01/business"
+  xmlns:core="http://xbrl.frc.org.uk/fr/2024-01-01/core">
+<head><title>micro-entity accounts</title></head>
+<body><ix:header><ix:hidden>
+  <ix:nonNumeric contextRef="CY_END" format="ixt2:datedaymonthyear" name="uk-bus:StartDateForPeriodCoveredByReport">1.12.23</ix:nonNumeric>
+  <ix:nonNumeric contextRef="CY_END" format="ixt2:datedaymonthyear" name="uk-bus:EndDateForPeriodCoveredByReport">30.11.24</ix:nonNumeric>
+  <ix:nonFraction contextRef="CY_END" decimals="2" name="core:FixedAssets" unitRef="GBP">0</ix:nonFraction>
+  <ix:nonFraction contextRef="CY_END" decimals="2" name="core:CurrentAssets" unitRef="GBP">74,991</ix:nonFraction>
+  <ix:nonFraction contextRef="PY_END" decimals="2" name="core:CurrentAssets" unitRef="GBP">68,946</ix:nonFraction>
+  <ix:nonFraction contextRef="CreditorsWithinOneYear_CY_END" decimals="2" name="core:Creditors" unitRef="GBP">0</ix:nonFraction>
+  <ix:nonFraction contextRef="CreditorsWithinOneYear_PY_END" decimals="2" name="core:Creditors" unitRef="GBP">570</ix:nonFraction>
+  <ix:nonFraction contextRef="CY_END" decimals="2" name="core:NetCurrentAssetsLiabilities" unitRef="GBP">74,991</ix:nonFraction>
+  <ix:nonFraction contextRef="CY_END" decimals="2" name="core:TotalAssetsLessCurrentLiabilities" unitRef="GBP">74,991</ix:nonFraction>
+  <ix:nonFraction contextRef="CY_END" decimals="2" name="core:ProvisionsForLiabilitiesBalanceSheetSubtotal" unitRef="GBP">540</ix:nonFraction>
+  <ix:nonFraction contextRef="CY_END" decimals="2" name="core:NetAssetsLiabilities" unitRef="GBP">74,451</ix:nonFraction>
+  <ix:nonFraction contextRef="CY_END" decimals="2" name="core:Equity" unitRef="GBP">74,451</ix:nonFraction>
+</ix:hidden></ix:header>
+{}{}{}{}
+<div>report body</div>
+</body></html>"#,
+            ctx("CY_END", "2024-11-30", None),
+            ctx("PY_END", "2023-11-30", None),
+            ctx("CreditorsWithinOneYear_CY_END", "2024-11-30", Some("core:WithinOneYear")),
+            ctx("CreditorsWithinOneYear_PY_END", "2023-11-30", Some("core:WithinOneYear")),
+        )
+    }
+
+    /// The two-pass parse reads CH's micro-entity iXBRL: the generic pass
+    /// collects the facts into the IR, the accounts pass resolves the
+    /// current-period context and the creditor dimensions, applies the sign
+    /// convention, and recovers the period from the document.
+    #[test]
+    fn parse_filed_accounts_reads_ch_micro_entity_ixbrl() {
+        let bs = parse_filed_accounts(&ch_micro_entity_ixbrl()).expect("the fixture parses");
+
+        assert_eq!(bs.period_start, NaiveDate::from_ymd_opt(2022, 11, 28).unwrap());
+        assert_eq!(bs.period_end, NaiveDate::from_ymd_opt(2023, 11, 30).unwrap());
+
+        let f = &bs.figures;
+        assert_eq!(f.current_assets, 68_946.0);
+        assert_eq!(f.creditors_within_1_year, -570.0, "creditors stored negative");
+        assert_eq!(f.creditors_after_1_year, 0.0);
+        assert_eq!(f.net_current_assets, 68_376.0);
+        assert_eq!(f.total_assets_less_liabilities, 68_376.0);
+        assert_eq!(f.net_assets, 68_376.0);
+        assert_eq!(f.capital_and_reserves, 68_376.0);
+        assert_eq!(f.fixed_assets, 0.0, "zerodash reads as zero");
+        assert_eq!(f.prepayments_and_accrued_income, 0.0);
+        assert_eq!(f.provisions_for_liabilities, 0.0);
+        assert_eq!(f.accruals_and_deferred_income, 0.0);
+    }
+
+    /// The FRC 2024 rendering (the real 2025-08-31 filing for 14510633):
+    /// `core:` prefixes, `DD.MM.YY` period dates, comparatives present.
+    #[test]
+    fn parse_filed_accounts_reads_ch_2024_taxonomy() {
+        let bs = parse_filed_accounts(&ch_micro_entity_ixbrl_2024()).expect("the fixture parses");
+
+        assert_eq!(bs.period_start, NaiveDate::from_ymd_opt(2023, 12, 1).unwrap());
+        assert_eq!(bs.period_end, NaiveDate::from_ymd_opt(2024, 11, 30).unwrap());
+
+        let f = &bs.figures;
+        assert_eq!(f.current_assets, 74_991.0);
+        assert_eq!(f.creditors_within_1_year, 0.0, "current-period creditors");
+        assert_eq!(f.net_current_assets, 74_991.0);
+        assert_eq!(f.total_assets_less_liabilities, 74_991.0);
+        assert_eq!(f.provisions_for_liabilities, 540.0);
+        assert_eq!(f.net_assets, 74_451.0);
+        assert_eq!(f.capital_and_reserves, 74_451.0);
+        // The comparatives (PY_END: 68,946 / -570) must not leak into the
+        // filed period's figures.
+        assert_ne!(f.current_assets, 68_946.0);
+        assert_ne!(f.creditors_within_1_year, -570.0);
+    }
+
     /// A company with registration 2024-01-01, whose cached profile announces
     /// next accounts 2025-01-01..2025-12-31 due 2026-09-30.
     fn next_accounts_profile(cache_dir: &Path) {
@@ -3557,20 +3933,6 @@ mod live_tests {
             .await
             .expect("fetch the filing history");
 
-        // The company for the parse: the profile (cache-first) supplies the
-        // name and registration date; the document's own facts override them
-        // and recover the period.
-        let profile = client
-            .get_company_profile_cached(&number)
-            .await
-            .expect("fetch the company profile");
-        let mut lib = Company::new(profile.company_name.clone(), "", &number);
-        lib.registration_date = profile
-            .date_of_creation
-            .as_deref()
-            .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-            .unwrap_or_default();
-
         let mut parsed = 0usize;
         for item in history.accounts() {
             let Some(tx) = item.transaction_id() else {
@@ -3592,24 +3954,20 @@ mod live_tests {
                 );
                 continue;
             };
-            match Frs105Accounts::from_ixbrl(
-                html,
-                &lib,
-                &test_utils::TestData::sample_accounts_meta(),
-            ) {
-                Ok(accounts) => {
-                    let period = accounts
-                        .accounts
-                        .period
-                        .as_ref()
-                        .map(|p| p.end.to_string())
-                        .unwrap_or_else(|| "?".to_string());
-                    println!("balance sheet at {period} (filed {filed_on}):");
-                    print_figures(&accounts);
+            // The two-pass parse: generic iXBRL → fact IR, then the
+            // accounts-specific pass → the balance sheet (period recovered
+            // from the document).
+            match parse_filed_accounts(html) {
+                Ok(bs) => {
+                    println!(
+                        "balance sheet at {} (period {} → {}, filed {filed_on}):",
+                        bs.period_end, bs.period_start, bs.period_end
+                    );
+                    print_figures(&bs.figures);
                     parsed += 1;
                 }
                 Err(e) => println!(
-                    "  filed {filed_on}  {tx}: not a parseable FRS 105 iXBRL document: {e}"
+                    "  filed {filed_on}  {tx}: not a parseable accounts iXBRL document: {e}"
                 ),
             }
         }
@@ -3619,30 +3977,29 @@ mod live_tests {
         );
     }
 
-    /// Print a parsed balance sheet's line items: current period | previous
-    /// period (whole pounds).
-    fn print_figures(accounts: &Frs105Accounts) {
-        for (label, values) in [
-            ("fixed assets", accounts.fixed_assets),
-            ("current assets", accounts.current_assets),
+    /// Print a filed balance sheet's line items (whole pounds; creditor
+    /// lines negative — the reports' sign convention).
+    fn print_figures(figures: &PreviousYearFigures) {
+        for (label, value) in [
+            ("fixed assets", figures.fixed_assets),
+            ("current assets", figures.current_assets),
             (
                 "prepayments and accrued income",
-                accounts.prepayments_and_accrued_income,
+                figures.prepayments_and_accrued_income,
             ),
-            ("creditors within 1 year", accounts.creditors_within_1_year),
-            ("net current assets", accounts.net_current_assets),
+            ("creditors within 1 year", figures.creditors_within_1_year),
+            ("net current assets", figures.net_current_assets),
             (
                 "total assets less liabilities",
-                accounts.total_assets_less_liabilities,
+                figures.total_assets_less_liabilities,
             ),
-            ("creditors after 1 year", accounts.creditors_after_1_year),
-            ("provisions for liabilities", accounts.provisions_for_liabilities),
-            ("accruals and deferred income", accounts.accruals_and_deferred_income),
-            ("net assets", accounts.net_assets),
-            ("capital and reserves", accounts.capital_and_reserves),
+            ("creditors after 1 year", figures.creditors_after_1_year),
+            ("provisions for liabilities", figures.provisions_for_liabilities),
+            ("accruals and deferred income", figures.accruals_and_deferred_income),
+            ("net assets", figures.net_assets),
+            ("capital and reserves", figures.capital_and_reserves),
         ] {
-            let (current, previous) = (values[0], values[1]);
-            println!("    {label:<32} {current:>12}  {previous:>12}");
+            println!("    {label:<32} {value:>12}");
         }
     }
 
