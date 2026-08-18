@@ -210,13 +210,21 @@ pub enum ChFormType {
 impl ChFormType {
     /// Parse a Companies House form type code; codes without a modelled
     /// variant are preserved verbatim in [`Self::Other`].
+    ///
+    /// The code table lives in `ct600` ([`ct600::companies_house::FormType`]);
+    /// this storage enum collapses its finer account-family granularity
+    /// (micro-entity / dormant …) into [`Self::Accounts`] and maps the rest
+    /// 1:1.
     pub fn from_code(code: &str) -> Self {
-        match code {
-            "AA" => Self::Accounts,
-            "AA01" => Self::ChangeAccountingReferenceDate,
-            "CS01" => Self::ConfirmationStatement,
-            "AD01" => Self::ChangeRegisteredOffice,
-            "NEWINC" => Self::Incorporation,
+        use ct600::companies_house::FormType;
+        match FormType::from_code(code) {
+            FormType::Accounts
+            | FormType::MicroEntityAccounts
+            | FormType::DormantAccounts => Self::Accounts,
+            FormType::ChangeAccountingReferenceDate => Self::ChangeAccountingReferenceDate,
+            FormType::ConfirmationStatement => Self::ConfirmationStatement,
+            FormType::ChangeRegisteredOffice => Self::ChangeRegisteredOffice,
+            FormType::Incorporation => Self::Incorporation,
             _ => Self::Other {
                 code: code.to_string(),
             },

@@ -121,11 +121,12 @@ what enriches. The derivation re-runs on every `GET /filings` (or a poll after
 a refresh) with the new filings/balance sheets + the coverage anchor:
 
 - **Enrichment** — a provisional row whose end **matches** a confirmed filing
-  (balance-sheet `period_end`, or an accounts filing's `made up to` date
-  parsed from its CH description) becomes `filed`; a covered-and-unfiled ended
-  period (`end <= fetched_at`) becomes `pending`. Nothing more is needed — the
-  status is re-derived per read, so a completed fetch flips the rows on the
-  next load, and the web's mini-banner disappears.
+  (balance-sheet `period_end`, or an accounts filing's period end parsed from
+  the CH item's `description_values` — the typed `TypedFiling` parse in
+  `ct600`, not the human-readable description) becomes `filed`; a
+  covered-and-unfiled ended period (`end <= fetched_at`) becomes `pending`.
+  Nothing more is needed — the status is re-derived per read, so a completed
+  fetch flips the rows on the next load, and the web's mini-banner disappears.
 - **Invalidation** — a confirmed filing whose dates conflict with an estimate
   (shortened first period, changed ARD, late filing) **drops** the estimate;
   the CH-derived end drives the list. Concrete rule (in the pure core

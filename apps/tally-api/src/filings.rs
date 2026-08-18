@@ -20,6 +20,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::{Duration, Months, NaiveDate};
+use ct600::companies_house::{FilingHistoryItem, TypedFiling};
 use ixbrl::company::{AccountingPeriod, AccountsMeta, Company as LibCompany};
 use ixbrl::reports::uk_frs105_accounts::{Frs105Accounts, PreviousYearFigures};
 use serde::Serialize;
@@ -476,7 +477,8 @@ fn fetch_status(job: Option<&Job>) -> FetchStatus {
 /// - **`ongoing`** — the schedule period containing today (always functional:
 ///   deadlines + expected `not-sent` filings);
 /// - **`filed`** — a period end with a stored balance sheet (or an accounts
-///   filing whose period end — parsed from its description — matches);
+///   filing whose period end — parsed from the CH item's
+///   `description_values` — matches);
 /// - **`pending`** — an ended period with no confirmed accounts filing whose
 ///   end a completed fetch has covered (`end <= fetched_at`);
 /// - **`provisional`** — an ended period **not** covered by any completed
@@ -514,10 +516,10 @@ fn derive_periods(
         }
     }
     for filing in filings {
-        if filing.category == "accounts" {
-            if let Some(d) = period_end_from_description(&filing.description) {
-                filed_ends.push(d);
-            }
+        if filing.category == "accounts"
+            && let Some(d) = accounts_period_end(filing)
+        {
+            filed_ends.push(d);
         }
     }
 
@@ -672,8 +674,7 @@ fn filings_for_period(end: NaiveDate, is_filed: bool, filings: &[Filing]) -> Vec
     for filing in filings {
         // Accounts filings belong to the period ending on their period end.
         let belongs = if filing.category == "accounts" {
-            let derived = period_end_from_description(&filing.description);
-            derived == Some(end)
+            accounts_period_end(filing) == Some(end)
         } else {
             // Other categories: the period containing the filing date.
             filing
@@ -745,26 +746,19 @@ fn parse_iso_date(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok()
 }
 
-/// Derive an accounts filing's period end from its CH description, e.g.
-/// `"micro company accounts made up to 31 March 2024"` → 2024-03-31.
-fn period_end_from_description(description: &str) -> Option<NaiveDate> {
-    let idx = description.find("made up to")?;
-    let tail = &description[idx + "made up to".len()..];
-    let candidate = tail.trim().trim_end_matches('.');
-    // CH renders the date as `31 March 2024`; tolerate a few common shapes.
-    for fmt in ["%d %B %Y", "%d %b %Y", "%d/%m/%Y", "%Y-%m-%d"] {
-        if let Ok(date) = NaiveDate::parse_from_str(candidate, fmt) {
-            return Some(date);
-        }
-    }
-    // Trailing words (rare) — try just the first three tokens.
-    let first_three = candidate.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
-    for fmt in ["%d %B %Y", "%d %b %Y"] {
-        if let Ok(date) = NaiveDate::parse_from_str(&first_three, fmt) {
-            return Some(date);
-        }
-    }
-    None
+/// An accounts filing's period end, from the typed parse of the stored CH
+/// item ([`TypedFiling::Accounts`] — the `description_values` carry the
+/// real period dates, unlike the human-readable description). `None` when
+/// the row carries no parseable item (an accounts filing without a period).
+fn accounts_period_end(filing: &Filing) -> Option<NaiveDate> {
+    serde_json::from_value::<FilingHistoryItem>(filing.raw.clone().0)
+        .ok()
+        .as_ref()
+        .map(TypedFiling::from)
+        .and_then(|typed| match typed {
+            TypedFiling::Accounts(accounts) => accounts.period_end,
+            _ => None,
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -799,17 +793,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn period_end_from_description_parses() {
+    fn accounts_period_end_reads_typed_description_values() {
+        let raw_with_period = serde_json::json!({
+            "date": "2025-06-30",
+            "category": "accounts",
+            "type": "AA",
+            "description": "micro company accounts",
+            "description_values": {
+                "period_start_on": "2024-07-01",
+                "period_end_on": "2025-06-30"
+            },
+            "links": null,
+        });
+        let filing = Filing {
+            id: uuid::Uuid::now_v7(),
+            company_id: uuid::Uuid::now_v7(),
+            ch_transaction_id: "tx-1".to_string(),
+            category: "accounts".to_string(),
+            form_type: ChFormType::from_code("AA"),
+            description: "micro company accounts".to_string(),
+            filed_on: Some("2025-06-30".to_string()),
+            document_metadata_url: String::new(),
+            raw: toasty::Json(raw_with_period),
+            fetched_at: "2025-07-01T00:00:00Z".to_string(),
+            company: toasty::Deferred::default(),
+        };
         assert_eq!(
-            period_end_from_description("micro company accounts made up to 31 March 2024"),
-            NaiveDate::from_ymd_opt(2024, 3, 31)
+            accounts_period_end(&filing),
+            NaiveDate::from_ymd_opt(2025, 6, 30)
         );
-        assert_eq!(
-            period_end_from_description("total exemption full accounts made up to 31/12/2023"),
-            NaiveDate::from_ymd_opt(2023, 12, 31)
-        );
-        assert_eq!(period_end_from_description("confirmation statement made on 13 November 2023"), None);
-        assert_eq!(period_end_from_description(""), None);
+
+        // A filing with no period (e.g. an AA01 ARD change stored under the
+        // accounts category) contributes no filed end.
+        let no_period = Filing {
+            raw: toasty::Json(serde_json::json!({
+                "category": "accounts",
+                "type": "AA01",
+                "description_values": { "new_ard_date": "2026-06-30" },
+            })),
+            ..Filing {
+                company: toasty::Deferred::default(),
+                id: uuid::Uuid::now_v7(),
+                company_id: filing.company_id,
+                ch_transaction_id: "tx-2".to_string(),
+                category: filing.category.clone(),
+                form_type: filing.form_type.clone(),
+                description: String::new(),
+                filed_on: None,
+                document_metadata_url: String::new(),
+                raw: toasty::Json(serde_json::Value::Null),
+                fetched_at: String::new(),
+            }
+        };
+        assert_eq!(accounts_period_end(&no_period), None);
     }
 
     #[test]

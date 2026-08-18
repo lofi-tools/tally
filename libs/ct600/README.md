@@ -12,6 +12,7 @@ CT600 corporation-tax return builder, GovTalk messages, the HMRC Corporation Tax
 | `GovTalkParams` | `govtalk::GovTalkSubmissionRequest` / `…Acknowledgement` / `…Poll` / `…Error` / `…Response` / `…DeleteRequest` / `…DeleteResponse`; `decode_govtalk_message()` parses responses |
 | `CompanyProfile` | cached fetch via `companies_house::CompaniesHouseClient::get_company_profile_cached()` → `companies-house-{number}.json` |
 | Filing id (from a `FilingHistoryItem`'s `links.self`) | `companies_house::CompaniesHouseClient::download_filing(company_number, filing_id)` → the raw document bytes, cache-first in the `filings_downloads/` subdirectory as `{number}-{period_end}-{filing_id}` |
+| `FilingHistoryItem` / `FilingHistory` | typed parse via `companies_house::TypedFiling::from(&item)` / `FilingHistory::typed()` → the kind-specific structs: `AccountsFiling` (period), `ConfirmationStatementFiling` (`made_on`), `ArdChangeFiling` (`new_ard_date`), `OfficerChangeFiling` (officer + action + date), `IncorporationFiling`, `OtherFiling`; the code classifier `FormType::from_code` is the single source of truth for the code table |
 | `Ct600Return` + `HmrcCorpTaxConfig` | `clients::HmrcCorpTaxClient::submit_and_poll()` → the full Document Submission Protocol lifecycle: submit → acknowledge → poll → response → delete |
 
 ## Filing with HMRC

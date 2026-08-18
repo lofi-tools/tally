@@ -1091,6 +1091,14 @@ impl FilingHistory {
     pub fn parsed(&self) -> impl Iterator<Item = ChFiling> {
         self.items.iter().map(ChFiling::from)
     }
+
+    /// The filings parsed into their kind-specific structs
+    /// ([`TypedFiling`]): each filing classified as accounts / confirmation
+    /// statement / ARD change / officer change / incorporation / other, with
+    /// the fields its kind carries (see [`TypedFiling::from`]).
+    pub fn typed(&self) -> impl Iterator<Item = TypedFiling> {
+        self.items.iter().map(TypedFiling::from)
+    }
 }
 
 /// A past filing parsed into typed dates: when it was registered and the
@@ -1130,6 +1138,358 @@ impl From<&FilingHistoryItem> for ChFiling {
             description: item.description.clone(),
         }
     }
+}
+
+// ============================================================================
+// Typed filing parsing (per-kind structs)
+// ============================================================================
+
+/// A Companies House form type code, classified into the kinds the product
+/// understands (accounts, confirmation statements, ARD changes, officer
+/// changes, incorporation); any other code is preserved verbatim in
+/// [`FormType::Other`].
+///
+/// This is the single source of truth for the code table — the tally-api
+/// storage enum (`ChFormType`) delegates its `from_code` here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormType {
+    /// Full accounts (`AA`).
+    Accounts,
+    /// Micro-entity accounts (`AA02`).
+    MicroEntityAccounts,
+    /// Dormant company accounts (`AAMD`).
+    DormantAccounts,
+    /// Confirmation statement (`CS01`).
+    ConfirmationStatement,
+    /// Change of accounting reference date (`AA01`).
+    ChangeAccountingReferenceDate,
+    /// Change of registered office address (`AD01`).
+    ChangeRegisteredOffice,
+    /// Officer appointment (`AP01`–`AP04`).
+    OfficerAppointed,
+    /// Officer termination (`TM01`, `TM02`).
+    OfficerTerminated,
+    /// Change of officer details (`CH01`–`CH04`).
+    OfficerDetailsChanged,
+    /// Incorporation (`NEWINC`).
+    Incorporation,
+    /// Any other form type code, preserved verbatim.
+    Other { code: String },
+}
+
+impl FormType {
+    /// Classify a Companies House form type code; unmodelled codes are
+    /// preserved verbatim in [`FormType::Other`].
+    pub fn from_code(code: &str) -> Self {
+        match code {
+            "AA" => Self::Accounts,
+            "AA02" => Self::MicroEntityAccounts,
+            "AAMD" => Self::DormantAccounts,
+            "CS01" => Self::ConfirmationStatement,
+            "AA01" => Self::ChangeAccountingReferenceDate,
+            "AD01" => Self::ChangeRegisteredOffice,
+            "AP01" | "AP02" | "AP03" | "AP04" => Self::OfficerAppointed,
+            "TM01" | "TM02" => Self::OfficerTerminated,
+            "CH01" | "CH02" | "CH03" | "CH04" => Self::OfficerDetailsChanged,
+            "NEWINC" => Self::Incorporation,
+            _ => Self::Other {
+                code: code.to_string(),
+            },
+        }
+    }
+
+    /// The form type code for this kind. For the multi-code kinds
+    /// (officer appointments, terminations, detail changes) this returns a
+    /// representative code (`AP01`, `TM01`, `CH01`) — the exact code of a
+    /// filing is available from the item's `form_type` field.
+    pub fn as_code(&self) -> &str {
+        match self {
+            Self::Accounts => "AA",
+            Self::MicroEntityAccounts => "AA02",
+            Self::DormantAccounts => "AAMD",
+            Self::ConfirmationStatement => "CS01",
+            Self::ChangeAccountingReferenceDate => "AA01",
+            Self::ChangeRegisteredOffice => "AD01",
+            Self::OfficerAppointed => "AP01",
+            Self::OfficerTerminated => "TM01",
+            Self::OfficerDetailsChanged => "CH01",
+            Self::Incorporation => "NEWINC",
+            Self::Other { code } => code,
+        }
+    }
+}
+
+/// A filing-history item parsed into a kind-specific struct
+/// ([`TypedFiling`]): the common fields every filing carries (when it was
+/// filed, its transaction id, its description) plus the fields specific to
+/// the filing's kind (e.g. an accounts filing's period).
+///
+/// Dispatch is code-first for the specific kinds (ARD changes, officer
+/// changes, incorporation), then by category for the broad families
+/// (accounts, confirmation statements) — so an accounts filing with an
+/// unknown/new form type code still parses as [`TypedFiling::Accounts`].
+impl From<&FilingHistoryItem> for TypedFiling {
+    fn from(item: &FilingHistoryItem) -> Self {
+        let parse = |key: &str| {
+            item.description_values
+                .get(key)
+                .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        };
+        let common = (
+            item.filed_on(),
+            item.transaction_id(),
+            item.description.clone(),
+        );
+        let (filed_on, transaction_id, description) = common;
+
+        match FormType::from_code(item.form_type.as_deref().unwrap_or("")) {
+            FormType::ChangeAccountingReferenceDate => {
+                TypedFiling::ChangeOfAccountingReferenceDate(ArdChangeFiling {
+                    filed_on,
+                    transaction_id,
+                    description,
+                    new_ard_date: parse("new_ard_date").or_else(|| parse("action_date")),
+                })
+            }
+            FormType::OfficerAppointed => officer_filing(
+                item,
+                filed_on,
+                transaction_id,
+                description,
+                OfficerChangeAction::Appointed,
+            ),
+            FormType::OfficerTerminated => officer_filing(
+                item,
+                filed_on,
+                transaction_id,
+                description,
+                OfficerChangeAction::Terminated,
+            ),
+            FormType::OfficerDetailsChanged => officer_filing(
+                item,
+                filed_on,
+                transaction_id,
+                description,
+                OfficerChangeAction::DetailsChanged,
+            ),
+            FormType::Incorporation => TypedFiling::Incorporation(IncorporationFiling {
+                filed_on,
+                transaction_id,
+                description,
+            }),
+            _ => match item.category.as_deref() {
+                Some("accounts") => TypedFiling::Accounts(AccountsFiling {
+                    filed_on,
+                    transaction_id,
+                    description,
+                    made_up_to: parse("made_up_to").or_else(|| parse("made_up_date")),
+                    period_start: parse("period_start_on"),
+                    period_end: parse("period_end_on")
+                        .or_else(|| parse("made_up_to"))
+                        .or_else(|| parse("made_up_date")),
+                }),
+                Some("confirmation-statement") => {
+                    TypedFiling::ConfirmationStatement(ConfirmationStatementFiling {
+                        filed_on,
+                        transaction_id,
+                        description,
+                        // CH reports the statement date as `made_up_date`.
+                        made_on: parse("made_up_date").or_else(|| parse("made_on")),
+                    })
+                }
+                _ => TypedFiling::Other(OtherFiling {
+                    filed_on,
+                    transaction_id,
+                    description,
+                    form_type: item.form_type.clone(),
+                }),
+            },
+        }
+    }
+}
+
+/// Build the [`TypedFiling::OfficerChange`] variant from an officer-change
+/// item: the officer's name and the change's date (CH reports it as
+/// `appointment_date`, `termination_date`, `change_date`, or `action_date`
+/// depending on the form).
+fn officer_filing(
+    item: &FilingHistoryItem,
+    filed_on: Option<NaiveDate>,
+    transaction_id: Option<String>,
+    description: Option<String>,
+    action: OfficerChangeAction,
+) -> TypedFiling {
+    let officer_name = item.description_values.get("officer_name").cloned();
+    let action_date = ["appointment_date", "termination_date", "change_date", "action_date"]
+        .iter()
+        .find_map(|key| {
+            item.description_values
+                .get(*key)
+                .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        });
+    TypedFiling::OfficerChange(OfficerChangeFiling {
+        filed_on,
+        transaction_id,
+        description,
+        officer_name,
+        action,
+        action_date,
+    })
+}
+
+/// A filing parsed into the kind-specific struct it actually is. Match on
+/// the variant to read the kind's fields (see the per-kind structs); the
+/// common fields (when filed, transaction id, description) are on every
+/// variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TypedFiling {
+    /// An accounts filing (category `accounts`, e.g. `AA`, `AA02`, `AAMD`).
+    Accounts(AccountsFiling),
+    /// A confirmation statement (`CS01`).
+    ConfirmationStatement(ConfirmationStatementFiling),
+    /// A change of accounting reference date (`AA01`).
+    ChangeOfAccountingReferenceDate(ArdChangeFiling),
+    /// An officer appointment / termination / detail change (`AP01`–`AP04`,
+    /// `TM01`/`TM02`, `CH01`–`CH04`).
+    OfficerChange(OfficerChangeFiling),
+    /// The company's incorporation (`NEWINC`).
+    Incorporation(IncorporationFiling),
+    /// Any other filing, with its raw form type code.
+    Other(OtherFiling),
+}
+
+impl TypedFiling {
+    /// When the filing was registered with Companies House (on every
+    /// variant).
+    pub fn filed_on(&self) -> Option<NaiveDate> {
+        match self {
+            Self::Accounts(f) => f.filed_on,
+            Self::ConfirmationStatement(f) => f.filed_on,
+            Self::ChangeOfAccountingReferenceDate(f) => f.filed_on,
+            Self::OfficerChange(f) => f.filed_on,
+            Self::Incorporation(f) => f.filed_on,
+            Self::Other(f) => f.filed_on,
+        }
+    }
+
+    /// The Companies House transaction id (on every variant).
+    pub fn transaction_id(&self) -> Option<&str> {
+        match self {
+            Self::Accounts(f) => f.transaction_id.as_deref(),
+            Self::ConfirmationStatement(f) => f.transaction_id.as_deref(),
+            Self::ChangeOfAccountingReferenceDate(f) => f.transaction_id.as_deref(),
+            Self::OfficerChange(f) => f.transaction_id.as_deref(),
+            Self::Incorporation(f) => f.transaction_id.as_deref(),
+            Self::Other(f) => f.transaction_id.as_deref(),
+        }
+    }
+
+    /// CH's human-readable description (on every variant).
+    pub fn description(&self) -> Option<&str> {
+        match self {
+            Self::Accounts(f) => f.description.as_deref(),
+            Self::ConfirmationStatement(f) => f.description.as_deref(),
+            Self::ChangeOfAccountingReferenceDate(f) => f.description.as_deref(),
+            Self::OfficerChange(f) => f.description.as_deref(),
+            Self::Incorporation(f) => f.description.as_deref(),
+            Self::Other(f) => f.description.as_deref(),
+        }
+    }
+}
+
+/// An accounts filing: the period it covers, as CH reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountsFiling {
+    /// When the filing was registered with Companies House.
+    pub filed_on: Option<NaiveDate>,
+    /// The Companies House transaction id (`links.self`'s trailing segment).
+    pub transaction_id: Option<String>,
+    /// CH's human-readable description.
+    pub description: Option<String>,
+    /// The period end as reported (`made_up_to` / `made_up_date`).
+    pub made_up_to: Option<NaiveDate>,
+    /// The start of the period the accounts cover, when reported.
+    pub period_start: Option<NaiveDate>,
+    /// The end of the period the accounts cover, when reported.
+    pub period_end: Option<NaiveDate>,
+}
+
+/// A confirmation statement (`CS01`): when it was made up to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfirmationStatementFiling {
+    pub filed_on: Option<NaiveDate>,
+    pub transaction_id: Option<String>,
+    pub description: Option<String>,
+    /// The date the statement was made up to (CH reports it as `made_up_date`).
+    pub made_on: Option<NaiveDate>,
+}
+
+/// A change of accounting reference date (`AA01`): the new ARD, when CH
+/// reports one (the `description_values` key is best-effort — some AA01
+/// filings carry no date at all).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArdChangeFiling {
+    pub filed_on: Option<NaiveDate>,
+    pub transaction_id: Option<String>,
+    pub description: Option<String>,
+    /// The new accounting reference date, when reported.
+    pub new_ard_date: Option<NaiveDate>,
+}
+
+/// An officer appointment / termination / detail change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OfficerChangeFiling {
+    pub filed_on: Option<NaiveDate>,
+    pub transaction_id: Option<String>,
+    pub description: Option<String>,
+    /// The officer's name, as registered (e.g. `BLOGGS, A`).
+    pub officer_name: Option<String>,
+    /// What happened: appointed, terminated, or details changed.
+    pub action: OfficerChangeAction,
+    /// The date of the change (CH reports it as `appointment_date`,
+    /// `termination_date`, `change_date`, or `action_date`).
+    pub action_date: Option<NaiveDate>,
+}
+
+/// What an [`OfficerChangeFiling`] records about the officer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OfficerChangeAction {
+    /// The officer was appointed (`AP01`–`AP04`).
+    Appointed,
+    /// The officer was terminated (`TM01`, `TM02`).
+    Terminated,
+    /// The officer's details were changed (`CH01`–`CH04`).
+    DetailsChanged,
+}
+
+impl OfficerChangeAction {
+    /// A short label for display, e.g. `appointed`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Appointed => "appointed",
+            Self::Terminated => "terminated",
+            Self::DetailsChanged => "details changed",
+        }
+    }
+}
+
+/// The company's incorporation (`NEWINC`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncorporationFiling {
+    pub filed_on: Option<NaiveDate>,
+    pub transaction_id: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Any filing that is not one of the modelled kinds, with its raw form type
+/// code preserved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OtherFiling {
+    pub filed_on: Option<NaiveDate>,
+    pub transaction_id: Option<String>,
+    pub description: Option<String>,
+    /// The raw form type code (e.g. `AD01`).
+    pub form_type: Option<String>,
 }
 
 /// The metadata of a filed document (`GET` on the document API).
@@ -2426,6 +2786,198 @@ mod tests {
         assert_eq!(cs.period_end, None);
     }
 
+    /// Each filing kind parses into its typed struct, with the common
+    /// fields (filed-on date, transaction id, description) on every variant
+    /// and the kind's own fields filled from the `description_values`.
+    #[test]
+    fn typed_filings_parse_each_kind() {
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let tx = |id: &str| {
+            Some(format!(
+                "https://api.company-information.service.gov.uk/company/12345678/filing-history/{id}"
+            ))
+        };
+        let item = |category: &str,
+                    form_type: &str,
+                    date: &str,
+                    description: Option<&str>,
+                    description_values: &[(&str, &str)]|
+         -> FilingHistoryItem {
+            FilingHistoryItem {
+                date: Some(date.to_string()),
+                category: Some(category.to_string()),
+                form_type: Some(form_type.to_string()),
+                description: description.map(str::to_string),
+                description_values: description_values
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                links: None,
+            }
+        };
+
+        // Accounts (category fallback: an unknown code still parses).
+        let accounts = TypedFiling::from(&item(
+            "accounts",
+            "ZZ-NEW",
+            "2025-06-30",
+            Some("micro company accounts"),
+            &[
+                ("period_start_on", "2024-07-01"),
+                ("period_end_on", "2025-06-30"),
+            ],
+        ));
+        let TypedFiling::Accounts(accounts) = accounts else {
+            panic!("expected Accounts, got {accounts:?}");
+        };
+        assert_eq!(accounts.filed_on, Some(d("2025-06-30")));
+        assert_eq!(accounts.period_start, Some(d("2024-07-01")));
+        assert_eq!(accounts.period_end, Some(d("2025-06-30")));
+        assert_eq!(accounts.made_up_to, None, "no made_up key in this fixture");
+
+        // Accounts with only `made_up_date` (the 14510633 shape).
+        let accounts = TypedFiling::from(&item(
+            "accounts",
+            "AA",
+            "2025-08-31",
+            None,
+            &[("made_up_date", "2025-08-31")],
+        ));
+        let TypedFiling::Accounts(accounts) = accounts else {
+            panic!("expected Accounts, got {accounts:?}");
+        };
+        assert_eq!(accounts.period_end, Some(d("2025-08-31")));
+        assert_eq!(accounts.made_up_to, Some(d("2025-08-31")));
+        assert_eq!(accounts.period_start, None);
+
+        // Confirmation statement: CH reports the statement date as
+        // `made_up_date`.
+        let cs = TypedFiling::from(&item(
+            "confirmation-statement",
+            "CS01",
+            "2025-12-09",
+            None,
+            &[("made_up_date", "2025-11-27")],
+        ));
+        let TypedFiling::ConfirmationStatement(cs) = cs else {
+            panic!("expected ConfirmationStatement, got {cs:?}");
+        };
+        assert_eq!(cs.made_on, Some(d("2025-11-27")));
+
+        // ARD change.
+        let ard = TypedFiling::from(&item(
+            "accounts",
+            "AA01",
+            "2024-03-01",
+            Some("change of accounting reference date"),
+            &[("new_ard_date", "2025-06-30")],
+        ));
+        let TypedFiling::ChangeOfAccountingReferenceDate(ard) = ard else {
+            panic!("expected ChangeOfAccountingReferenceDate, got {ard:?}");
+        };
+        assert_eq!(ard.new_ard_date, Some(d("2025-06-30")));
+
+        // Officer appointments / terminations / detail changes.
+        let appointed = TypedFiling::from(&item(
+            "officers",
+            "AP01",
+            "2024-01-15",
+            Some("appointment of Mr A Bloggs as a director"),
+            &[("appointment_date", "2024-01-15"), ("officer_name", "BLOGGS, A")],
+        ));
+        let TypedFiling::OfficerChange(appointed) = appointed else {
+            panic!("expected OfficerChange, got {appointed:?}");
+        };
+        assert_eq!(appointed.action, OfficerChangeAction::Appointed);
+        assert_eq!(appointed.officer_name.as_deref(), Some("BLOGGS, A"));
+        assert_eq!(appointed.action_date, Some(d("2024-01-15")));
+
+        let terminated = TypedFiling::from(&item(
+            "officers",
+            "TM01",
+            "2024-06-30",
+            None,
+            &[("termination_date", "2024-06-30"), ("officer_name", "BLOGGS, A")],
+        ));
+        let TypedFiling::OfficerChange(terminated) = terminated else {
+            panic!("expected OfficerChange, got {terminated:?}");
+        };
+        assert_eq!(terminated.action, OfficerChangeAction::Terminated);
+        assert_eq!(terminated.action_date, Some(d("2024-06-30")));
+
+        let changed = TypedFiling::from(&item(
+            "officers",
+            "CH01",
+            "2024-02-01",
+            None,
+            &[("change_date", "2024-02-01")],
+        ));
+        let TypedFiling::OfficerChange(changed) = changed else {
+            panic!("expected OfficerChange, got {changed:?}");
+        };
+        assert_eq!(changed.action, OfficerChangeAction::DetailsChanged);
+        assert_eq!(changed.action_date, Some(d("2024-02-01")));
+
+        // Incorporation (empty description_values).
+        let inc = TypedFiling::from(&item("incorporation", "NEWINC", "2022-11-28", None, &[]));
+        let TypedFiling::Incorporation(inc) = inc else {
+            panic!("expected Incorporation, got {inc:?}");
+        };
+        assert_eq!(inc.filed_on, Some(d("2022-11-28")));
+
+        // Any other kind keeps its raw form type code.
+        let other = TypedFiling::from(&item(
+            "address",
+            "AD01",
+            "2023-12-11",
+            None,
+            &[("change_date", "2023-12-11")],
+        ));
+        let TypedFiling::Other(other) = other else {
+            panic!("expected Other, got {other:?}");
+        };
+        assert_eq!(other.form_type.as_deref(), Some("AD01"));
+        assert_eq!(other.filed_on, Some(d("2023-12-11")));
+
+        // The transaction id (from `links.self`) is carried on every kind.
+        let mut tx_item = item("officers", "TM01", "2024-06-30", None, &[]);
+        tx_item.links = Some(FilingHistoryLinks {
+            self_link: tx("MzA1OTg4NDcwMDY5"),
+            document_metadata: None,
+        });
+        let TypedFiling::OfficerChange(with_tx) = TypedFiling::from(&tx_item) else {
+            panic!("expected OfficerChange");
+        };
+        assert_eq!(with_tx.transaction_id.as_deref(), Some("MzA1OTg4NDcwMDY5"));
+    }
+
+    /// The `FormType` classifier maps the known codes and preserves unknown
+    /// ones verbatim.
+    #[test]
+    fn form_type_classifies_codes() {
+        assert_eq!(FormType::from_code("AA"), FormType::Accounts);
+        assert_eq!(FormType::from_code("AA02"), FormType::MicroEntityAccounts);
+        assert_eq!(FormType::from_code("AAMD"), FormType::DormantAccounts);
+        assert_eq!(FormType::from_code("CS01"), FormType::ConfirmationStatement);
+        assert_eq!(
+            FormType::from_code("AA01"),
+            FormType::ChangeAccountingReferenceDate
+        );
+        assert_eq!(FormType::from_code("AD01"), FormType::ChangeRegisteredOffice);
+        assert_eq!(FormType::from_code("AP02"), FormType::OfficerAppointed);
+        assert_eq!(FormType::from_code("TM02"), FormType::OfficerTerminated);
+        assert_eq!(FormType::from_code("CH03"), FormType::OfficerDetailsChanged);
+        assert_eq!(FormType::from_code("NEWINC"), FormType::Incorporation);
+        assert_eq!(
+            FormType::from_code("SH01"),
+            FormType::Other {
+                code: "SH01".to_string()
+            }
+        );
+        assert_eq!(FormType::from_code("SH01").as_code(), "SH01");
+        assert_eq!(FormType::Accounts.as_code(), "AA");
+    }
+
     /// A company with registration 2024-01-01, whose cached profile announces
     /// next accounts 2025-01-01..2025-12-31 due 2026-09-30.
     fn next_accounts_profile(cache_dir: &Path) {
@@ -2920,6 +3472,62 @@ mod live_tests {
                 item.description.as_deref().unwrap_or("")
             );
         }
+
+        // The typed parse classifies each filing into its kind — accounts
+        // (with the period), confirmation statements (with the statement
+        // date), ARD changes, officer changes, incorporation, or other.
+        println!("typed filings:");
+        for typed in history.typed() {
+            let filed = typed
+                .filed_on()
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "—".to_string());
+            let (kind, detail) = match &typed {
+                TypedFiling::Accounts(a) => (
+                    "accounts",
+                    a.period_end
+                        .map(|d| format!("made up to {d}"))
+                        .unwrap_or_else(|| "no period".to_string()),
+                ),
+                TypedFiling::ConfirmationStatement(cs) => (
+                    "confirmation-statement",
+                    cs.made_on
+                        .map(|d| format!("made up to {d}"))
+                        .unwrap_or_else(|| "no date".to_string()),
+                ),
+                TypedFiling::ChangeOfAccountingReferenceDate(ard) => (
+                    "ard-change",
+                    ard.new_ard_date
+                        .map(|d| format!("new ard {d}"))
+                        .unwrap_or_else(|| "no date".to_string()),
+                ),
+                TypedFiling::OfficerChange(o) => {
+                    let name = o.officer_name.as_deref().unwrap_or("?");
+                    let date = o
+                        .action_date
+                        .map(|d| d.to_string())
+                        .unwrap_or_else(|| "?".to_string());
+                    (
+                        "officer-change",
+                        format!("{} {} {}", o.action.as_str(), name, date),
+                    )
+                }
+                TypedFiling::Incorporation(_) => ("incorporation", String::new()),
+                TypedFiling::Other(o) => (
+                    "other",
+                    o.form_type.as_deref().unwrap_or("?").to_string(),
+                ),
+            };
+            println!("  filed {filed}  {kind}  {detail}");
+        }
+        // The typed parse must never fail to classify: every item lands in a
+        // known variant, and the accounts items carry a period end.
+        let typed: Vec<_> = history.typed().collect();
+        assert_eq!(typed.len(), history.items.len());
+        assert!(
+            typed.iter().any(|t| matches!(t, TypedFiling::Accounts(a) if a.period_end.is_some())),
+            "at least one accounts filing with a period end"
+        );
 
         // Download the filed documents by filing id (cache-first): every
         // first-page filing carrying a document is downloaded, and each is
