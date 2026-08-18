@@ -216,7 +216,10 @@ fn unzip_ixbrl(bytes: &[u8]) -> Option<String> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).ok()?;
-        if entry.name().ends_with(".html") || entry.name().ends_with(".htm") {
+        // zip 2.x: names can be non-UTF8, so `name()` is fallible; a bad
+        // name just skips that entry.
+        let name = entry.name().unwrap_or_default();
+        if name.ends_with(".html") || name.ends_with(".htm") {
             let mut buf = Vec::new();
             std::io::Read::read_to_end(&mut entry, &mut buf).ok()?;
             return String::from_utf8(buf).ok();

@@ -60,7 +60,10 @@ pub enum CompaniesHouseError {
     #[snafu(display(
         "filing {filing_id} not found in the filing history of company {company_number}"
     ))]
-    FilingNotFound { company_number: String, filing_id: String },
+    FilingNotFound {
+        company_number: String,
+        filing_id: String,
+    },
 
     /// The filing kind is not implemented yet: its `description_values` keys
     /// are unverified (no real filing of this kind to check against), so the
@@ -416,7 +419,11 @@ impl CompaniesHouseClient {
     /// period; the id disambiguates filings sharing a date) — and only
     /// fetched from the document API on a miss.  Without a configured cache
     /// directory every call hits the API.
-    pub async fn download_filing(&self, company_number: &str, filing_id: &str) -> ApiResult<Vec<u8>> {
+    pub async fn download_filing(
+        &self,
+        company_number: &str,
+        filing_id: &str,
+    ) -> ApiResult<Vec<u8>> {
         let history = self.get_filing_history(company_number).await?;
         let item = history
             .items
@@ -499,7 +506,7 @@ impl CompaniesHouseClient {
         company: &Company,
     ) -> ApiResult<NextAccountingPeriod> {
         let company_number = (!company.company_number.is_empty())
-            .then(|| company.company_number.as_str())
+            .then_some(company.company_number.as_str())
             .or_else(|| self.config.company_number())
             .filter(|n| !n.is_empty())
             .ok_or(CompaniesHouseError::MissingCompanyNumber)?;
@@ -1291,13 +1298,15 @@ impl TryFrom<&FilingHistoryItem> for TypedFiling {
                         .or_else(|| parse("made_up_date")),
                 })),
                 Some("confirmation-statement") => {
-                    Ok(TypedFiling::ConfirmationStatement(ConfirmationStatementFiling {
-                        filed_on,
-                        transaction_id,
-                        description,
-                        // CH reports the statement date as `made_up_date`.
-                        made_on: parse("made_up_date").or_else(|| parse("made_on")),
-                    }))
+                    Ok(TypedFiling::ConfirmationStatement(
+                        ConfirmationStatementFiling {
+                            filed_on,
+                            transaction_id,
+                            description,
+                            // CH reports the statement date as `made_up_date`.
+                            made_on: parse("made_up_date").or_else(|| parse("made_on")),
+                        },
+                    ))
                 }
                 _ => Ok(TypedFiling::Other(OtherFiling {
                     filed_on,
@@ -1564,14 +1573,12 @@ pub fn parse_filed_accounts(html: &str) -> Result<FiledBalanceSheet, String> {
     // `uk-core:WithinOneYear`).
     let num = |ctx: Option<&str>, stem: &str| -> f64 {
         ctx.and_then(|c| {
-            ["core:", "uk-core:"]
-                .iter()
-                .find_map(|prefix| {
-                    facts
-                        .numeric_by_ctx
-                        .get(&(format!("{prefix}{stem}"), c.to_string()))
-                        .copied()
-                })
+            ["core:", "uk-core:"].iter().find_map(|prefix| {
+                facts
+                    .numeric_by_ctx
+                    .get(&(format!("{prefix}{stem}"), c.to_string()))
+                    .copied()
+            })
         })
         .unwrap_or(0.0)
     };
@@ -1677,12 +1684,7 @@ fn collect_context_periods(
 /// a context's subtree (the period element nests below the context).
 fn collect_period_dates(nodes: &[XmlNode], period: &mut ContextPeriod) {
     for node in nodes {
-        if let XmlNode::Elem {
-            name,
-            children,
-            ..
-        } = node
-        {
+        if let XmlNode::Elem { name, children, .. } = node {
             if matches!(
                 name.as_str(),
                 "xbrli:instant" | "xbrli:startDate" | "xbrli:endDate"
@@ -3105,7 +3107,10 @@ mod tests {
                 code,
                 "2024-01-15",
                 None,
-                &[("appointment_date", "2024-01-15"), ("officer_name", "BLOGGS, A")],
+                &[
+                    ("appointment_date", "2024-01-15"),
+                    ("officer_name", "BLOGGS, A"),
+                ],
             ))
             .expect_err("officer changes are unimplemented");
             assert!(
@@ -3164,7 +3169,10 @@ mod tests {
             FormType::from_code("AA01"),
             FormType::ChangeAccountingReferenceDate
         );
-        assert_eq!(FormType::from_code("AD01"), FormType::ChangeRegisteredOffice);
+        assert_eq!(
+            FormType::from_code("AD01"),
+            FormType::ChangeRegisteredOffice
+        );
         assert_eq!(FormType::from_code("AP02"), FormType::OfficerAppointed);
         assert_eq!(FormType::from_code("TM02"), FormType::OfficerTerminated);
         assert_eq!(FormType::from_code("CH03"), FormType::OfficerDetailsChanged);
@@ -3272,8 +3280,16 @@ mod tests {
 </body></html>"#,
             ctx("CY_END", "2024-11-30", None),
             ctx("PY_END", "2023-11-30", None),
-            ctx("CreditorsWithinOneYear_CY_END", "2024-11-30", Some("core:WithinOneYear")),
-            ctx("CreditorsWithinOneYear_PY_END", "2023-11-30", Some("core:WithinOneYear")),
+            ctx(
+                "CreditorsWithinOneYear_CY_END",
+                "2024-11-30",
+                Some("core:WithinOneYear")
+            ),
+            ctx(
+                "CreditorsWithinOneYear_PY_END",
+                "2023-11-30",
+                Some("core:WithinOneYear")
+            ),
         )
     }
 
@@ -3285,12 +3301,21 @@ mod tests {
     fn parse_filed_accounts_reads_ch_micro_entity_ixbrl() {
         let bs = parse_filed_accounts(&ch_micro_entity_ixbrl()).expect("the fixture parses");
 
-        assert_eq!(bs.period_start, NaiveDate::from_ymd_opt(2022, 11, 28).unwrap());
-        assert_eq!(bs.period_end, NaiveDate::from_ymd_opt(2023, 11, 30).unwrap());
+        assert_eq!(
+            bs.period_start,
+            NaiveDate::from_ymd_opt(2022, 11, 28).unwrap()
+        );
+        assert_eq!(
+            bs.period_end,
+            NaiveDate::from_ymd_opt(2023, 11, 30).unwrap()
+        );
 
         let f = &bs.figures;
         assert_eq!(f.current_assets, 68_946.0);
-        assert_eq!(f.creditors_within_1_year, -570.0, "creditors stored negative");
+        assert_eq!(
+            f.creditors_within_1_year, -570.0,
+            "creditors stored negative"
+        );
         assert_eq!(f.creditors_after_1_year, 0.0);
         assert_eq!(f.net_current_assets, 68_376.0);
         assert_eq!(f.total_assets_less_liabilities, 68_376.0);
@@ -3309,8 +3334,14 @@ mod tests {
     fn parse_filed_accounts_reads_ch_2024_taxonomy() {
         let bs = parse_filed_accounts(&ch_micro_entity_ixbrl_2024()).expect("the fixture parses");
 
-        assert_eq!(bs.period_start, NaiveDate::from_ymd_opt(2023, 12, 1).unwrap());
-        assert_eq!(bs.period_end, NaiveDate::from_ymd_opt(2024, 11, 30).unwrap());
+        assert_eq!(
+            bs.period_start,
+            NaiveDate::from_ymd_opt(2023, 12, 1).unwrap()
+        );
+        assert_eq!(
+            bs.period_end,
+            NaiveDate::from_ymd_opt(2024, 11, 30).unwrap()
+        );
 
         let f = &bs.figures;
         assert_eq!(f.current_assets, 74_991.0);
@@ -3855,20 +3886,22 @@ mod live_tests {
                 ),
                 // Reserved kinds (ARD changes, officer changes) never parse
                 // yet — they return Unimplemented — so they don't appear here.
-                TypedFiling::ChangeOfAccountingReferenceDate(_)
-                | TypedFiling::OfficerChange(_) => unreachable!("reserved kinds are unimplemented"),
+                TypedFiling::ChangeOfAccountingReferenceDate(_) | TypedFiling::OfficerChange(_) => {
+                    unreachable!("reserved kinds are unimplemented")
+                }
                 TypedFiling::Incorporation(_) => ("incorporation", String::new()),
-                TypedFiling::Other(o) => (
-                    "other",
-                    o.form_type.as_deref().unwrap_or("?").to_string(),
-                ),
+                TypedFiling::Other(o) => {
+                    ("other", o.form_type.as_deref().unwrap_or("?").to_string())
+                }
             };
             println!("  filed {filed}  {kind}  {detail}");
         }
         // Every item classified, and the accounts items carry a period end.
         assert_eq!(typed.len(), history.items.len());
         assert!(
-            typed.iter().any(|t| matches!(t, TypedFiling::Accounts(a) if a.period_end.is_some())),
+            typed
+                .iter()
+                .any(|t| matches!(t, TypedFiling::Accounts(a) if a.period_end.is_some())),
             "at least one accounts filing with a period end"
         );
 
@@ -3893,7 +3926,10 @@ mod live_tests {
                 .download_filing(&number, &tx)
                 .await
                 .expect("download the filing document");
-            assert!(!bytes.is_empty(), "a downloaded document is non-empty: {tx}");
+            assert!(
+                !bytes.is_empty(),
+                "a downloaded document is non-empty: {tx}"
+            );
             println!(
                 "  filed {}  {}  ({}): {} bytes",
                 item.filed_on()
@@ -3991,7 +4027,10 @@ mod live_tests {
     /// lines negative — the reports' sign convention).
     fn print_figures(figures: &PreviousYearFigures) {
         for (label, value) in [
-            ("called up share capital not paid", figures.called_up_share_capital_not_paid),
+            (
+                "called up share capital not paid",
+                figures.called_up_share_capital_not_paid,
+            ),
             ("fixed assets", figures.fixed_assets),
             ("current assets", figures.current_assets),
             (
@@ -4005,8 +4044,14 @@ mod live_tests {
                 figures.total_assets_less_liabilities,
             ),
             ("creditors after 1 year", figures.creditors_after_1_year),
-            ("provisions for liabilities", figures.provisions_for_liabilities),
-            ("accruals and deferred income", figures.accruals_and_deferred_income),
+            (
+                "provisions for liabilities",
+                figures.provisions_for_liabilities,
+            ),
+            (
+                "accruals and deferred income",
+                figures.accruals_and_deferred_income,
+            ),
             ("net assets", figures.net_assets),
             ("capital and reserves", figures.capital_and_reserves),
         ] {

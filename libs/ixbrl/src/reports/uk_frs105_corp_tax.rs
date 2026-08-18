@@ -3653,18 +3653,35 @@ mod tests {
         encoder.finish().expect("finish the gzip stream")
     }
 
+    /// Decompress gzip `data` — the inverse of [`gzip`].  The gzip *bytes*
+    /// themselves depend on flate2's backend (the workspace build unifies
+    /// zip 2's `zlib-rs` feature into flate2, whose deflate output differs
+    /// from a miniz_oxide-only build), so backend-sensitive comparisons
+    /// decompress first and compare the XML.
+    fn gunzip(data: &[u8]) -> Vec<u8> {
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+        let mut decoder = GzDecoder::new(data);
+        let mut out = Vec::new();
+        decoder.read_to_end(&mut out).expect("decompress the book");
+        out
+    }
+
     /// The committed ctm03955 book is exactly the serializer's output
-    /// (gzip'd): regenerating it must be a no-op.  If it ever drifts, run
+    /// (gzip'd): regenerating it must be a no-op.  The comparison is on
+    /// the decompressed XML, so it holds whichever flate2 backend the
+    /// build unified (see [`gunzip`]).  If it ever drifts, run
     /// `cargo test -p ixbrl -- --ignored regenerate_ctm03955_book_fixture`.
     #[test]
     fn test_ctm03955_book_matches_committed_fixture() {
-        let generated = gzip(ctm03955_book().to_gnucash_xml().as_bytes());
-        let committed = std::fs::read(crate::test_utils::repo_path(
+        let generated = ctm03955_book().to_gnucash_xml();
+        let committed = gunzip(&std::fs::read(crate::test_utils::repo_path(
             "libs/ixbrl/example_data/ctm03955-marginal-relief/input.gnucash",
         ))
-        .expect("read the ctm03955 book");
+        .expect("read the ctm03955 book"));
         assert_eq!(
-            generated, committed,
+            generated.as_bytes(),
+            committed,
             "example_data/ctm03955-marginal-relief/input.gnucash is stale — run the ignored \
              regenerate_ctm03955_book_fixture test to rewrite it"
         );
