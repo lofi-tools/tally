@@ -1570,10 +1570,10 @@ mod live_tests {
     /// registration date, next accounting period, and the descriptive
     /// profile: registered-office address, SIC codes, jurisdiction and the
     /// current directors), and the resolved inputs are printed.  The profile
-    /// and officers land in the repository's `.cache` (this test exercises
-    /// the CLI, not the client — the cache means repeat runs don't keep
-    /// hitting the remote API), and a second run with a placeholder key
-    /// proves the cache serves the response.
+    /// and officers land in the repository's `.cache/api_responses` (this
+    /// test exercises the CLI, not the client — the cache means repeat runs
+    /// don't keep hitting the remote API), and a second run with a
+    /// placeholder key proves the cache serves the response.
     #[tokio::test]
     #[cfg_attr(
         not(feature = "api_tests"),
@@ -1595,11 +1595,12 @@ mod live_tests {
                      Tax reference is never resolved from Companies House)",
         );
 
-        // The repository's `.cache` (cargo runs the test with cwd = this
-        // package, so `../../.cache` is the repo root's): the profile and
-        // officers are cached there, so the second run is served from it and
-        // repeat runs of the suite don't keep hitting the API.
-        env.cache_dir = Some(PathBuf::from("../../.cache"));
+        // The repository's `.cache/api_responses` (cargo runs the test with
+        // cwd = this package, so `../../.cache/api_responses` is the repo
+        // root's): the profile and officers are cached there, so the second
+        // run is served from it and repeat runs of the suite don't keep
+        // hitting the API.
+        env.cache_dir = Some(PathBuf::from("../../.cache/api_responses"));
 
         // The committed minimal config: no identity, no period, blank
         // profile — the identity and period come from the environment and

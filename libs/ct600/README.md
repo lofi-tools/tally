@@ -71,11 +71,12 @@ Companies House resolution (client + config in `companies_house`) is opt-in:
 
 `cargo test -p ct600` runs the full suite, including the live Companies
 House integration tests (`live_tests`, part of the default-enabled
-`cached_live_tests` feature — they use the repository's `.cache`, so only
-the first, cold run needs a key + `COMPANY_NUMBER` and hits the API;
-repeat runs are served from disk).  Enable `always_live_tests` to force a
-fresh network run every time.  Run fully offline with `cargo test -p ct600
---no-default-features` (the live tests are then reported as ignored):
+`cached_live_tests` feature — they use the repository's
+`.cache/api_responses`, so only the first, cold run needs a key +
+`COMPANY_NUMBER` and hits the API; repeat runs are served from disk).
+Enable `always_live_tests` to force a fresh network run every time.  Run
+fully offline with `cargo test -p ct600 --no-default-features` (the live
+tests are then reported as ignored):
 
 - Companies House is served from hardcoded fixtures in
   `companies_house::test_utils`: company `12345678`, `EXAMPLE CORP LTD`,
