@@ -1378,7 +1378,7 @@ impl Frs105Accounts {
             accounting_standards_dimension: dim("ctxt-4", "uk-bus:AccountingStandardsDimension"),
             accounts_type_dimension: dim("ctxt-5", "uk-bus:AccountsTypeDimension"),
             accounts_status_dimension: dim("ctxt-6", "uk-bus:AccountsStatusDimension"),
-            signature_b64: imgs.get("Director's signature").cloned().unwrap_or_default(),
+            signature_b64: imgs.get("Director's signature").cloned(),
             ..accounts
         };
 
@@ -1576,47 +1576,47 @@ impl Frs105Accounts {
     fn build_title_page(&self) -> XmlNode {
         let company = &self.company;
         let profile = &self.profile;
-        page(vec![div("titlepage", vec![
-            div("company-number", vec![span(vec![
-                span_text(" Company registration no. "),
-                span(vec![non_numeric(
-                    "uk-bus:UKCompaniesHouseRegisteredNumber",
-                    "ctxt-0",
-                    &company.company_number,
-                )]),
-                span_text(" ("),
-                span(vec![span_text(&profile.jurisdiction)]),
-                span_text(")"),
-            ])]),
-            elt(
+        let mut title_children = vec![div("company-number", vec![span(vec![
+            span_text(" Company registration no. "),
+            span(vec![non_numeric(
+                "uk-bus:UKCompaniesHouseRegisteredNumber",
+                "ctxt-0",
+                &company.company_number,
+            )]),
+            span_text(" ("),
+            span(vec![span_text(&profile.jurisdiction)]),
+            span_text(")"),
+        ])])];
+        // The logo is optional: omit the image (and the empty data URI)
+        // when none is supplied.
+        if let Some(logo) = profile.logo_b64.as_deref().filter(|logo| !logo.is_empty()) {
+            title_children.push(elt(
                 "img",
                 &[
                     ("alt", "Company logo"),
-                    ("src", &format!(
-                        "data:image/png;base64,{}",
-                        profile.logo_b64.as_deref().unwrap_or("")
-                    )),
+                    ("src", &format!("data:image/png;base64,{logo}")),
                 ],
-            ),
-            div("company-name", vec![span(vec![span(vec![non_numeric(
-                "uk-bus:EntityCurrentLegalOrRegisteredName",
-                "ctxt-0",
-                &company.name,
-            )])])]),
-            div("title", vec![span(vec![span(vec![non_numeric(
-                "uk-bus:ReportTitle",
-                "ctxt-0",
-                REPORT_TITLE,
-            )])])]),
-            div("subtitle", vec![span(vec![
-                span_text("For the year ended "),
-                span(vec![date_fact(
-                    "uk-bus:EndDateForPeriodCoveredByReport",
-                    "ctxt-1",
-                    &self.accounts.period().end,
-                )]),
-            ])]),
-        ])])
+            ));
+        }
+        title_children.push(div("company-name", vec![span(vec![span(vec![non_numeric(
+            "uk-bus:EntityCurrentLegalOrRegisteredName",
+            "ctxt-0",
+            &company.name,
+        )])])]));
+        title_children.push(div("title", vec![span(vec![span(vec![non_numeric(
+            "uk-bus:ReportTitle",
+            "ctxt-0",
+            REPORT_TITLE,
+        )])])]));
+        title_children.push(div("subtitle", vec![span(vec![
+            span_text("For the year ended "),
+            span(vec![date_fact(
+                "uk-bus:EndDateForPeriodCoveredByReport",
+                "ctxt-1",
+                &self.accounts.period().end,
+            )]),
+        ])]));
+        page(vec![div("titlepage", title_children)])
     }
 
     /// Company-information page: header, then a table of directors, company
@@ -1919,7 +1919,7 @@ impl Frs105Accounts {
             ),
         ]));
 
-        let approval = elt("div", &[]).child(elt("div", &[]).children(vec![
+        let mut approval_children = vec![
             elt("p", &[]).child(span(vec![
                 span_text("Approved by the board of directors and authorised for publication on "),
                 span(vec![date_fact(
@@ -1934,17 +1934,19 @@ impl Frs105Accounts {
                 span(vec![span_text(&self.accounts.signed_by)]),
                 span_text("."),
             ])),
-            elt(
+        ];
+        // The signature image is optional: omit it (and the empty data URI)
+        // when none is supplied.
+        if let Some(signature_b64) = &self.accounts.signature_b64 {
+            approval_children.push(elt(
                 "img",
                 &[
                     ("alt", "Director's signature"),
-                    ("src", &format!(
-                        "data:image/png;base64,{}",
-                        &self.accounts.signature_b64
-                    )),
+                    ("src", &format!("data:image/png;base64,{signature_b64}")),
                 ],
-            ),
-        ]));
+            ));
+        }
+        let approval = elt("div", &[]).child(elt("div", &[]).children(approval_children));
 
         page(vec![elt("div", &[]).children(vec![
             self.page_header("Statement of financial position", HeaderSubtitle::AsAt),
@@ -2608,7 +2610,7 @@ mod tests {
             accounts.incorporation_date,
             chrono::NaiveDate::from_ymd_opt(2017, 4, 5).unwrap()
         );
-        assert!(!accounts.signature_b64.is_empty());
+        assert!(accounts.signature_b64.is_some());
     }
 
     #[tokio::test]
@@ -3372,6 +3374,38 @@ mod tests {
             html.find("uk-core:CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset").unwrap()
                 < html.find("uk-core:FixedAssets").unwrap()
         );
+    }
+
+    #[test]
+    fn logo_and_signature_omitted_when_not_supplied() {
+        // A report built without a logo or signature omits both images (no
+        // empty data URIs); the example's logo and signature still render
+        // when supplied.
+        let company = example_company();
+        let empty_book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
+        let no_assets = Frs105Accounts::new(
+            &empty_book,
+            &company,
+            &CompanyProfile::default(),
+            &AccountsMeta {
+                signature_b64: None,
+                ..example_accounts_meta()
+            },
+        )
+        .to_ixbrl();
+        assert!(!no_assets.contains("alt=\"Company logo\""));
+        assert!(!no_assets.contains("alt=\"Director's signature\""));
+        assert!(!no_assets.contains("data:image/png;base64,"));
+
+        let with_assets = Frs105Accounts::new(
+            &empty_book,
+            &company,
+            &example_profile(),
+            &example_accounts_meta(),
+        )
+        .to_ixbrl();
+        assert!(with_assets.contains("alt=\"Company logo\""));
+        assert!(with_assets.contains("alt=\"Director's signature\""));
     }
 
 

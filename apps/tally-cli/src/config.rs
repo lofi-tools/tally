@@ -422,7 +422,9 @@ impl AccountsConfig {
             accounting_standards_dimension: self.accounting_standards_dimension,
             accounts_type_dimension: self.accounts_type_dimension,
             accounts_status_dimension: self.accounts_status_dimension,
-            signature_b64: self.signature_b64,
+            // The config requires the field (`""` for none): normalise the
+            // empty-string sentinel to an explicit `None`.
+            signature_b64: (!self.signature_b64.is_empty()).then_some(self.signature_b64),
         }
     }
 }
@@ -1383,7 +1385,7 @@ mod tests {
             meta.average_employees,
             HashMap::from([("2019".to_string(), 1), ("2020".to_string(), 1)])
         );
-        assert_eq!(meta.signature_b64, "");
+        assert_eq!(meta.signature_b64, None);
     }
 
     /// Config files are parsed as JSONC (`serde_json_lenient`): `//`

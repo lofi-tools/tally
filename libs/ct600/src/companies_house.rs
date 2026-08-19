@@ -403,6 +403,10 @@ mod live_tests {
 
         // The generated documents carry their expected markers.
         assert!(accounts_html.contains("Unaudited Micro-Entity Accounts"));
+        // No logo or signature is supplied in this test — the report omits
+        // both images instead of emitting empty data URIs.
+        assert!(!accounts_html.contains("alt=\"Company logo\""));
+        assert!(!accounts_html.contains("alt=\"Director's signature\""));
         assert!(corp_tax_html.contains("Corporation Tax Statement"));
         assert!(ct600_xml.contains("GovTalkMessage"));
         assert!(ct600_xml.contains(&ch_profile.company_number));

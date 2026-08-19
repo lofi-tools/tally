@@ -229,8 +229,9 @@ pub struct AccountsMeta {
     /// Taxonomy dimension value for the accounts status.
     pub accounts_status_dimension: String,
     /// Base64-encoded director's signature, embedded on the statement of
-    /// financial position.
-    pub signature_b64: String,
+    /// financial position; `None` when the report is not signed with an
+    /// image (the signature block is then omitted).
+    pub signature_b64: Option<String>,
 }
 
 impl Default for AccountsMeta {
@@ -253,7 +254,7 @@ impl Default for AccountsMeta {
             accounting_standards_dimension: String::new(),
             accounts_type_dimension: String::new(),
             accounts_status_dimension: String::new(),
-            signature_b64: String::new(),
+            signature_b64: None,
         }
     }
 }

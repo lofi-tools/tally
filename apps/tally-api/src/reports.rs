@@ -402,7 +402,7 @@ fn to_meta(company: &Company, period: AccountingPeriod) -> Result<AccountsMeta, 
         accounting_standards_dimension: DEFAULT_ACCOUNTING_STANDARDS_DIMENSION.into(),
         accounts_type_dimension: DEFAULT_ACCOUNTS_TYPE_DIMENSION.into(),
         accounts_status_dimension: DEFAULT_ACCOUNTS_STATUS_DIMENSION.into(),
-        signature_b64: company.signature_b64.clone().unwrap_or_default(),
+        signature_b64: company.signature_b64.clone(),
     })
 }
 
