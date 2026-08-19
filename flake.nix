@@ -15,7 +15,17 @@
         buildTimeDeps = [ pkgs.pkg-config ];
         runtimeDeps = [ ];
         # node + pnpm back the JS workspace (apps/design-system-showcase, apps/tally-web, packages/design-system).
-        devDeps = [ pkgs.cargo-nextest pkgs.arelle pkgs.nodejs pkgs.pnpm ];
+        devDeps = [ pkgs.cargo-nextest arelle pkgs.nodejs pkgs.pnpm ];
+
+        # Arelle with the extra dependency the bundled UK validation plugin
+        # (arelle/plugin/validate/UK — the HMRC / Companies House Joint
+        # Filing Validation Checks) needs: nixpkgs ships `tinycss2` only in
+        # arelle's `esef` extra (test-only), so `--plugins validate/UK`
+        # fails to load without this override (see the `validate-accounts`
+        # script).
+        arelle = pkgs.arelle.overridePythonAttrs (old: {
+          dependencies = (old.dependencies or [ ]) ++ [ pkgs.python3Packages.tinycss2 ];
+        });
 
         pythonVers = pkgs.python312Packages;
 
@@ -416,7 +426,7 @@
           # (needs cargo + arelle): `nix develop -c validate-all`.
           validate-all = ''
             set -e
-            cargo test -p ixbrl --lib
+            cargo test -p reports --lib
             for f in \
               accts-micro-basic-1.html \
               accts-micro-roundtrip-basic-1.html \
@@ -430,6 +440,42 @@
               arelleCmdLine -f "$path" -v --validationExitCode --captureWarnings
             done
             echo "all reports validate OK"
+          '';
+
+          # Validate the generated documents of the 3-report live test
+          # (`.cache/tally-full-year/`, company 14510633) with Arelle's UK
+          # plugin: the FRC taxonomy is loaded from the documents'
+          # schemaRefs (network or Arelle's HTTP cache), surfacing the
+          # schema-level errors (empty xbrldi:explicitMember values and
+          # friends), and the HMRC / Companies House Joint Filing
+          # Validation Checks run on top (`--plugins validate/UK
+          # --disclosureSystem hmrc`).  The iXBRL documents (accounts +
+          # corporation-tax computation) are validated; the CT600 GovTalk
+          # return is not XBRL — HMRC's Local Test Service validates that.
+          # Regenerates the documents first if missing (the 3-report test;
+          # a warm cache runs fully offline, a cold one needs
+          # COMPANIES_HOUSE_API_KEY).  Runs in the devShell (needs cargo +
+          # arelle): `nix develop -c validate-accounts`.
+          validate-accounts = ''
+            set -e
+            cd "${wd}"
+            for f in 14510633-accounts.html 14510633-corp-tax.html; do
+              if [ ! -f ".cache/tally-full-year/$f" ]; then
+                echo "validate-accounts: missing .cache/tally-full-year/$f; regenerating the 3-report documents" >&2
+                COMPANY_NUMBER="''${COMPANY_NUMBER:-14510633}" \
+                  cargo test -p ct600 --lib companies_house::live_tests::live_latest_accounts_full_year_reports -- --nocapture
+                break
+              fi
+            done
+            for f in 14510633-accounts.html 14510633-corp-tax.html; do
+              path="${wd}/.cache/tally-full-year/$f"
+              [ -f "$path" ] || { echo "validate-accounts: missing report: $path" >&2; exit 1; }
+              echo "==> validating $path (UK plugin)"
+              # --captureWarnings: warnings fail the run too (exit 3).
+              arelleCmdLine --plugins validate/UK --disclosureSystem hmrc \
+                -f "$path" -v --validationExitCode --captureWarnings
+            done
+            echo "all generated documents validate OK (UK plugin)"
           '';
 
           # Run the 3-report live test (the ct600 crate's
