@@ -230,17 +230,18 @@ mod live_tests {
     /// fetch the filing history, take the latest accounts filing as the
     /// starting point, then generate all three output documents for the
     /// next pending period — the FRS 105 accounts, the FRS 105
-    /// corporation-tax computation and the CT600 return — with an empty
-    /// transaction list (the pending period has no ledger yet).  The
+    /// corporation-tax computation and the CT600 return.  The
     /// previous-period comparative column is computed from a chart of
     /// accounts auto-generated *plausibly* from the filed balance sheet
     /// ([`crate::test_utils::plausible_previous_book`]), which must
-    /// reconcile with the filing ([`Frs105Accounts::check_previous_period_matches_filing`]);
-    /// with no current-period transactions the seeded current column
-    /// ([`Frs105Accounts::with_prev_period_data`]) equals the previous
-    /// column, so every balance reads the same in both columns.  The
-    /// documents are written under `.cache`, like the other live tests'
-    /// artifacts.
+    /// reconcile with the filing ([`Frs105Accounts::check_previous_period_matches_filing`]).
+    /// A prior-period error is then corrected: the filed balance sheet
+    /// omitted the corporation-tax liability, so the comparative column
+    /// restores the £2006.21 via a previous-year start-balance adjustment
+    /// ([`Frs105Accounts::with_previous_year_adjustments`]), and the
+    /// current column settles it with the pending period's one transaction
+    /// — the 2025-08-31 payment in the ledger.  The documents are written
+    /// under `.cache`, like the other live tests' artifacts.
     #[tokio::test]
     #[cfg_attr(
         not(any(feature = "cached_live_tests", feature = "always_live_tests")),
@@ -252,7 +253,10 @@ mod live_tests {
         use chrono::Datelike;
         use reports::GnucashBook;
         use reports::reports::uk_frs105_accounts::{FilingDeadlines, Frs105Accounts, PreviousPeriodData};
-        use reports::{AccountsMeta, Company, EmployeePeriod, Employees};
+        use reports::{
+            AccountsMeta, AdjustmentSplit, AdjustmentTransaction, Company, EmployeePeriod,
+            Employees, RawSplit, RawTransaction,
+        };
 
         use crate::ct600_return::Ct600Return;
 
@@ -347,10 +351,6 @@ mod live_tests {
             ..AccountsMeta::default()
         };
 
-        // Empty ledger: no transactions in the pending period yet — the new
-        // balance sheet carries the filed figures in the previous column.
-        let book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
-
         // The previous period's chart of accounts.  The filing alone cannot
         // rebuild the CoA (it carries only the aggregates), so the test
         // auto-generates a *plausible* one — a book that reproduces the
@@ -363,16 +363,56 @@ mod live_tests {
             filing: Some(&bs),
         };
 
-        // The three documents: the previous-period comparative column is
-        // computed from the previous CoA, and the pending period has no
-        // transactions, so the seeded current column (previous-period
-        // figures + zero activity) equals the comparative column — the
-        // balances are unchanged (see `Frs105Accounts::with_prev_period_data`).
-        // The signing date is not supplied in this test: it defaults to one
-        // day before the earliest filing deadline (accounts vs CT600),
-        // capped at today.  The real deadlines come from the profile's
-        // `next_accounts.due_on` (the pending period's accounts due date)
-        // and the period end (the CT600 due date, 12 months after).
+        // The pending period's ledger: the previous period's chart of
+        // accounts, with the period's one transaction so far — the
+        // 2025-08-31 payment settling the corporation tax the comparative
+        // column restores below (Dr the CT liability, Cr the bank).  The
+        // accounts are copied from the previous book (same GUIDs), so the
+        // payment's splits resolve against the same chart.
+        let owed_ct_guid = previous_book
+            .raw_accounts()
+            .iter()
+            .find(|a| a.name == "Owed Corporation Tax")
+            .expect("the plausible chart carries the CT liability account")
+            .guid
+            .clone();
+        let bank_guid = previous_book
+            .raw_accounts()
+            .iter()
+            .find(|a| a.name == "Bank Accounts")
+            .expect("the plausible chart carries the bank account")
+            .guid
+            .clone();
+        let book = GnucashBook::from_raw_parts(
+            previous_book.raw_accounts().to_vec(),
+            vec![RawTransaction {
+                guid: "txn-ct-payment".into(),
+                post_datetime: chrono::NaiveDate::from_ymd_opt(2025, 8, 31)
+                    .unwrap()
+                    .and_hms_opt(12, 0, 0)
+                    .unwrap(),
+                description: "corporation tax paid (prior year)".into(),
+            }],
+            vec![
+                RawSplit {
+                    tx_guid: "txn-ct-payment".into(),
+                    account_guid: owed_ct_guid,
+                    value: "2006.21".parse().unwrap(),
+                },
+                RawSplit {
+                    tx_guid: "txn-ct-payment".into(),
+                    account_guid: bank_guid,
+                    value: "-2006.21".parse().unwrap(),
+                },
+            ],
+        );
+
+        // The three documents.  The signing date is not supplied in this
+        // test: it defaults to one day before the earliest filing deadline
+        // (accounts vs CT600), capped at today.  The real deadlines come
+        // from the profile's `next_accounts.due_on` (the pending period's
+        // accounts due date) and the period end (the CT600 due date, 12
+        // months after).
         let accounts_deadline = ch_profile
             .accounts
             .as_ref()
@@ -393,21 +433,84 @@ mod live_tests {
                 hmrc_ct600: pending_end + chrono::Months::new(12),
             });
         // The generated previous CoA reconciles with the filed balance
-        // sheet line for line (this is what the check validates).
+        // sheet line for line (this is what the check validates) — checked
+        // before the prior-year correction below changes the comparative
+        // column.
         accounts
             .check_previous_period_matches_filing(&bs)
             .expect("the plausible previous-period CoA must reconcile with the filed balance sheet");
-        assert_eq!(
-            accounts.net_assets[0], accounts.net_assets[1],
-            "no transactions: net assets carried forward"
+
+        // The prior-period error: the filed balance sheet did not accrue
+        // the corporation tax (a mistake), so the comparative column is
+        // corrected with a previous-year start-balance adjustment — the
+        // £2006.21 owed to HMRC restored at the start of the previous
+        // period (Dr the CT equity reserve, Cr the CT liability) — while
+        // the current column settles it with the payment already in the
+        // ledger.  Net assets fall by the same amount in both columns.
+        let adjustments = [AdjustmentTransaction {
+            // Dated at the start of the previous period per the accounting
+            // schedule (one day after the filing's period start — the
+            // schedule's periods run the day after the previous one ends).
+            post_datetime: pending.previous().start.and_hms_opt(12, 0, 0).unwrap(),
+            description: "restore omitted prior-year corporation tax liability".into(),
+            splits: vec![
+                AdjustmentSplit {
+                    account: "Liabilities:Owed Corporation Tax".into(),
+                    value: "-2006.21".parse().unwrap(),
+                },
+                AdjustmentSplit {
+                    account: "Equity:Corporation Tax".into(),
+                    value: "2006.21".parse().unwrap(),
+                },
+            ],
+        }];
+        let accounts = accounts.with_previous_year_adjustments(&adjustments);
+
+        // The correction: the comparative column restores the omitted
+        // liability (creditors −2006.21, retained earnings −2006.21), and
+        // the current column nets it against the 2025-08-31 payment — the
+        // liability clears (current creditors back to the filed figure) and
+        // the bank is lower; net assets are down by the same £2006.21 in
+        // both columns.
+        println!(
+            "corrected balance sheet: creditors within 1 year {} / {}, net assets {} / {} (current / previous)",
+            accounts.creditors_within_1_year[0],
+            accounts.creditors_within_1_year[1],
+            accounts.net_assets[0],
+            accounts.net_assets[1],
+        );
+        assert!(
+            (accounts.net_assets[0] - accounts.net_assets[1]).abs() < 0.005,
+            "net assets fall by the same amount in both columns"
+        );
+        assert!(
+            (accounts.net_assets[0] - (bs.figures.net_assets - 2006.21)).abs() < 0.005,
+            "net assets down by the restored liability: {} vs {}",
+            accounts.net_assets[0],
+            bs.figures.net_assets - 2006.21
         );
         assert_eq!(
             accounts.fixed_assets[0], accounts.fixed_assets[1],
-            "no transactions: fixed assets carried forward"
+            "fixed assets unaffected by the CT correction"
+        );
+        assert!(
+            (accounts.creditors_within_1_year[0] - bs.figures.creditors_within_1_year).abs()
+                < 0.005,
+            "the payment clears the restored liability: current creditors match the filed figure"
+        );
+        assert!(
+            (accounts.creditors_within_1_year[1] - (bs.figures.creditors_within_1_year - 2006.21))
+                .abs()
+                < 0.005,
+            "the comparative column restores the omitted CT liability"
+        );
+        assert!(
+            (accounts.current_assets[0] - (bs.figures.current_assets - 2006.21)).abs() < 0.005,
+            "the payment reduces the current-period bank"
         );
         assert_eq!(
-            accounts.current_assets[0], accounts.current_assets[1],
-            "no transactions: current assets carried forward"
+            accounts.current_assets[1], bs.figures.current_assets,
+            "the comparative column keeps the filed current assets"
         );
         let corp_tax = Frs105CorpTax::builder(&book, &company, &accounts_meta).build();
         let ct600 = Ct600Return::from_inputs(&accounts, &corp_tax);

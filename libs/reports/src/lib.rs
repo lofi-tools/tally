@@ -101,6 +101,39 @@ pub struct RawSplit {
     pub value: rucash::Num,
 }
 
+/// One previous-period start-balance adjustment: a transaction whose splits
+/// reference accounts (by full path, resolved against the previous period's
+/// chart of accounts) — e.g. correcting a prior-period error the
+/// comparative column must reflect, such as restoring a liability the filed
+/// balance sheet omitted.  Applied to a report with
+/// [`reports::uk_frs105_accounts::Frs105Accounts::with_previous_year_adjustments`].
+#[derive(Debug, Clone)]
+pub struct AdjustmentTransaction {
+    /// The posting date, within the previous period.
+    pub post_datetime: chrono::NaiveDateTime,
+    /// The transaction's description/memo.
+    pub description: String,
+    /// The transaction's splits — they must balance (each account's sign
+    /// follows the GnuCash convention the reports read: assets and
+    /// liabilities stored as-is, equity / income / expense negated).
+    pub splits: Vec<AdjustmentSplit>,
+}
+
+/// One leg of an [`AdjustmentTransaction`]: a value posted against an
+/// account, referenced by its full `":"`-separated path (e.g.
+/// `"Liabilities:Owed Corporation Tax"`) and resolved against the previous
+/// period's chart of accounts.  The referenced account must exist in the
+/// previous book and fall on a balance-sheet line's account paths (the
+/// `LINE_ACCOUNTS` of the FRS 105 accounts module — a split on an account
+/// outside them is silently ignored by the line computations).
+#[derive(Debug, Clone)]
+pub struct AdjustmentSplit {
+    /// The full account path, e.g. `"Liabilities:Owed Corporation Tax"`.
+    pub account: String,
+    /// The posted value (the same sign convention as [`RawSplit::value`]).
+    pub value: rucash::Num,
+}
+
 #[derive(Debug, Clone)]
 pub struct GnucashBook {
     accounts: Vec<AccountNode>,

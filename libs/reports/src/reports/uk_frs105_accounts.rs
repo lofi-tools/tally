@@ -29,7 +29,7 @@ use companies_house::FiledBalanceSheet;
 use core_model::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use ixbrl_ir::ixbrl_fmt::*;
 use snafu::Snafu;
-use crate::GnucashBook;
+use crate::{AdjustmentTransaction, GnucashBook};
 
 /// The report title written into the generated document (the title page and
 /// the hidden `uk-bus:ReportTitle` fact).  Auto-generated here — the config
@@ -72,6 +72,12 @@ pub struct Frs105Accounts {
     /// `None` for reports parsed from iXBRL ([`Self::from_ixbrl_node`]),
     /// which have no ledger.
     book: Option<GnucashBook>,
+    /// The previous period's chart of accounts, retained (cloned) by
+    /// [`Self::with_prev_period_data`] so [`Self::with_previous_year_adjustments`]
+    /// can recompute both columns with start-balance adjustments merged
+    /// into the previous-period book.  `None` when no previous-period data
+    /// was supplied (or the report was parsed from iXBRL).
+    prev_book: Option<GnucashBook>,
     /// The filing deadlines the default signing date is capped by, when no
     /// explicit `authorised_date` is supplied: the earliest of the accounts
     /// (Companies House) and CT600 (HMRC) deadlines.  Defaults to the
@@ -548,6 +554,7 @@ impl Frs105Accounts {
             profile: profile.clone(),
             accounts: accounts_meta.clone(),
             book: Some(gnucash.clone()),
+            prev_book: None,
             filing_deadlines: FilingDeadlines::from_period_end(period.end),
             fixed_assets: col(current.fixed_assets),
             // Line A (called-up share capital not paid) has no account path:
@@ -637,21 +644,158 @@ impl Frs105Accounts {
         let prev_end = period.start - chrono::Duration::days(1);
         let previous = Self::compute_lines(prev.book, prev_end);
 
+        // Retained (cloned) so [`Self::with_previous_year_adjustments`] can
+        // later merge start-balance adjustments into the comparative
+        // column.
+        self.prev_book = Some(prev.book.clone());
+
         // This period's activity: the current book's splits dated within
         // the period, filtered explicitly (everything outside the period is
         // ignored — the previous period is represented entirely by the
-        // caller's override).  `None` when the report was parsed from iXBRL
-        // and has no ledger.
-        let activity = match &self.book {
+        // caller's override).
+        let current = Self::seeded_current(&self.book, previous, period);
+        self.set_computed(current, previous);
+        self
+    }
+
+    /// The opt-out variant of [`Self::with_prev_period_data`]: fills the
+    /// previous-period comparative column from [`PreviousPeriodData::book`]
+    /// (up to the day before the current period starts) but leaves the
+    /// current-period column as computed in [`Self::new`] — purely from the
+    /// current book, with no seeding from the previous period's figures.
+    pub fn with_prev_period_data_no_seed(mut self, prev: &PreviousPeriodData) -> Self {
+        let period = self.accounts.period();
+        let previous = Self::compute_lines(prev.book, period.start - chrono::Duration::days(1));
+        self.fixed_assets[1] = previous.fixed_assets;
+        self.current_assets[1] = previous.current_assets;
+        self.prepayments_and_accrued_income[1] = previous.prepayments_and_accrued_income;
+        self.creditors_within_1_year[1] = previous.creditors_within_1_year;
+        self.net_current_assets[1] = previous.net_current_assets;
+        self.total_assets_less_liabilities[1] = previous.total_assets_less_liabilities;
+        self.creditors_after_1_year[1] = previous.creditors_after_1_year;
+        self.provisions_for_liabilities[1] = previous.provisions_for_liabilities;
+        self.accruals_and_deferred_income[1] = previous.accruals_and_deferred_income;
+        self.net_assets[1] = previous.net_assets;
+        self.capital_and_reserves[1] = previous.capital_and_reserves;
+        self
+    }
+
+    /// Merge previous-period start-balance adjustments into the comparative
+    /// column: a list of transactions (splits referencing accounts by
+    /// path, resolved against the previous period's chart of accounts
+    /// supplied via [`Self::with_prev_period_data`]) dated within the
+    /// previous period — e.g. correcting a prior-period error the
+    /// comparative column must reflect, such as restoring a liability the
+    /// filed balance sheet omitted.  Both columns are recomputed exactly as
+    /// [`Self::with_prev_period_data`] does, with the adjustments merged
+    /// into the previous-period book:
+    ///
+    /// - the previous-period comparative column is computed from the
+    ///   adjusted previous-period book up to the day before the current
+    ///   period starts;
+    /// - the current-period column is re-seeded: the adjusted
+    ///   previous-period closing figures plus this period's activity — so a
+    ///   current-period transaction that settles the restored balance (e.g.
+    ///   paying the restored tax liability out of the bank) nets it out of
+    ///   the current column, leaving the correction visible in the
+    ///   comparative column only.
+    ///
+    /// The adjustment splits' account paths must exist in the previous
+    /// book and fall on the balance-sheet lines' account paths
+    /// ([`LINE_ACCOUNTS`]) — a split on an account outside them is silently
+    /// ignored by the line computations (like any ledger posting off the
+    /// lines).  Requires the seeding variant [`Self::with_prev_period_data`]
+    /// (the `_no_seed` opt-out does not retain the previous book); the
+    /// transactions must balance and their dates must fall within the
+    /// previous period.
+    pub fn with_previous_year_adjustments(
+        mut self,
+        adjustments: &[AdjustmentTransaction],
+    ) -> Self {
+        let period = self.accounts.period();
+        let prev_period = period.previous();
+        let prev_end = prev_period.end;
+        let prev_book = self.prev_book.as_ref().expect(
+            "with_previous_year_adjustments requires previous-period data: \
+             call with_prev_period_data (the seeding variant) first",
+        );
+
+        // Resolve each adjustment split's account path against the previous
+        // book's accounts, and merge the transactions into the previous
+        // book's raw parts (fresh transaction GUIDs, existing accounts).
+        let accounts = prev_book.raw_accounts();
+        let known: Vec<String> = accounts.iter().map(|a| Self::account_path(accounts, a)).collect();
+        let merged_accounts = accounts.to_vec();
+        let mut merged_txns = prev_book.raw_transactions().to_vec();
+        let mut merged_splits = prev_book.raw_splits().to_vec();
+        for (ti, txn) in adjustments.iter().enumerate() {
+            let date = txn.post_datetime.date();
+            assert!(
+                prev_period.contains(date),
+                "with_previous_year_adjustments: transaction '{}' dated {date} falls \
+                 outside the previous period ({} .. {})",
+                txn.description,
+                prev_period.start,
+                prev_period.end,
+            );
+            let txn_guid = format!("adj-txn-{ti}");
+            merged_txns.push(crate::RawTransaction {
+                guid: txn_guid.clone(),
+                post_datetime: txn.post_datetime,
+                description: txn.description.clone(),
+            });
+            for (si, split) in txn.splits.iter().enumerate() {
+                let acc = accounts
+                    .iter()
+                    .find(|a| Self::account_path(accounts, a) == split.account)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "with_previous_year_adjustments: split {} of transaction '{}' \
+                             references unknown account path '{}' (known: {})",
+                            si,
+                            txn.description,
+                            split.account,
+                            known.join(", "),
+                        )
+                    });
+                merged_splits.push(crate::RawSplit {
+                    tx_guid: txn_guid.clone(),
+                    account_guid: acc.guid.clone(),
+                    value: split.value,
+                });
+            }
+        }
+        let adjusted_prev =
+            GnucashBook::from_raw_parts(merged_accounts, merged_txns, merged_splits);
+
+        let previous = Self::compute_lines(&adjusted_prev, prev_end);
+        let current = Self::seeded_current(&self.book, previous, period);
+        self.set_computed(current, previous);
+        self
+    }
+
+    /// The seeded current column: the previous-period figures plus this
+    /// period's activity (the current book's splits dated within the
+    /// period), rounded per line (the sum of two rounded sets carries f64
+    /// noise).  `None` book (a report parsed from iXBRL) contributes zero
+    /// activity.
+    fn seeded_current(
+        book: &Option<GnucashBook>,
+        previous: ComputedLines,
+        period: AccountingPeriod,
+    ) -> ComputedLines {
+        let activity = match book {
             Some(book) => {
                 Self::compute_lines_between(book, Some(period.start), Some(period.end))
             }
             None => ComputedLines::default(),
         };
-        // Previous-period figures + this period's activity, rounded per
-        // line (the sum of two rounded sets carries f64 noise).
-        let current = (previous + activity).rounded();
+        (previous + activity).rounded()
+    }
 
+    /// Set both columns of the statement of financial position from a
+    /// computed current and previous period.
+    fn set_computed(&mut self, current: ComputedLines, previous: ComputedLines) {
         self.fixed_assets = [current.fixed_assets, previous.fixed_assets];
         self.current_assets = [current.current_assets, previous.current_assets];
         self.prepayments_and_accrued_income = [
@@ -681,29 +825,6 @@ impl Frs105Accounts {
         ];
         self.net_assets = [current.net_assets, previous.net_assets];
         self.capital_and_reserves = [current.capital_and_reserves, previous.capital_and_reserves];
-        self
-    }
-
-    /// The opt-out variant of [`Self::with_prev_period_data`]: fills the
-    /// previous-period comparative column from [`PreviousPeriodData::book`]
-    /// (up to the day before the current period starts) but leaves the
-    /// current-period column as computed in [`Self::new`] — purely from the
-    /// current book, with no seeding from the previous period's figures.
-    pub fn with_prev_period_data_no_seed(mut self, prev: &PreviousPeriodData) -> Self {
-        let period = self.accounts.period();
-        let previous = Self::compute_lines(prev.book, period.start - chrono::Duration::days(1));
-        self.fixed_assets[1] = previous.fixed_assets;
-        self.current_assets[1] = previous.current_assets;
-        self.prepayments_and_accrued_income[1] = previous.prepayments_and_accrued_income;
-        self.creditors_within_1_year[1] = previous.creditors_within_1_year;
-        self.net_current_assets[1] = previous.net_current_assets;
-        self.total_assets_less_liabilities[1] = previous.total_assets_less_liabilities;
-        self.creditors_after_1_year[1] = previous.creditors_after_1_year;
-        self.provisions_for_liabilities[1] = previous.provisions_for_liabilities;
-        self.accruals_and_deferred_income[1] = previous.accruals_and_deferred_income;
-        self.net_assets[1] = previous.net_assets;
-        self.capital_and_reserves[1] = previous.capital_and_reserves;
-        self
     }
 
     /// Compute the balance-sheet lines of one book up to `end` (a balance
@@ -1486,6 +1607,7 @@ impl Frs105Accounts {
             // Parsed from iXBRL: no ledger, so the seeding step in
             // `with_prev_period_data` has no book to read activity from.
             book: None,
+            prev_book: None,
             // The signing date is recovered from the document (explicit);
             // the deadlines only back the default when it is absent.
             filing_deadlines: FilingDeadlines::from_period_end(period_end),
@@ -2482,6 +2604,7 @@ pub const ACCTS_HTML_ATTRS: &[(&str, &str)] = &[
 mod tests {
     use super::*;
     use crate::test_utils::{TestData, cache_dir, cache_path, repo_path};
+    use crate::AdjustmentSplit;
 
     async fn load_example() -> (Company, GnucashBook) {
         let company = example_company();
@@ -2615,6 +2738,115 @@ mod tests {
             },
         ];
         GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
+    }
+
+    /// The chart the previous-year-adjustment tests use: the bank, the
+    /// corporation-tax liability (`Liabilities:Owed Corporation Tax`) and
+    /// the CT equity reserve (`Equity:Corporation Tax`) the adjustment
+    /// posts to, plus the shareholdings reserve (so a previous book can be
+    /// balanced) and the invisible "Opening Balances" counter account.
+    fn ct_chart() -> Vec<crate::RawAccount> {
+        vec![
+            crate::RawAccount {
+                guid: "root".into(),
+                name: "Root Account".into(),
+                r#type: "ROOT".into(),
+                parent_guid: String::new(),
+            },
+            crate::RawAccount {
+                guid: "bank".into(),
+                name: "Bank Accounts".into(),
+                r#type: "BANK".into(),
+                parent_guid: "root".into(),
+            },
+            crate::RawAccount {
+                guid: "liab".into(),
+                name: "Liabilities".into(),
+                r#type: "LIABILITY".into(),
+                parent_guid: "root".into(),
+            },
+            crate::RawAccount {
+                guid: "owed-ct".into(),
+                name: "Owed Corporation Tax".into(),
+                r#type: "LIABILITY".into(),
+                parent_guid: "liab".into(),
+            },
+            crate::RawAccount {
+                guid: "equity".into(),
+                name: "Equity".into(),
+                r#type: "EQUITY".into(),
+                parent_guid: "root".into(),
+            },
+            crate::RawAccount {
+                guid: "shareholdings".into(),
+                name: "Shareholdings".into(),
+                r#type: "EQUITY".into(),
+                parent_guid: "equity".into(),
+            },
+            crate::RawAccount {
+                guid: "equity-ct".into(),
+                name: "Corporation Tax".into(),
+                r#type: "EQUITY".into(),
+                parent_guid: "equity".into(),
+            },
+            crate::RawAccount {
+                guid: "opening".into(),
+                name: "Opening Balances".into(),
+                r#type: "EQUITY".into(),
+                parent_guid: "root".into(),
+            },
+        ]
+    }
+
+    /// A balanced previous-period book on the [`ct_chart`] chart: `bank`
+    /// posted to the bank and `equity` to the shareholdings reserve on
+    /// `date` (the equity is stored negative, the GnuCash convention the
+    /// reports negate for the capital-and-reserves line).
+    fn ct_book(bank: i64, equity: i64, date: chrono::NaiveDate) -> GnucashBook {
+        let raw_txns = vec![crate::RawTransaction {
+            guid: "txn".into(),
+            post_datetime: date.and_hms_opt(12, 0, 0).unwrap(),
+            description: String::new(),
+        }];
+        let raw_splits = vec![
+            crate::RawSplit {
+                tx_guid: "txn".into(),
+                account_guid: "bank".into(),
+                value: rucash::Num::from(bank),
+            },
+            crate::RawSplit {
+                tx_guid: "txn".into(),
+                account_guid: "shareholdings".into(),
+                value: rucash::Num::from(equity),
+            },
+        ];
+        GnucashBook::from_raw_parts(ct_chart(), raw_txns, raw_splits)
+    }
+
+    /// A current-period book on the [`ct_chart`] chart with a single
+    /// transaction dated `date`: paying `payment` off the corporation-tax
+    /// liability (Dr `Liabilities:Owed Corporation Tax`, Cr the bank) — the
+    /// current-period side of a restored prior-year CT liability.
+    fn ct_payment_book(payment: &str, date: chrono::NaiveDate) -> GnucashBook {
+        let value: rucash::Num = payment.parse().unwrap();
+        let raw_txns = vec![crate::RawTransaction {
+            guid: "txn-payment".into(),
+            post_datetime: date.and_hms_opt(12, 0, 0).unwrap(),
+            description: "corporation tax paid".into(),
+        }];
+        let raw_splits = vec![
+            crate::RawSplit {
+                tx_guid: "txn-payment".into(),
+                account_guid: "owed-ct".into(),
+                value,
+            },
+            crate::RawSplit {
+                tx_guid: "txn-payment".into(),
+                account_guid: "bank".into(),
+                value: -value,
+            },
+        ];
+        GnucashBook::from_raw_parts(ct_chart(), raw_txns, raw_splits)
     }
 
     /// The example company's identity fields from the JSON; the remaining
@@ -3441,6 +3673,7 @@ mod tests {
             profile,
             accounts,
             book: None,
+            prev_book: None,
             filing_deadlines: FilingDeadlines::from_period_end(period_end),
             fixed_assets: [100.0, 200.0],
             called_up_share_capital_not_paid: [0.0, 0.0],
@@ -3637,5 +3870,98 @@ mod tests {
     fn test_format_date() {
         let d = chrono::NaiveDate::from_ymd_opt(2020, 12, 31).unwrap();
         assert_eq!(format_date(&d), "31\u{00A0}December\u{00A0}2020");
+    }
+
+    #[test]
+    fn previous_year_adjustments_restore_a_missing_liability() {
+        // A prior-period error: the previous period's balance sheet omitted
+        // the £2006.21 corporation-tax liability, and this period the tax is
+        // paid (2020-06-15).  The previous-period book carries the position
+        // as filed (bank £1000, no CT liability); the current book carries
+        // the payment.
+        let company = example_company();
+        let profile = example_profile();
+        let accounts = example_accounts_meta();
+        let period = accounts.period();
+        let previous_book = ct_book(1000, -1000, period.start - chrono::Duration::days(1));
+        let current_book = ct_payment_book("2006.21", date(2020, 6, 15));
+        let prev = PreviousPeriodData {
+            book: &previous_book,
+            filing: None,
+        };
+        let base = Frs105Accounts::new(&current_book, &company, &profile, &accounts)
+            .with_prev_period_data(&prev);
+
+        // Without the adjustment, the payment debits a liability that was
+        // never restored: the CT account shows as an asset in the current
+        // column (+2006.21 creditors) — the inconsistency the adjustment
+        // fixes.
+        let close = |a: f64, b: f64| (a - b).abs() < 0.005;
+        assert!(
+            close(base.creditors_within_1_year[0], 2006.21),
+            "payment with no restored liability: {:?}",
+            base.creditors_within_1_year
+        );
+
+        // The start-balance adjustment restores the omitted liability at
+        // the start of the previous period: Dr the CT equity reserve, Cr
+        // the CT liability (the comparative column's creditors fall by
+        // 2006.21 and capital and reserves by the same).
+        let adjustments = vec![AdjustmentTransaction {
+            post_datetime: date(2019, 1, 1).and_hms_opt(12, 0, 0).unwrap(),
+            description: "restore omitted prior-year corporation tax liability".into(),
+            splits: vec![
+                AdjustmentSplit {
+                    account: "Liabilities:Owed Corporation Tax".into(),
+                    value: "-2006.21".parse().unwrap(),
+                },
+                AdjustmentSplit {
+                    account: "Equity:Corporation Tax".into(),
+                    value: "2006.21".parse().unwrap(),
+                },
+            ],
+        }];
+        let adjusted = base.clone().with_previous_year_adjustments(&adjustments);
+
+        // Comparative column: the liability restored (creditors −2006.21),
+        // the CT reserve reduced — net assets down by 2006.21.
+        assert!(close(adjusted.creditors_within_1_year[1], -2006.21));
+        assert!(close(adjusted.capital_and_reserves[1], -1006.21));
+        assert!(close(adjusted.net_assets[1], -1006.21));
+        // Current column: the restored liability nets against the payment —
+        // the liability clears (creditors 0), the bank is lower, and net
+        // assets fall by the same amount in both columns.
+        assert!(close(adjusted.creditors_within_1_year[0], 0.0));
+        assert!(close(adjusted.current_assets[0], -1006.21));
+        assert!(close(adjusted.net_assets[0], -1006.21));
+        assert!(close(adjusted.capital_and_reserves[0], -1006.21));
+        // The comparative column keeps the filed current assets.
+        assert!(close(adjusted.current_assets[1], 1000.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "references unknown account path")]
+    fn previous_year_adjustments_reject_unknown_account_paths() {
+        let company = example_company();
+        let profile = example_profile();
+        let accounts = example_accounts_meta();
+        let period = accounts.period();
+        let previous_book = ct_book(1000, -1000, period.start - chrono::Duration::days(1));
+        let current_book = ct_payment_book("2006.21", date(2020, 6, 15));
+        let prev = PreviousPeriodData {
+            book: &previous_book,
+            filing: None,
+        };
+        let base = Frs105Accounts::new(&current_book, &company, &profile, &accounts)
+            .with_prev_period_data(&prev);
+        let adjustments = vec![AdjustmentTransaction {
+            post_datetime: date(2019, 1, 1).and_hms_opt(12, 0, 0).unwrap(),
+            description: "typo".into(),
+            splits: vec![AdjustmentSplit {
+                account: "Liabilities:Nonexistent".into(),
+                value: "-1".parse().unwrap(),
+            }],
+        }];
+        let _ = base.with_previous_year_adjustments(&adjustments);
     }
 }
