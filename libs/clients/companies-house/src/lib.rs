@@ -61,6 +61,10 @@ pub enum CompaniesHouseError {
         filing_id: String,
     },
 
+    /// A filed document could not be parsed into the requested kind.
+    #[snafu(display("failed to parse the filed {kind} document: {reason}"))]
+    DocumentParse { kind: String, reason: String },
+
     /// The filing kind is not implemented yet: its `description_values` keys
     /// are unverified (no real filing of this kind to check against), so the
     /// typed parse refuses it instead of guessing.
@@ -448,6 +452,51 @@ impl CompaniesHouseClient {
             write_cached_filing_download(cache_dir, company_number, date, filing_id, &bytes);
         }
         Ok(bytes)
+    }
+
+    /// The latest accounts filing for a company: the most recently filed
+    /// item in the `accounts` category, with its document downloaded
+    /// (cache-first, like [`Self::download_filing`]) and parsed into a
+    /// [`FiledBalanceSheet`] — the natural starting point for the next set
+    /// of accounts.
+    ///
+    /// "Latest" means the accounts filing covering the latest period (the
+    /// greatest `made_up_date`), falling back on the filing date when the
+    /// API reports no period.  Returns `None` when the company has no
+    /// accounts filing, or when the latest one has no downloadable document.
+    pub async fn latest_accounts_filing(
+        &self,
+        company_number: &str,
+    ) -> ApiResult<Option<LatestAccountsFiling>> {
+        let history = self.get_filing_history(company_number).await?;
+        let latest = history.accounts().max_by_key(|item| {
+            ChFiling::from(*item)
+                .period_end
+                .unwrap_or_else(|| item.filed_on().unwrap_or(NaiveDate::MIN))
+        });
+        let Some(item) = latest else {
+            return Ok(None);
+        };
+        let Some(filing_id) = item.transaction_id() else {
+            return Ok(None);
+        };
+        let Some(filed_on) = item.filed_on() else {
+            return Ok(None);
+        };
+        let bytes = self.download_filing(company_number, &filing_id).await?;
+        let html = std::str::from_utf8(&bytes).map_err(|e| CompaniesHouseError::DocumentParse {
+            kind: "accounts".to_string(),
+            reason: e.to_string(),
+        })?;
+        let balance_sheet =
+            parse_filed_accounts(html).map_err(|reason| CompaniesHouseError::DocumentParse {
+                kind: "accounts".to_string(),
+                reason,
+            })?;
+        Ok(Some(LatestAccountsFiling {
+            filed_on,
+            balance_sheet,
+        }))
     }
 
     /// Fetch a company's officers.
@@ -1529,6 +1578,16 @@ pub struct FiledBalanceSheet {
     pub period_end: NaiveDate,
     /// The balance-sheet line items for the filed period.
     pub figures: PreviousYearFigures,
+}
+
+/// A company's latest accounts filing: when it was registered and the
+/// downloaded document parsed into a balance sheet (see
+/// [`CompaniesHouseClient::latest_accounts_filing`]).
+pub struct LatestAccountsFiling {
+    /// When the filing was registered with Companies House.
+    pub filed_on: NaiveDate,
+    /// The parsed balance sheet of the filed accounts document.
+    pub balance_sheet: FiledBalanceSheet,
 }
 
 /// Parse a filed accounts document (the iXBRL HTML/XML CH serves) into a

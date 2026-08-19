@@ -225,4 +225,165 @@ mod live_tests {
             println!("    {label:<32} {value:>12}");
         }
     }
+
+    /// The full-year pipeline for a real company (default `14510633`):
+    /// fetch the filing history, take the latest accounts filing as the
+    /// starting point, then generate all three output documents for the
+    /// next pending period — the FRS 105 accounts, the FRS 105
+    /// corporation-tax computation and the CT600 return — with an empty
+    /// transaction list (the pending period has no ledger yet, so the new
+    /// balance sheet carries the filed figures forward: previous-year column
+    /// from the filed accounts, current column via
+    /// [`Frs105Accounts::with_carry_forward`], so every balance reads the
+    /// same in both columns).  The documents are written under `.cache`,
+    /// like the other live tests' artifacts.
+    #[tokio::test]
+    #[cfg_attr(
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key for a cold cache"
+    )]
+    async fn live_latest_accounts_full_year_reports() {
+        use chrono::Datelike;
+        use reports::GnucashBook;
+        use reports::reports::uk_frs105_accounts::Frs105Accounts;
+        use reports::{AccountsMeta, Company, CompanyProfile};
+
+        use crate::ct600_return::Ct600Return;
+
+        let number = std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
+        let client = live_client();
+
+        // The latest accounts filing: history → the accounts item covering
+        // the latest period → its document downloaded (cache-first) and
+        // parsed into a balance sheet.
+        let filing = client
+            .latest_accounts_filing(&number)
+            .await
+            .expect("fetch the latest accounts filing")
+            .expect("the company has an accounts filing");
+        let bs = filing.balance_sheet;
+        println!(
+            "latest accounts filing (filed {}): period {} → {}",
+            filing.filed_on, bs.period_start, bs.period_end
+        );
+        print_figures(&bs.figures);
+
+        // The company: registration date from the profile, so the
+        // accounting-period schedule is the real one.
+        let ch_profile = client
+            .get_company_profile(&number)
+            .await
+            .expect("fetch the company profile");
+        let mut company = Company::new(
+            &ch_profile.company_name,
+            "1234567890", // the CH profile carries no tax reference; placeholder for the artifact
+            &ch_profile.company_number,
+        );
+        company.registration_date = ch_profile
+            .date_of_creation
+            .as_deref()
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .expect("the profile carries the registration date");
+
+        // The reports' company profile: the CH API model has no
+        // contact / accountant / auditor fields (those are config-only), so
+        // the report profile carries what the API provides (address, SIC,
+        // jurisdiction) and defaults the rest.
+        let profile = CompanyProfile {
+            address_lines: ch_profile
+                .registered_office_address
+                .as_ref()
+                .map(|a| {
+                    [a.address_line_1.as_deref(), a.address_line_2.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            county: ch_profile
+                .registered_office_address
+                .as_ref()
+                .and_then(|a| a.region.clone())
+                .filter(|s| !s.is_empty()),
+            location: ch_profile
+                .registered_office_address
+                .as_ref()
+                .and_then(|a| a.locality.clone())
+                .unwrap_or_default(),
+            postcode: ch_profile
+                .registered_office_address
+                .as_ref()
+                .and_then(|a| a.postal_code.clone())
+                .unwrap_or_default(),
+            sic_codes: ch_profile.sic_codes.clone().unwrap_or_default(),
+            jurisdiction: ch_profile.jurisdiction.clone().unwrap_or_default(),
+            ..Default::default()
+        };
+
+        // The pending period: the accounting period after the filed one.
+        let pending = company.accounting_period_containing(
+            bs.period_end
+                .succ_opt()
+                .expect("the filed period end has a successor"),
+        );
+        println!("pending period: {} → {}", pending.start, pending.end);
+        let accounts_meta = AccountsMeta {
+            period: Some(pending),
+            fy1_year: pending.end.year() - 1,
+            fy2_year: pending.end.year(),
+            ..AccountsMeta::default()
+        };
+
+        // Empty ledger: no transactions in the pending period yet — the new
+        // balance sheet carries the filed figures in the previous column.
+        let book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
+
+        // The three documents, seeded from the filed balance sheet.  The
+        // pending period has no transactions, so the balances are unchanged
+        // — the previous-year figures carry forward into the current column
+        // too (see `Frs105Accounts::with_carry_forward`).
+        let accounts = Frs105Accounts::new(&book, &company, &profile, &accounts_meta)
+            .with_previous_year(bs.figures)
+            .with_carry_forward();
+        assert_eq!(
+            accounts.net_assets[0], accounts.net_assets[1],
+            "no transactions: net assets carried forward"
+        );
+        assert_eq!(
+            accounts.fixed_assets[0], accounts.fixed_assets[1],
+            "no transactions: fixed assets carried forward"
+        );
+        assert_eq!(
+            accounts.current_assets[0], accounts.current_assets[1],
+            "no transactions: current assets carried forward"
+        );
+        let corp_tax = Frs105CorpTax::builder(&book, &company, &accounts_meta).build();
+        let ct600 = Ct600Return::from_inputs(&accounts, &corp_tax);
+
+        let accounts_html = accounts.to_ixbrl();
+        let corp_tax_html = corp_tax.to_ixbrl();
+        let ct600_xml = ct600.to_xml();
+
+        // Test artifacts: persisted under `.cache`, like the other live
+        // tests.
+        let dir = crate::test_utils::cache_dir("tally-full-year");
+        std::fs::create_dir_all(&dir).expect("create the cache dir");
+        for (name, doc) in [
+            (format!("{number}-accounts.html"), accounts_html.as_str()),
+            (format!("{number}-corp-tax.html"), corp_tax_html.as_str()),
+            (format!("{number}-ct600.xml"), ct600_xml.as_str()),
+        ] {
+            let path = dir.join(&name);
+            std::fs::write(&path, doc).expect("write the generated document");
+            println!("wrote {}", path.display());
+        }
+
+        // The generated documents carry their expected markers.
+        assert!(accounts_html.contains("Unaudited Micro-Entity Accounts"));
+        assert!(corp_tax_html.contains("Corporation Tax Statement"));
+        assert!(ct600_xml.contains("GovTalkMessage"));
+        assert!(ct600_xml.contains(&ch_profile.company_number));
+    }
 }

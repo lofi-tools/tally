@@ -967,6 +967,10 @@ impl Frs105Accounts {
     /// Replace the previous-period (comparative) column with externally
     /// sourced figures (e.g. the last filed accounts at Companies House).
     /// The current-period column is left as computed from the ledger.
+    ///
+    /// Chain [`Self::with_carry_forward`] when the current period has no
+    /// transactions: the balances are then unchanged from the previous
+    /// period, so the current column takes the comparative figures too.
     pub fn with_previous_year(mut self, prev: PreviousYearFigures) -> Self {
         self.fixed_assets[1] = prev.fixed_assets;
         self.called_up_share_capital_not_paid[1] = prev.called_up_share_capital_not_paid;
@@ -980,6 +984,29 @@ impl Frs105Accounts {
         self.accruals_and_deferred_income[1] = prev.accruals_and_deferred_income;
         self.net_assets[1] = prev.net_assets;
         self.capital_and_reserves[1] = prev.capital_and_reserves;
+        self
+    }
+
+    /// Carry the previous period's balances into the current period: a year
+    /// with no transactions leaves the balances unchanged, so the current
+    /// column takes the previous column's figures.  Use after
+    /// [`Self::with_previous_year`] when the ledger has no transactions in
+    /// the current period (e.g. a pending period whose book is not yet
+    /// populated) — the comparative figures then seed both columns and the
+    /// statement renders the balances carried forward instead of zeros.
+    pub fn with_carry_forward(mut self) -> Self {
+        self.fixed_assets[0] = self.fixed_assets[1];
+        self.called_up_share_capital_not_paid[0] = self.called_up_share_capital_not_paid[1];
+        self.current_assets[0] = self.current_assets[1];
+        self.prepayments_and_accrued_income[0] = self.prepayments_and_accrued_income[1];
+        self.creditors_within_1_year[0] = self.creditors_within_1_year[1];
+        self.net_current_assets[0] = self.net_current_assets[1];
+        self.total_assets_less_liabilities[0] = self.total_assets_less_liabilities[1];
+        self.creditors_after_1_year[0] = self.creditors_after_1_year[1];
+        self.provisions_for_liabilities[0] = self.provisions_for_liabilities[1];
+        self.accruals_and_deferred_income[0] = self.accruals_and_deferred_income[1];
+        self.net_assets[0] = self.net_assets[1];
+        self.capital_and_reserves[0] = self.capital_and_reserves[1];
         self
     }
 
@@ -2316,6 +2343,52 @@ mod tests {
         // Identity fields survive.
         assert_eq!(out.company.name, base.company.name);
         assert_eq!(out.company.company_number, base.company.company_number);
+    }
+
+    #[test]
+    fn test_with_carry_forward_after_empty_year_matches_previous() {
+        // A pending period with no transactions yet: the ledger is empty, so
+        // the builder computes both columns as zero; the filed figures seed
+        // the comparative column, and the carry-forward brings them into the
+        // current column too — a year with no activity leaves the balances
+        // unchanged (current == previous on every line).
+        let company = example_company();
+        let profile = example_profile();
+        let accounts = example_accounts_meta();
+        let empty_book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
+
+        let prev = PreviousYearFigures {
+            fixed_assets: 1000.0,
+            called_up_share_capital_not_paid: 0.0,
+            current_assets: 2222.0,
+            prepayments_and_accrued_income: 0.0,
+            creditors_within_1_year: -333.0,
+            net_current_assets: 1889.0,
+            total_assets_less_liabilities: 2889.0,
+            creditors_after_1_year: 0.0,
+            provisions_for_liabilities: 0.0,
+            accruals_and_deferred_income: 0.0,
+            net_assets: 2889.0,
+            capital_and_reserves: 2889.0,
+        };
+
+        let out = Frs105Accounts::new(&empty_book, &company, &profile, &accounts)
+            .with_previous_year(prev)
+            .with_carry_forward();
+
+        // Every balance carried forward: current column == previous column.
+        assert_eq!(out.fixed_assets, [1000.0, 1000.0]);
+        assert_eq!(out.called_up_share_capital_not_paid, [0.0, 0.0]);
+        assert_eq!(out.current_assets, [2222.0, 2222.0]);
+        assert_eq!(out.prepayments_and_accrued_income, [0.0, 0.0]);
+        assert_eq!(out.creditors_within_1_year, [-333.0, -333.0]);
+        assert_eq!(out.net_current_assets, [1889.0, 1889.0]);
+        assert_eq!(out.total_assets_less_liabilities, [2889.0, 2889.0]);
+        assert_eq!(out.creditors_after_1_year, [0.0, 0.0]);
+        assert_eq!(out.provisions_for_liabilities, [0.0, 0.0]);
+        assert_eq!(out.accruals_and_deferred_income, [0.0, 0.0]);
+        assert_eq!(out.net_assets, [2889.0, 2889.0]);
+        assert_eq!(out.capital_and_reserves, [2889.0, 2889.0]);
     }
 
     #[test]
