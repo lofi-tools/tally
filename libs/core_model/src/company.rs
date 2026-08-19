@@ -233,8 +233,9 @@ pub struct AccountsMeta {
     /// Taxonomy dimension value for the accounts status.
     pub accounts_status_dimension: String,
     /// Base64-encoded director's signature, embedded on the statement of
-    /// financial position; `None` when the report is not signed with an
-    /// image (the signature block is then omitted).
+    /// financial position; `None` = not supplied — the accounts builder
+    /// embeds a bundled default signature instead (see
+    /// `Frs105Accounts::signature_b64` / `with_signature`).
     pub signature_b64: Option<String>,
 }
 

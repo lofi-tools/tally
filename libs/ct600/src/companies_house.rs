@@ -406,10 +406,10 @@ mod live_tests {
 
         // The generated documents carry their expected markers.
         assert!(accounts_html.contains("Unaudited Micro-Entity Accounts"));
-        // No logo or signature is supplied in this test — the report omits
-        // both images instead of emitting empty data URIs.
+        // No logo is supplied in this test — the report omits it, but the
+        // signature is always embedded (the bundled default here).
         assert!(!accounts_html.contains("alt=\"Company logo\""));
-        assert!(!accounts_html.contains("alt=\"Director's signature\""));
+        assert!(accounts_html.contains("alt=\"Director's signature\""));
         // The directors auto-fetched from Companies House are listed, and
         // the signatory defaults to the first director.
         assert!(

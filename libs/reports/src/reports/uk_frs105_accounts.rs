@@ -36,6 +36,12 @@ use crate::GnucashBook;
 /// file no longer carries a `report_title`.
 const REPORT_TITLE: &str = "Unaudited Micro-Entity Accounts";
 
+/// The bundled default director's signature (base64 PNG), embedded on the
+/// statement of financial position when no `signature_b64` is supplied —
+/// the same asset the example company's config carries, kept as a file
+/// under `example_data/`.  Override with [`Frs105Accounts::with_signature`].
+const DEFAULT_SIGNATURE_B64: &str = include_str!("../../../../example_data/default_signature.b64");
+
 /// Previous-period balance-sheet figures — the comparative column of the
 /// statement of financial position when the ledger doesn't cover the
 /// previous period (e.g. sourced from the company's last filed accounts at
@@ -580,6 +586,24 @@ impl Frs105Accounts {
     /// default: an explicitly-supplied `accounts.authorised_date` wins.
     pub fn with_signing_deadlines(mut self, deadlines: FilingDeadlines) -> Self {
         self.filing_deadlines = deadlines;
+        self
+    }
+
+    /// The base64-encoded director's signature embedded on the statement of
+    /// financial position: the explicitly-supplied `accounts.signature_b64`,
+    /// else the bundled default ([`DEFAULT_SIGNATURE_B64`]).  Override with
+    /// [`Self::with_signature`].
+    pub fn signature_b64(&self) -> &str {
+        self.accounts
+            .signature_b64
+            .as_deref()
+            .unwrap_or(DEFAULT_SIGNATURE_B64)
+    }
+
+    /// Override the director's signature embedded on the statement of
+    /// financial position with a user-provided one (base64 PNG).
+    pub fn with_signature(mut self, signature_b64: String) -> Self {
+        self.accounts.signature_b64 = Some(signature_b64);
         self
     }
 
@@ -2011,17 +2035,15 @@ impl Frs105Accounts {
                 span_text("."),
             ])),
         ];
-        // The signature image is optional: omit it (and the empty data URI)
-        // when none is supplied.
-        if let Some(signature_b64) = &self.accounts.signature_b64 {
-            approval_children.push(elt(
-                "img",
-                &[
-                    ("alt", "Director's signature"),
-                    ("src", &format!("data:image/png;base64,{signature_b64}")),
-                ],
-            ));
-        }
+        // The signature image is always embedded: the supplied one, or the
+        // bundled default ([`Self::signature_b64`]).
+        approval_children.push(elt(
+            "img",
+            &[
+                ("alt", "Director's signature"),
+                ("src", &format!("data:image/png;base64,{}", self.signature_b64())),
+            ],
+        ));
         let approval = elt("div", &[]).child(elt("div", &[]).children(approval_children));
 
         page(vec![elt("div", &[]).children(vec![
@@ -3460,13 +3482,13 @@ mod tests {
     }
 
     #[test]
-    fn logo_and_signature_omitted_when_not_supplied() {
-        // A report built without a logo or signature omits both images (no
-        // empty data URIs); the example's logo and signature still render
-        // when supplied.
+    fn logo_omitted_and_signature_always_embedded() {
+        // The logo is omitted when not supplied, but the signature is
+        // always embedded — the bundled default when none is supplied (no
+        // empty data URIs).
         let company = example_company();
         let empty_book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
-        let no_assets = Frs105Accounts::new(
+        let no_logo = Frs105Accounts::new(
             &empty_book,
             &company,
             &CompanyProfile::default(),
@@ -3476,10 +3498,11 @@ mod tests {
             },
         )
         .to_ixbrl();
-        assert!(!no_assets.contains("alt=\"Company logo\""));
-        assert!(!no_assets.contains("alt=\"Director's signature\""));
-        assert!(!no_assets.contains("data:image/png;base64,"));
+        assert!(!no_logo.contains("alt=\"Company logo\""));
+        assert!(no_logo.contains("alt=\"Director's signature\""));
+        assert!(no_logo.contains("data:image/png;base64,"));
 
+        // With the example's logo and signature both render.
         let with_assets = Frs105Accounts::new(
             &empty_book,
             &company,
@@ -3489,6 +3512,47 @@ mod tests {
         .to_ixbrl();
         assert!(with_assets.contains("alt=\"Company logo\""));
         assert!(with_assets.contains("alt=\"Director's signature\""));
+    }
+
+    #[test]
+    fn signature_defaults_to_bundled_and_with_signature_overrides() {
+        let company = example_company();
+        let profile = example_profile();
+        let book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
+
+        // Not supplied: the bundled default is embedded.
+        let accounts = Frs105Accounts::new(
+            &book,
+            &company,
+            &profile,
+            &AccountsMeta {
+                signature_b64: None,
+                ..example_accounts_meta()
+            },
+        );
+        assert_eq!(accounts.signature_b64(), DEFAULT_SIGNATURE_B64);
+        assert!(accounts
+            .to_ixbrl()
+            .contains(&format!("data:image/png;base64,{}", DEFAULT_SIGNATURE_B64)));
+
+        // An explicit meta signature wins.
+        let explicit = Frs105Accounts::new(
+            &book,
+            &company,
+            &profile,
+            &AccountsMeta {
+                signature_b64: Some("custom-signature".to_string()),
+                ..example_accounts_meta()
+            },
+        );
+        assert_eq!(explicit.signature_b64(), "custom-signature");
+
+        // The mut builder method overrides either.
+        let overridden = accounts
+            .with_signature("user-signature".to_string())
+            .to_ixbrl();
+        assert!(overridden.contains("data:image/png;base64,user-signature"));
+        assert!(!overridden.contains(DEFAULT_SIGNATURE_B64));
     }
 
 
