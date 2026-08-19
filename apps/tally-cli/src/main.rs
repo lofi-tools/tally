@@ -189,8 +189,13 @@ async fn run_ct600(args: CliArgs) -> Result<()> {
     // column is computed from its own history); no filed balance sheet is
     // attached for the check.
     let prev = PreviousPeriodData::same_book(&book);
-    let accounts =
-        Frs105Accounts::new(&book, &prev, &resolved.company, &resolved.profile, &resolved.accounts);
+    let accounts = Frs105Accounts::new(
+        &book,
+        &resolved.company,
+        &resolved.profile,
+        &resolved.accounts,
+    )
+    .with_prev_period_data(&prev);
     let corp_tax = Frs105CorpTax::builder(&book, &resolved.company, &resolved.accounts).build();
 
     // The CT600 GovTalk message.

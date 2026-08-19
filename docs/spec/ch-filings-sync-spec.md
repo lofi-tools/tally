@@ -433,12 +433,14 @@ pub struct PreviousPeriodFigures {
 }
 ```
 
-- `Frs105Accounts::new(gnucash, prev: &PreviousPeriodData, company, profile,
-  accounts_meta)` — the current column is computed from the current book, the
-  previous-period comparative column from `PreviousPeriodData::book` (the
-  previous period's chart of accounts, a **required** input; a filed balance
-  sheet cannot rebuild the CoA). `PreviousPeriodData::filing` is an optional
-  filed balance sheet, check-only. `with_previous_year` is gone.
+- `Frs105Accounts::new(gnucash, company, profile, accounts_meta)` — the
+  current column is computed from the current book; the previous-period
+  comparative column **defaults to zeros**. The previous period's chart of
+  accounts is supplied afterwards, as an optional override:
+  `.with_prev_period_data(&prev)` recomputes the comparative column from
+  `PreviousPeriodData::book` (a filed balance sheet cannot rebuild the CoA).
+  `PreviousPeriodData::filing` is an optional filed balance sheet, check-only.
+  `with_previous_year` is gone.
 
 ```rust
 pub struct PreviousPeriodData<'a> {
@@ -468,8 +470,9 @@ impl Frs105Accounts {
 ```rust
 let prev = PreviousPeriodData::same_book(&inputs.book);
 let accounts = Frs105Accounts::new(
-    &inputs.book, &prev, &inputs.company, &inputs.profile, &inputs.meta,
-);
+    &inputs.book, &inputs.company, &inputs.profile, &inputs.meta,
+)
+.with_prev_period_data(&prev);
 ```
 
 - **tally-cli**: same `same_book` pattern (it runs from a local config + ledger).

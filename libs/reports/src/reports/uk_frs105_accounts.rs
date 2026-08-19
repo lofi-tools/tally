@@ -104,8 +104,10 @@ pub struct Frs105Accounts {
 /// The previous-period comparative column is **computed from the chart of
 /// accounts** — a filed balance sheet alone cannot rebuild the CoA (the
 /// filing carries only the aggregate lines, not the accounts or
-/// transactions), so the previous CoA is a required input.  When a filed
-/// balance sheet is also available it is not used for the computation:
+/// transactions).  The previous CoA is an *optional* input: without it the
+/// comparative column defaults to zeros, and it is supplied afterwards via
+/// [`Frs105Accounts::with_prev_period_data`].  When a filed balance sheet
+/// is also available it is not used for the computation:
 /// [`Frs105Accounts::check_previous_period_matches_filing`] compares the
 /// computed comparative column against it.
 pub struct PreviousPeriodData<'a> {
@@ -155,8 +157,9 @@ impl std::fmt::Display for PreviousPeriodMismatch {
 }
 
 /// The 12 balance-sheet lines computed from one book up to an end date —
-/// the current-period column from the current book, the previous-period
-/// column from the previous-period book (see [`Frs105Accounts::new`]).
+/// the current-period column from the current book, and the previous-period
+/// column from the previous-period book when one is supplied (see
+/// [`Frs105Accounts::with_prev_period_data`]).
 #[derive(Debug, Clone, Copy)]
 struct ComputedLines {
     fixed_assets: f64,
@@ -177,67 +180,70 @@ impl Frs105Accounts {
     /// company details.
     ///
     /// The current-period column is computed from the current-period book
-    /// (the `gnucash` ledger, up to the period end); the previous-period
-    /// comparative column is computed from the previous period's chart of
-    /// accounts ([`PreviousPeriodData::book`], up to the day before the
-    /// current period starts) — a filed balance sheet alone cannot rebuild
-    /// the previous CoA, so the previous book is a required input.  The
-    /// optional filed balance sheet ([`PreviousPeriodData::filing`]) is not
-    /// used here; verify the book against it with
-    /// [`Self::check_previous_period_matches_filing`].
+    /// (the `gnucash` ledger, up to the period end).  The previous-period
+    /// comparative column defaults to **zeros** — a company whose ledger
+    /// doesn't cover the previous period, or one that hasn't supplied
+    /// previous-period data yet, renders a blank comparative column.
+    /// Supply the previous period afterwards with
+    /// [`Self::with_prev_period_data`] (a previous-period chart of accounts;
+    /// a filed balance sheet alone cannot rebuild the previous CoA).
     pub fn new(
         gnucash: &GnucashBook,
-        prev: &PreviousPeriodData,
         company: &Company,
         profile: &CompanyProfile,
         accounts_meta: &AccountsMeta,
     ) -> Self {
         let period = accounts_meta.period();
         let current = Self::compute_lines(gnucash, period.end);
-        let previous = Self::compute_lines(prev.book, period.start - chrono::Duration::days(1));
-        let col = |current: f64, previous: f64| [current, previous];
+        let col = |current: f64| [current, 0.0];
 
         Frs105Accounts {
             company: company.clone(),
             profile: profile.clone(),
             accounts: accounts_meta.clone(),
-            fixed_assets: col(current.fixed_assets, previous.fixed_assets),
+            fixed_assets: col(current.fixed_assets),
             // Line A (called-up share capital not paid) has no account path:
             // it defaults to zero and is supplied via
             // `with_called_up_share_capital_not_paid`.
             called_up_share_capital_not_paid: [0.0; 2],
-            current_assets: col(current.current_assets, previous.current_assets),
-            prepayments_and_accrued_income: col(
-                current.prepayments_and_accrued_income,
-                previous.prepayments_and_accrued_income,
-            ),
-            creditors_within_1_year: col(
-                current.creditors_within_1_year,
-                previous.creditors_within_1_year,
-            ),
-            net_current_assets: col(current.net_current_assets, previous.net_current_assets),
-            total_assets_less_liabilities: col(
-                current.total_assets_less_liabilities,
-                previous.total_assets_less_liabilities,
-            ),
-            creditors_after_1_year: col(
-                current.creditors_after_1_year,
-                previous.creditors_after_1_year,
-            ),
-            provisions_for_liabilities: col(
-                current.provisions_for_liabilities,
-                previous.provisions_for_liabilities,
-            ),
-            accruals_and_deferred_income: col(
-                current.accruals_and_deferred_income,
-                previous.accruals_and_deferred_income,
-            ),
-            net_assets: col(current.net_assets, previous.net_assets),
-            capital_and_reserves: col(
-                current.capital_and_reserves,
-                previous.capital_and_reserves,
-            ),
+            current_assets: col(current.current_assets),
+            prepayments_and_accrued_income: col(current.prepayments_and_accrued_income),
+            creditors_within_1_year: col(current.creditors_within_1_year),
+            net_current_assets: col(current.net_current_assets),
+            total_assets_less_liabilities: col(current.total_assets_less_liabilities),
+            creditors_after_1_year: col(current.creditors_after_1_year),
+            provisions_for_liabilities: col(current.provisions_for_liabilities),
+            accruals_and_deferred_income: col(current.accruals_and_deferred_income),
+            net_assets: col(current.net_assets),
+            capital_and_reserves: col(current.capital_and_reserves),
         }
+    }
+
+    /// Override the previous-period comparative column with a previous
+    /// period's chart of accounts: recompute the previous column from
+    /// [`PreviousPeriodData::book`] up to the day before the current period
+    /// starts.  The comparative column otherwise defaults to zeros (see
+    /// [`Self::new`]); when the previous-period CoA is the same book as the
+    /// current one, pass [`PreviousPeriodData::same_book`].
+    ///
+    /// The optional filed balance sheet ([`PreviousPeriodData::filing`]) is
+    /// not used here; verify the book against it with
+    /// [`Self::check_previous_period_matches_filing`].
+    pub fn with_prev_period_data(mut self, prev: &PreviousPeriodData) -> Self {
+        let period = self.accounts.period();
+        let previous = Self::compute_lines(prev.book, period.start - chrono::Duration::days(1));
+        self.fixed_assets[1] = previous.fixed_assets;
+        self.current_assets[1] = previous.current_assets;
+        self.prepayments_and_accrued_income[1] = previous.prepayments_and_accrued_income;
+        self.creditors_within_1_year[1] = previous.creditors_within_1_year;
+        self.net_current_assets[1] = previous.net_current_assets;
+        self.total_assets_less_liabilities[1] = previous.total_assets_less_liabilities;
+        self.creditors_after_1_year[1] = previous.creditors_after_1_year;
+        self.provisions_for_liabilities[1] = previous.provisions_for_liabilities;
+        self.accruals_and_deferred_income[1] = previous.accruals_and_deferred_income;
+        self.net_assets[1] = previous.net_assets;
+        self.capital_and_reserves[1] = previous.capital_and_reserves;
+        self
     }
 
     /// Compute the balance-sheet lines of one book up to `end` (a balance
@@ -2190,13 +2196,11 @@ mod tests {
         let (company, gnucash) = load_example().await;
         let accounts = Frs105Accounts::new(
             &gnucash,
-            &prev_from_same_book(&gnucash),
             &company,
             &example_profile(),
             &example_accounts_meta()
-        );
-
-        // Balance-sheet values (whole-pence, computed from the ledger).
+        )
+        .with_prev_period_data(&prev_from_same_book(&gnucash));
         assert_eq!(accounts.fixed_assets, [932.74, 633.10]);
         assert_eq!(accounts.current_assets, [14923.66, 10333.27]);
         assert_eq!(accounts.creditors_within_1_year, [-3712.32, -3020.37]);
@@ -2218,6 +2222,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_multi_year_one_shot_matches_two_step() {
+        // basic-1's book spans several years (transactions 2018-01-31 →
+        // 2021-03-01; the configured period is calendar 2020).  Computing
+        // the last period's balance sheet directly from origin of time
+        // (one shot) must equal re-calculating it after first computing the
+        // previous period (2019) and feeding it in as the previous-period
+        // input — both columns, line for line.
+        let (company, gnucash) = load_example().await;
+        let profile = example_profile();
+
+        // The earlier period (calendar 2019) and the last period (2020).
+        let meta_2019 = AccountsMeta {
+            period: Some(AccountingPeriod {
+                start: chrono::NaiveDate::from_ymd_opt(2019, 1, 1).unwrap(),
+                end: chrono::NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
+            }),
+            fy1_year: 2018,
+            fy2_year: 2019,
+            ..example_accounts_meta()
+        };
+        let meta_2020 = example_accounts_meta();
+
+        // One shot: the last-period balance sheet from origin of time —
+        // both columns computed from the book's own history (current up to
+        // 2020-12-31, comparative up to 2019-12-31).
+        let one_shot = Frs105Accounts::new(&gnucash, &company, &profile, &meta_2020)
+            .with_prev_period_data(&prev_from_same_book(&gnucash));
+
+        // Two step: first the 2019 balance sheet, then re-calculate the
+        // last period with that earlier period as the previous input.
+        let earlier = Frs105Accounts::new(&gnucash, &company, &profile, &meta_2019)
+            .with_prev_period_data(&prev_from_same_book(&gnucash));
+        let two_step = Frs105Accounts::new(&gnucash, &company, &profile, &meta_2020)
+            .with_prev_period_data(&PreviousPeriodData {
+                book: &gnucash,
+                filing: None,
+            });
+
+        // The earlier period's current column is the last period's
+        // comparative column, and the two last-period balance sheets are
+        // identical on every line.
+        let lines: [([f64; 2], [f64; 2]); 12] = [
+            (earlier.fixed_assets, one_shot.fixed_assets),
+            (earlier.called_up_share_capital_not_paid, one_shot.called_up_share_capital_not_paid),
+            (earlier.current_assets, one_shot.current_assets),
+            (
+                earlier.prepayments_and_accrued_income,
+                one_shot.prepayments_and_accrued_income,
+            ),
+            (earlier.creditors_within_1_year, one_shot.creditors_within_1_year),
+            (earlier.net_current_assets, one_shot.net_current_assets),
+            (
+                earlier.total_assets_less_liabilities,
+                one_shot.total_assets_less_liabilities,
+            ),
+            (earlier.creditors_after_1_year, one_shot.creditors_after_1_year),
+            (
+                earlier.provisions_for_liabilities,
+                one_shot.provisions_for_liabilities,
+            ),
+            (
+                earlier.accruals_and_deferred_income,
+                one_shot.accruals_and_deferred_income,
+            ),
+            (earlier.net_assets, one_shot.net_assets),
+            (earlier.capital_and_reserves, one_shot.capital_and_reserves),
+        ];
+        for (earlier_line, last_line) in lines {
+            assert_eq!(
+                earlier_line[0], last_line[1],
+                "earlier period's current column must equal the last period's comparative"
+            );
+        }
+        for (a, b) in [
+            (one_shot.fixed_assets, two_step.fixed_assets),
+            (
+                one_shot.called_up_share_capital_not_paid,
+                two_step.called_up_share_capital_not_paid,
+            ),
+            (one_shot.current_assets, two_step.current_assets),
+            (
+                one_shot.prepayments_and_accrued_income,
+                two_step.prepayments_and_accrued_income,
+            ),
+            (one_shot.creditors_within_1_year, two_step.creditors_within_1_year),
+            (one_shot.net_current_assets, two_step.net_current_assets),
+            (
+                one_shot.total_assets_less_liabilities,
+                two_step.total_assets_less_liabilities,
+            ),
+            (one_shot.creditors_after_1_year, two_step.creditors_after_1_year),
+            (
+                one_shot.provisions_for_liabilities,
+                two_step.provisions_for_liabilities,
+            ),
+            (
+                one_shot.accruals_and_deferred_income,
+                two_step.accruals_and_deferred_income,
+            ),
+            (one_shot.net_assets, two_step.net_assets),
+            (one_shot.capital_and_reserves, two_step.capital_and_reserves),
+        ] {
+            assert_eq!(a, b, "one-shot and two-step balance sheets must be equal");
+        }
+    }
+
+    #[tokio::test]
     async fn test_accounts_output_matches_reference_fixture() {
         // Regenerate the fixture with:
         //   nix run .#racc-gnucash   # -> .cache/py-ixbrl-reporter/accts-micro-gnucash.html
@@ -2229,11 +2340,11 @@ mod tests {
         let (company, gnucash) = load_example().await;
         let accounts = Frs105Accounts::new(
             &gnucash,
-            &prev_from_same_book(&gnucash),
             &company,
             &example_profile(),
             &example_accounts_meta()
-        );
+        )
+        .with_prev_period_data(&prev_from_same_book(&gnucash));
         let out = accounts.to_ixbrl();
 
         // Write the Rust output for external validation (arelle).
@@ -2259,11 +2370,12 @@ mod tests {
         let (company, gnucash) = load_example().await;
         let out = Frs105Accounts::new(
             &gnucash,
-            &prev_from_same_book(&gnucash),
             &company,
             &example_profile(),
             &example_accounts_meta()
-        ).to_ixbrl();
+        )
+        .with_prev_period_data(&prev_from_same_book(&gnucash))
+        .to_ixbrl();
 
         // Header structure
         assert!(out.contains("<div style=\"display:none\"><ix:header><ix:hidden>"));
@@ -2308,11 +2420,11 @@ mod tests {
         let accounts =
             Frs105Accounts::new(
                 &gnucash,
-                &prev_from_same_book(&gnucash),
                 &company,
                 &profile,
                 &example_accounts_meta()
-            );
+            )
+            .with_prev_period_data(&prev_from_same_book(&gnucash));
         let html = accounts.to_ixbrl();
 
         // No voluntary fact is tagged.
@@ -2355,11 +2467,11 @@ mod tests {
         let (company, gnucash) = load_example().await;
         let accounts = Frs105Accounts::new(
             &gnucash,
-            &prev_from_same_book(&gnucash),
             &company,
             &example_profile(),
             &example_accounts_meta()
-        );
+        )
+        .with_prev_period_data(&prev_from_same_book(&gnucash));
         let html = accounts.to_ixbrl();
 
         std::fs::create_dir_all(cache_dir("ixbrl-rs-tests")).unwrap();
@@ -2548,14 +2660,14 @@ mod tests {
 
         let out = Frs105Accounts::new(
             &current_book,
-            &PreviousPeriodData {
-                book: &previous_book,
-                filing: None,
-            },
             &company,
             &profile,
             &accounts,
-        );
+        )
+        .with_prev_period_data(&PreviousPeriodData {
+            book: &previous_book,
+            filing: None,
+        });
 
         // Current column from the current book; comparative from the
         // previous book.  A bank balance shows up in current assets (and
@@ -2587,14 +2699,14 @@ mod tests {
 
         let out = Frs105Accounts::new(
             &empty_book,
-            &PreviousPeriodData {
-                book: &previous_book,
-                filing: None,
-            },
             &company,
             &profile,
             &accounts,
         )
+        .with_prev_period_data(&PreviousPeriodData {
+            book: &previous_book,
+            filing: None,
+        })
         .with_carry_forward();
 
         // Every balance carried forward: current column == previous column.
@@ -2625,14 +2737,14 @@ mod tests {
 
         let out = Frs105Accounts::new(
             &bank_book(0, period.end),
-            &PreviousPeriodData {
-                book: &previous_book,
-                filing: None,
-            },
             &company,
             &profile,
             &accounts,
-        );
+        )
+        .with_prev_period_data(&PreviousPeriodData {
+            book: &previous_book,
+            filing: None,
+        });
 
         // Matching filing: period aligned, figures reconcile.
         let matching = FiledBalanceSheet {

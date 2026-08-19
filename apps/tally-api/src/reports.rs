@@ -114,11 +114,11 @@ pub async fn accounts(
     let prev = PreviousPeriodData::same_book(&inputs.book);
     let accounts = Frs105Accounts::new(
         &inputs.book,
-        &prev,
         &inputs.company,
         &inputs.profile,
         &inputs.meta,
-    );
+    )
+    .with_prev_period_data(&prev);
     Ok(Html(accounts.to_ixbrl()))
 }
 
@@ -199,11 +199,11 @@ pub async fn ct600(
     let prev = PreviousPeriodData::same_book(&inputs.book);
     let accounts = Frs105Accounts::new(
         &inputs.book,
-        &prev,
         &inputs.company,
         &inputs.profile,
         &inputs.meta,
-    );
+    )
+    .with_prev_period_data(&prev);
     let corp_tax = Frs105CorpTax::builder(&inputs.book, &inputs.company, &inputs.meta).build();
 
     let mut filing = ct600::Ct600Return::from_inputs(&accounts, &corp_tax);

@@ -360,7 +360,8 @@ mod live_tests {
         // transactions, so the balances are unchanged — the previous-period
         // figures carry forward into the current column too (see
         // `Frs105Accounts::with_carry_forward`).
-        let accounts = Frs105Accounts::new(&book, &prev, &company, &profile, &accounts_meta)
+        let accounts = Frs105Accounts::new(&book, &company, &profile, &accounts_meta)
+            .with_prev_period_data(&prev)
             .with_carry_forward();
         // The generated previous CoA reconciles with the filed balance
         // sheet line for line (this is what the check validates).

@@ -390,14 +390,14 @@ mod tests {
         };
         let accounts = Frs105Accounts::new(
             &empty_current,
-            &PreviousPeriodData {
-                book: &book,
-                filing: Some(&filing),
-            },
             &company,
             &CompanyProfile::default(),
             &meta,
-        );
+        )
+        .with_prev_period_data(&PreviousPeriodData {
+            book: &book,
+            filing: Some(&filing),
+        });
 
         // Every line of the previous-period column equals the filing.
         assert_eq!(accounts.fixed_assets[1], 1000.0);
