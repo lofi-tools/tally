@@ -12,7 +12,7 @@
 
 use axum::http::{Method, StatusCode};
 use tally_tests_common::{assert_error, json_body, request, unique_email, TestApp};
-use reports::reports::uk_frs105_accounts::PreviousYearFigures;
+use reports::reports::uk_frs105_accounts::PreviousPeriodFigures;
 use serde_json::json;
 use tally_api::models::{BalanceSheet, ChFormType, Filing, Job};
 
@@ -267,7 +267,7 @@ async fn fetch_enriches_and_invalidates_provisional_periods() {
     let company_id = json_body(resp).await["id"].as_str().unwrap().to_string();
     let company_uuid = uuid::Uuid::parse_str(&company_id).unwrap();
 
-    let figures = PreviousYearFigures {
+    let figures = PreviousPeriodFigures {
         fixed_assets: 1000.0,
         current_assets: 5000.0,
         creditors_within_1_year: -2000.0,
@@ -390,7 +390,7 @@ async fn list_without_registration_date_but_with_filed_history_is_anchored_by_ba
     let company_id = json_body(resp).await["id"].as_str().unwrap().to_string();
     let company_uuid = uuid::Uuid::parse_str(&company_id).unwrap();
 
-    let figures = PreviousYearFigures {
+    let figures = PreviousPeriodFigures {
         fixed_assets: 1000.0,
         current_assets: 5000.0,
         creditors_within_1_year: -2000.0,

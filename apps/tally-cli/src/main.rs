@@ -30,7 +30,7 @@ use anyhow::{Context, Result, bail};
 use chrono::NaiveDate;
 use config::{CliArgs, ConfigBuilder};
 use ct600::{CompaniesHouseClientType, Ct600Return};
-use reports::reports::uk_frs105_accounts::Frs105Accounts;
+use reports::reports::uk_frs105_accounts::{Frs105Accounts, PreviousPeriodData};
 use reports::reports::uk_frs105_corp_tax::Frs105CorpTax;
 use reports::GnucashBook;
 
@@ -184,9 +184,13 @@ async fn run_ct600(args: CliArgs) -> Result<()> {
         .await
         .with_context(|| format!("load GnuCash book '{book_path}'"))?;
 
-    // FRS 105 inputs to the return.
+    // FRS 105 inputs to the return.  The book covers both periods, so the
+    // previous-period chart of accounts is the same book (the comparative
+    // column is computed from its own history); no filed balance sheet is
+    // attached for the check.
+    let prev = PreviousPeriodData::same_book(&book);
     let accounts =
-        Frs105Accounts::new(&book, &resolved.company, &resolved.profile, &resolved.accounts);
+        Frs105Accounts::new(&book, &prev, &resolved.company, &resolved.profile, &resolved.accounts);
     let corp_tax = Frs105CorpTax::builder(&book, &resolved.company, &resolved.accounts).build();
 
     // The CT600 GovTalk message.

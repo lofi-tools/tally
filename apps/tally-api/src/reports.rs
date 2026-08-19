@@ -21,7 +21,7 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::Json;
 use chrono::NaiveDate;
 use reports::company::{AccountingPeriod, AccountsMeta, Company as LibCompany, CompanyProfile};
-use reports::reports::uk_frs105_accounts::Frs105Accounts;
+use reports::reports::uk_frs105_accounts::{Frs105Accounts, PreviousPeriodData};
 use reports::reports::uk_frs105_corp_tax::Frs105CorpTax;
 use reports::{GnucashBook, RawAccount, RawSplit, RawTransaction};
 use serde::Deserialize;
@@ -106,12 +106,19 @@ pub async fn accounts(
     AppJson(request): AppJson<ReportRequest>,
 ) -> Result<Html<String>, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
-    let mut db = state.db.clone();
-    let accounts = Frs105Accounts::new(&inputs.book, &inputs.company, &inputs.profile, &inputs.meta);
-    let accounts = match crate::filings::previous_year_figures(&mut db, company_id).await? {
-        Some(prev) => accounts.with_previous_year(prev),
-        None => accounts, // no CH balance sheet on file → ledger-derived comparatives
-    };
+    // The previous-period comparative column is computed from the previous
+    // period's chart of accounts.  The ledger book covers both periods, so
+    // it doubles as the previous CoA; wiring a dedicated user-supplied
+    // previous-period book (and the filed-balance-sheet check) into the API
+    // is future work.
+    let prev = PreviousPeriodData::same_book(&inputs.book);
+    let accounts = Frs105Accounts::new(
+        &inputs.book,
+        &prev,
+        &inputs.company,
+        &inputs.profile,
+        &inputs.meta,
+    );
     Ok(Html(accounts.to_ixbrl()))
 }
 
@@ -184,12 +191,19 @@ pub async fn ct600(
 ) -> Result<Response, AppError> {
     let inputs = load_inputs(&state, user.id, company_id, &request).await?;
     require_utr(&inputs.company)?;
-    let mut db = state.db.clone();
-    let accounts = Frs105Accounts::new(&inputs.book, &inputs.company, &inputs.profile, &inputs.meta);
-    let accounts = match crate::filings::previous_year_figures(&mut db, company_id).await? {
-        Some(prev) => accounts.with_previous_year(prev),
-        None => accounts, // no CH balance sheet on file → ledger-derived comparatives
-    };
+    // The previous-period comparative column comes from the previous
+    // period's chart of accounts — the ledger book covers both periods, so
+    // it doubles as the previous CoA (a dedicated user-supplied
+    // previous-period book and the filed-balance-sheet check are future
+    // work).
+    let prev = PreviousPeriodData::same_book(&inputs.book);
+    let accounts = Frs105Accounts::new(
+        &inputs.book,
+        &prev,
+        &inputs.company,
+        &inputs.profile,
+        &inputs.meta,
+    );
     let corp_tax = Frs105CorpTax::builder(&inputs.book, &inputs.company, &inputs.meta).build();
 
     let mut filing = ct600::Ct600Return::from_inputs(&accounts, &corp_tax);

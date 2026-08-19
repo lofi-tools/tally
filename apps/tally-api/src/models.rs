@@ -293,7 +293,7 @@ pub struct Filing {
 /// A filed accounts balance sheet parsed from Companies House (spec:
 /// ch-filings-sync-spec.md §1, §6a). One row per `(company_id, period_end)`;
 /// the `figures` column is the single filed period's line items in the
-/// `PreviousYearFigures` shape.
+/// `PreviousPeriodFigures` shape.
 #[derive(Debug, Serialize, Model)]
 pub struct BalanceSheet {
     #[key]
@@ -311,7 +311,7 @@ pub struct BalanceSheet {
     /// The `filings` row this balance sheet was parsed from.
     pub source_filing_id: Option<uuid::Uuid>,
     #[column(type = json)]
-    pub figures: toasty::Json<reports::reports::uk_frs105_accounts::PreviousYearFigures>,
+    pub figures: toasty::Json<reports::reports::uk_frs105_accounts::PreviousPeriodFigures>,
     /// The downloaded document, as received (zipped iXBRL, HTML, or PDF).
     pub raw_document: Option<Vec<u8>>,
     /// The parsed iXBRL document (the `.html` extracted from the download).

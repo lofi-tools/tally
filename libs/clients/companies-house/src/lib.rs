@@ -19,7 +19,7 @@ use core_model::{AccountingPeriod, Company};
 use ixbrl_ir::ixbrl_fmt::{ParsedIxBrlFacts, XmlNode, xbrl_context_dimensions};
 use serde::{Deserialize, Serialize};
 
-pub use core_model::PreviousYearFigures;
+pub use core_model::PreviousPeriodFigures;
 use snafu::Snafu;
 use std::env::VarError;
 use std::path::{Path, PathBuf};
@@ -1568,7 +1568,7 @@ pub struct OtherFiling {
 
 /// A balance sheet parsed from a filed accounts document (an `AA`-family
 /// filing). The figures are the filed period's line items in the
-/// [`PreviousYearFigures`] shape (whole pounds; creditor lines negative),
+/// [`PreviousPeriodFigures`] shape (whole pounds; creditor lines negative),
 /// and the period is recovered from the document itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FiledBalanceSheet {
@@ -1577,7 +1577,7 @@ pub struct FiledBalanceSheet {
     /// ISO-8601 — the end of the period the accounts cover.
     pub period_end: NaiveDate,
     /// The balance-sheet line items for the filed period.
-    pub figures: PreviousYearFigures,
+    pub figures: PreviousPeriodFigures,
 }
 
 /// A company's latest accounts filing: when it was registered and the
@@ -1684,7 +1684,7 @@ pub fn parse_filed_accounts(html: &str) -> Result<FiledBalanceSheet, String> {
     Ok(FiledBalanceSheet {
         period_start,
         period_end,
-        figures: PreviousYearFigures {
+        figures: PreviousPeriodFigures {
             fixed_assets: current("FixedAssets"),
             called_up_share_capital_not_paid: current(
                 "CalledUpShareCapitalNotPaidNotExpressedAsCurrentAsset",

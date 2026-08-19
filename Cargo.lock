@@ -3468,6 +3468,7 @@ name = "reports"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "companies-house",
  "core_model",
  "flate2",
  "ixbrl-ir",

@@ -13,6 +13,9 @@ quick-xml = "0.41.0"
 # shared leaves: the company/accounting-period model and the iXBRL IR
 core_model = { path = "../core_model" }
 ixbrl-ir = { path = "../ixbrl-ir" }
+# the previous-period comparative column and its filing check build on the
+# Companies House filed-balance-sheet type (the client itself stays a leaf)
+companies-house = { path = "../clients/companies-house" }
 
 [dev-dependencies]
 tokio = { workspace = true }

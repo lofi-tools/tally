@@ -109,7 +109,7 @@ balance-sheet date.
   re-fetch upserts).
 - **`balance_sheets`** — `id uuid pk`, `company_id uuid fk`, `period_end date`,
   `filed_on date`, `source_filing_id uuid fk → filings`, `figures jsonb` (the
-  single filed period's line items in the exact `PreviousYearFigures` shape,
+  single filed period's line items in the exact `PreviousPeriodFigures` shape,
   §6a), `raw_document bytea`, `parsed_document text` (the iXBRL), `created_at`,
   `unique (company_id, period_end)`.
 
@@ -290,7 +290,7 @@ let _ = worker.await; // already draining via the token
    balance-sheet row as unparseable, and finish the job as done-with-partial (see
    Edge cases).
 5. **Parse** via `Frs105Accounts::from_ixbrl(...)`; take the parsed document's
-   **current-period column** (index `[0]`) and build a `PreviousYearFigures`
+   **current-period column** (index `[0]`) and build a `PreviousPeriodFigures`
    (the shape of the `figures` column, §6a) as the historical balance sheet
    for that period end.
 6. **Upsert** the `balance_sheets` row (figures, raw + parsed doc, source filing id).
@@ -341,17 +341,20 @@ let _ = worker.await; // already draining via the token
   transactions with `post_datetime > balance_sheet.period_end`, mapped to
   balance-sheet lines with the existing account-type logic
   (`is_balance_sheet_type` in `ledgers.rs` / `account_path` in the reports lib).
-- **Report integration**: when a `balance_sheets` row exists, the accounts (and
-  CT600) handlers apply its figures to the comparative/previous-year column via
-  `Frs105Accounts::with_previous_year(...)` — CH wins when present, ledger-derived
-  previous year stays as the fallback (§6a).
+- **Report integration**: the reports' previous-period comparative column is
+  computed from the **previous period's chart of accounts** (a required input —
+  a filed balance sheet alone cannot rebuild the CoA). When a `balance_sheets`
+  row exists, its figures verify that CoA via
+  `Frs105Accounts::check_previous_period_matches_filing(...)`; the check is
+  non-blocking for now (the API passes the ledger book as the previous CoA, see
+  §6a).
 
-### 6a. `balance_sheets.figures` shape + the previous-year override
+### 6a. `balance_sheets.figures` shape + the previous-period check
 
 **JSON shape** — a flat object of the filed accounts' balance-sheet line items,
 keyed exactly by the `Frs105Accounts` field names, values in **whole pounds** (as
 filed — iXBRL renders at `decimals = 0`) with the iXBRL sign convention (creditor
-lines negative). It deserialises directly into the `PreviousYearFigures` struct:
+lines negative). It deserialises directly into the `PreviousPeriodFigures` struct:
 
 ```json
 {
@@ -372,7 +375,7 @@ lines negative). It deserialises directly into the `PreviousYearFigures` struct:
 All 11 keys are always present (the four always-zero lines in the generated report
 — prepayments, creditors-after-1-year, provisions, accruals — are still stored
 explicitly so a future full-accounts parse round-trips honestly). The `BalanceSheet`
-model maps the column as `toasty::Json<PreviousYearFigures>`.
+model maps the column as `toasty::Json<PreviousPeriodFigures>`.
 
 The report's comparative column is then injected with a consuming builder on
 `Frs105Accounts` (see Changes — `libs/reports`); `new()` is unchanged, so the CLI and
@@ -406,17 +409,15 @@ the ct600 test helpers compile untouched and only the tally-api handlers opt in.
 
 ## Changes — `libs/reports`
 
-- New `PreviousYearFigures` struct (in `libs/reports/src/reports/uk_frs105_accounts.rs`)
+- New `PreviousPeriodFigures` struct (in `libs/core_model/src/lib.rs`)
   mirroring the twelve `Frs105Accounts` balance-sheet fields as `f64` (single
   period), deriving `Debug, Clone, Default, PartialEq, Serialize, Deserialize`:
 
 ```rust
-/// Previous-period balance-sheet figures — the comparative column of the
-/// statement of financial position when the ledger doesn't cover the
-/// previous period (e.g. sourced from the company's last filed accounts at
-/// Companies House). Mirrors the `Frs105Accounts` balance-sheet fields;
-/// values in whole pounds, iXBRL sign convention (creditors negative).
-pub struct PreviousYearFigures {
+/// A filed balance sheet's figures for one period: the previous-period
+/// comparative column of the micro-entity accounts (FRS 105) report.
+/// Values in whole pounds, iXBRL sign convention (creditors negative).
+pub struct PreviousPeriodFigures {
     pub fixed_assets: f64,
     pub called_up_share_capital_not_paid: f64,
     pub current_assets: f64,
@@ -432,49 +433,53 @@ pub struct PreviousYearFigures {
 }
 ```
 
-- New consuming builder on `Frs105Accounts` that replaces only the previous-period
-  column (index `[1]` of each array); the current column stays ledger-computed.
-  `new()` is untouched, so all existing callers (`tally-cli`, `tally-api`, ct600
-  tests) compile unchanged:
+- `Frs105Accounts::new(gnucash, prev: &PreviousPeriodData, company, profile,
+  accounts_meta)` — the current column is computed from the current book, the
+  previous-period comparative column from `PreviousPeriodData::book` (the
+  previous period's chart of accounts, a **required** input; a filed balance
+  sheet cannot rebuild the CoA). `PreviousPeriodData::filing` is an optional
+  filed balance sheet, check-only. `with_previous_year` is gone.
 
 ```rust
-impl Frs105Accounts {
-    /// Replace the previous-period (comparative) column with externally
-    /// sourced figures (e.g. the last filed accounts at Companies House).
-    /// The current-period column is left as computed from the ledger.
-    pub fn with_previous_year(mut self, prev: PreviousYearFigures) -> Self {
-        self.fixed_assets[1] = prev.fixed_assets;
-        self.called_up_share_capital_not_paid[1] = prev.called_up_share_capital_not_paid;
-        self.current_assets[1] = prev.current_assets;
-        self.prepayments_and_accrued_income[1] = prev.prepayments_and_accrued_income;
-        self.creditors_within_1_year[1] = prev.creditors_within_1_year;
-        self.net_current_assets[1] = prev.net_current_assets;
-        self.total_assets_less_liabilities[1] = prev.total_assets_less_liabilities;
-        self.creditors_after_1_year[1] = prev.creditors_after_1_year;
-        self.provisions_for_liabilities[1] = prev.provisions_for_liabilities;
-        self.accruals_and_deferred_income[1] = prev.accruals_and_deferred_income;
-        self.net_assets[1] = prev.net_assets;
-        self.capital_and_reserves[1] = prev.capital_and_reserves;
-        self
-    }
+pub struct PreviousPeriodData<'a> {
+    /// The previous period's chart of accounts (accounts + transactions).
+    pub book: &'a GnucashBook,
+    /// The previous period's filed balance sheet, when on record — check-only.
+    pub filing: Option<&'a FiledBalanceSheet>,
 }
 ```
 
-- **tally-api usage** (accounts + CT600 handlers):
+- New builder method verifying the computed comparative column against the
+  filed balance sheet — per-line differences plus period alignment:
 
 ```rust
-let accounts = Frs105Accounts::new(&inputs.book, &inputs.company, &inputs.profile, &inputs.meta);
-let accounts = match previous_year_figures(&inputs.company, &mut db).await? {
-    Some(prev) => accounts.with_previous_year(prev),
-    None => accounts, // no CH balance sheet on file → ledger-derived comparatives
-};
+impl Frs105Accounts {
+    pub fn check_previous_period_matches_filing(
+        &self,
+        filing: &FiledBalanceSheet,
+    ) -> Result<(), PreviousPeriodMismatch> { /* 12 lines vs the filing + period_end */ }
+}
 ```
 
-- **tally-cli**: unchanged for now (it runs from a local config + ledger; the
-  override is additive and can be adopted later).
-- **Unit test**: parse a committed filed-accounts fixture via `from_ixbrl`, apply
-  `with_previous_year`, assert the previous column matches and the current column
-  is untouched (the existing round-trip fixture pattern).
+- **tally-api usage** (accounts + CT600 handlers): the ledger book covers both
+  periods, so it doubles as the previous CoA; wiring a dedicated user-supplied
+  previous-period book (and running the check) is future work:
+
+```rust
+let prev = PreviousPeriodData::same_book(&inputs.book);
+let accounts = Frs105Accounts::new(
+    &inputs.book, &prev, &inputs.company, &inputs.profile, &inputs.meta,
+);
+```
+
+- **tally-cli**: same `same_book` pattern (it runs from a local config + ledger).
+- **Unit test**: `test_check_previous_period_matches_filing` — a previous book
+  that reconciles passes, a conflicting one reports exactly the differing lines,
+  and a wrong-period filing is flagged via `period_mismatch`. The
+  `ct600::test_utils::plausible_previous_book` generator builds a plausible
+  previous-period CoA from a filing (aggregates distributed across the
+  contributing accounts, reports' sign convention) and the live full-year test
+  asserts it reconciles.
 
 ## Changes — web (`apps/tally-web`)
 
@@ -484,7 +489,7 @@ let accounts = match previous_year_figures(&inputs.company, &mut db).await? {
   'ongoing', due: { hmrc, ch } | null, filings: PeriodFiling[] }`), `PeriodFiling`
   (`{ kind, state: 'confirmed'|'not-sent', filed_on?, form_type?, description?,
   document_metadata_url? }`), `BalanceSheet` (period_end, filed_on,
-  `figures: PreviousYearFigures`-shaped interface — the same 11 keys),
+  `figures: PreviousPeriodFigures`-shaped interface — the same 11 keys),
   `FetchStatus { state, fetched_at, last_error }`.
 - `listFilings(companyId) → { periods, balance_sheets, status }` and
   `refreshFilings(companyId) → { job_id }` (or the no-op 200).

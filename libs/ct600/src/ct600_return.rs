@@ -1046,6 +1046,10 @@ mod tests {
         .expect("open basic-1 gnucash");
         Frs105Accounts::new(
             &gnucash,
+            &reports::reports::uk_frs105_accounts::PreviousPeriodData {
+                book: &gnucash,
+                filing: None,
+            },
             &company,
             &basic_1_profile(),
             &basic_1_accounts_meta(),
@@ -1246,6 +1250,10 @@ mod tests {
         .expect("open ctm03955 gnucash");
         Frs105Accounts::new(
             &gnucash,
+            &reports::reports::uk_frs105_accounts::PreviousPeriodData {
+                book: &gnucash,
+                filing: None,
+            },
             &company,
             &ctm03955_profile(),
             &ctm03955_accounts_meta(),

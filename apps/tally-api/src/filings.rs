@@ -22,7 +22,7 @@ use axum::Json;
 use chrono::{Duration, Months, NaiveDate};
 use ct600::companies_house::{FilingHistoryItem, TypedFiling};
 use reports::company::{AccountingPeriod, AccountsMeta, Company as LibCompany};
-use reports::reports::uk_frs105_accounts::{Frs105Accounts, PreviousYearFigures};
+use reports::reports::uk_frs105_accounts::{Frs105Accounts, PreviousPeriodFigures};
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
@@ -157,7 +157,7 @@ pub async fn fetch_and_store(
 
     // 6. Upsert the balance-sheet row. Unparseable documents still get a
     //    row (raw bytes kept, `parsed_document` null, default figures) so
-    //    the period shows as filed; `previous_year_figures` skips rows
+    //    the period shows as filed; `previous_period_figures` skips rows
     //    without a parsed document, so comparatives stay unavailable.
     let period_end = parsed
         .as_ref()
@@ -256,10 +256,10 @@ fn parse_ixbrl(html: &str, company: &Company) -> Option<Frs105Accounts> {
 }
 
 /// The current-period column (index `[0]`) of a parsed report, in the
-/// `PreviousYearFigures` shape — the historical balance sheet for the filed
+/// `PreviousPeriodFigures` shape — the historical balance sheet for the filed
 /// period end.
-fn figures_from_parsed(parsed: &Frs105Accounts) -> PreviousYearFigures {
-    PreviousYearFigures {
+fn figures_from_parsed(parsed: &Frs105Accounts) -> PreviousPeriodFigures {
+    PreviousPeriodFigures {
         fixed_assets: parsed.fixed_assets[0],
         called_up_share_capital_not_paid: parsed.called_up_share_capital_not_paid[0],
         current_assets: parsed.current_assets[0],
@@ -340,7 +340,7 @@ pub struct FilingsView {
 pub struct BalanceSheetView {
     pub period_end: String,
     pub filed_on: Option<String>,
-    pub figures: PreviousYearFigures,
+    pub figures: PreviousPeriodFigures,
 }
 
 impl From<&BalanceSheet> for BalanceSheetView {
@@ -766,18 +766,22 @@ fn accounts_period_end(filing: &Filing) -> Option<NaiveDate> {
 }
 
 // ---------------------------------------------------------------------------
-// Shared: previous-year comparatives for the reports (§6)
+// Shared: the filed balance sheet on file for the reports' previous-period
+// check (§6)
 // ---------------------------------------------------------------------------
 
-/// The most recent parsed balance sheet on file, as the previous-year
-/// comparative figures for the report (CH wins when present; `None` → the
-/// ledger-derived comparatives stay). Rows without a parsed document (PDFs
-/// and other unparseable uploads) are skipped so comparatives stay
-/// unavailable rather than zero.
-pub async fn previous_year_figures(
+/// The most recent parsed balance sheet on file — the previous period's
+/// filed figures, retained for the upcoming wiring of the reports'
+/// `check_previous_period_matches_filing` validation (the previous-period
+/// comparative column itself is computed from the previous period's chart
+/// of accounts, a required input; the filing only verifies it).  Rows
+/// without a parsed document (PDFs and other unparseable uploads) are
+/// skipped so the check stays unavailable rather than comparing against
+/// zeros.
+pub async fn previous_period_figures(
     db: &mut toasty::Db,
     company_id: uuid::Uuid,
-) -> Result<Option<PreviousYearFigures>, AppError> {
+) -> Result<Option<PreviousPeriodFigures>, AppError> {
     let rows = BalanceSheet::filter_by_company_id(company_id)
         .order_by(BalanceSheet::fields().period_end().desc())
         .exec(db)

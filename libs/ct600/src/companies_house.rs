@@ -16,7 +16,7 @@ pub use companies_house::{
     ConfirmationStatement, ConfirmationStatementFiling, DocumentLinks, DocumentMetadata,
     FilingHistory, FilingHistoryItem, FilingHistoryLinks, FormType, IncorporationFiling,
     LastAccounts, NextAccounts, NextAccountingPeriod, Officer, OfficerChangeAction,
-    OfficerChangeFiling, OfficerList, OtherFiling, PreviousYearFigures, RegisteredOfficeAddress,
+    OfficerChangeFiling, OfficerList, OtherFiling, PreviousPeriodFigures, RegisteredOfficeAddress,
     TypedFiling, next_accounting_period_from, parse_filed_accounts,
 };
 
@@ -89,7 +89,7 @@ impl CompaniesHouseFormValues for CompaniesHouseClient {
 mod live_tests {
     use super::*;
 
-    use companies_house::PreviousYearFigures;
+    use companies_house::PreviousPeriodFigures;
 
     /// The cache directory the live tests use: a scratch tempdir when
     /// `always_live_tests` is enabled, else the repository's
@@ -192,7 +192,7 @@ mod live_tests {
 
     /// Print a filed balance sheet's line items (whole pounds; creditor
     /// lines negative — the reports' sign convention).
-    fn print_figures(figures: &PreviousYearFigures) {
+    fn print_figures(figures: &PreviousPeriodFigures) {
         for (label, value) in [
             (
                 "called up share capital not paid",
@@ -231,11 +231,14 @@ mod live_tests {
     /// starting point, then generate all three output documents for the
     /// next pending period — the FRS 105 accounts, the FRS 105
     /// corporation-tax computation and the CT600 return — with an empty
-    /// transaction list (the pending period has no ledger yet, so the new
-    /// balance sheet carries the filed figures forward: previous-year column
-    /// from the filed accounts, current column via
-    /// [`Frs105Accounts::with_carry_forward`], so every balance reads the
-    /// same in both columns).  The documents are written under `.cache`,
+    /// transaction list (the pending period has no ledger yet).  The
+    /// previous-period comparative column is computed from a chart of
+    /// accounts auto-generated *plausibly* from the filed balance sheet
+    /// ([`crate::test_utils::plausible_previous_book`]), which must
+    /// reconcile with the filing ([`Frs105Accounts::check_previous_period_matches_filing`]);
+    /// with no current-period transactions the balances carry forward
+    /// ([`Frs105Accounts::with_carry_forward`]), so every balance reads the
+    /// same in both columns.  The documents are written under `.cache`,
     /// like the other live tests' artifacts.
     #[tokio::test]
     #[cfg_attr(
@@ -245,7 +248,7 @@ mod live_tests {
     async fn live_latest_accounts_full_year_reports() {
         use chrono::Datelike;
         use reports::GnucashBook;
-        use reports::reports::uk_frs105_accounts::Frs105Accounts;
+        use reports::reports::uk_frs105_accounts::{Frs105Accounts, PreviousPeriodData};
         use reports::{AccountsMeta, Company, CompanyProfile};
 
         use crate::ct600_return::Ct600Return;
@@ -340,13 +343,30 @@ mod live_tests {
         // balance sheet carries the filed figures in the previous column.
         let book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
 
-        // The three documents, seeded from the filed balance sheet.  The
-        // pending period has no transactions, so the balances are unchanged
-        // — the previous-year figures carry forward into the current column
-        // too (see `Frs105Accounts::with_carry_forward`).
-        let accounts = Frs105Accounts::new(&book, &company, &profile, &accounts_meta)
-            .with_previous_year(bs.figures)
+        // The previous period's chart of accounts.  The filing alone cannot
+        // rebuild the CoA (it carries only the aggregates), so the test
+        // auto-generates a *plausible* one — a book that reproduces the
+        // filed figures when run through the builder's computations (see
+        // `test_utils::plausible_previous_book`) — and attaches the filing
+        // for the check.
+        let previous_book = crate::test_utils::plausible_previous_book(&bs);
+        let prev = PreviousPeriodData {
+            book: &previous_book,
+            filing: Some(&bs),
+        };
+
+        // The three documents: the previous-period comparative column is
+        // computed from the previous CoA, and the pending period has no
+        // transactions, so the balances are unchanged — the previous-period
+        // figures carry forward into the current column too (see
+        // `Frs105Accounts::with_carry_forward`).
+        let accounts = Frs105Accounts::new(&book, &prev, &company, &profile, &accounts_meta)
             .with_carry_forward();
+        // The generated previous CoA reconciles with the filed balance
+        // sheet line for line (this is what the check validates).
+        accounts
+            .check_previous_period_matches_filing(&bs)
+            .expect("the plausible previous-period CoA must reconcile with the filed balance sheet");
         assert_eq!(
             accounts.net_assets[0], accounts.net_assets[1],
             "no transactions: net assets carried forward"

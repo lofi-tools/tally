@@ -4,7 +4,7 @@
 //! ([`company::Company`], [`company::CompanyProfile`],
 //! [`company::AccountingPeriod`], [`company::AccountsMeta`]) — the domain
 //! types the accounts/tax reports and the Companies House
-//! next-accounting-period chain are built on.  [`PreviousYearFigures`] is
+//! next-accounting-period chain are built on.  [`PreviousPeriodFigures`] is
 //! the filed-balance-sheet shape: produced by the Companies House client's
 //! filing parse and consumed by the accounts report's comparative column.
 //!
@@ -17,12 +17,12 @@ pub use company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 /// comparative column of the micro-entity accounts (FRS 105) report.
 ///
 /// Produced by the Companies House client's `parse_filed_accounts` (the
-/// `figures` of a filed accounts document) and consumed by
-/// `Frs105Accounts::with_previous_year` for the next report's comparative
-/// column.  Values in whole pounds with the iXBRL sign convention (creditor
-/// lines negative).
+/// `figures` of a filed accounts document) and consumed by the accounts
+/// report's previous-period comparative column (and its
+/// `check_previous_period_matches_filing` validation).  Values in whole
+/// pounds with the iXBRL sign convention (creditor lines negative).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PreviousYearFigures {
+pub struct PreviousPeriodFigures {
     /// Tangible / fixed assets.
     pub fixed_assets: f64,
     /// Called-up share capital not paid — line A of the FRS 105
