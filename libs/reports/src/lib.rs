@@ -68,6 +68,7 @@ impl TryFrom<&str> for AccountType {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct AccountNode {
     name: String,
     account_type: AccountType,
@@ -98,6 +99,7 @@ pub struct RawSplit {
     pub value: rucash::Num,
 }
 
+#[derive(Debug, Clone)]
 pub struct GnucashBook {
     accounts: Vec<AccountNode>,
     net_assets: rucash::Num,

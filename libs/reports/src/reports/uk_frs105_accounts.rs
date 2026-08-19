@@ -59,6 +59,12 @@ pub struct Frs105Accounts {
     /// parameters and the report metadata (resolved before the report is
     /// built).
     pub accounts: AccountsMeta,
+    /// The current-period book the report was computed from, retained so
+    /// [`Self::with_prev_period_data`] can recompute the current column as
+    /// the previous period's closing figures plus this period's activity.
+    /// `None` for reports parsed from iXBRL ([`Self::from_ixbrl_node`]),
+    /// which have no ledger.
+    book: Option<GnucashBook>,
     /// Tangible / fixed assets.
     pub fixed_assets: [f64; 2],
     /// Called-up share capital not paid — line A of the FRS 105
@@ -106,8 +112,10 @@ pub struct Frs105Accounts {
 /// filing carries only the aggregate lines, not the accounts or
 /// transactions).  The previous CoA is an *optional* input: without it the
 /// comparative column defaults to zeros, and it is supplied afterwards via
-/// [`Frs105Accounts::with_prev_period_data`].  When a filed balance sheet
-/// is also available it is not used for the computation:
+/// [`Frs105Accounts::with_prev_period_data`].  Supplying it also **seeds**
+/// the current column — it starts from the previous period's closing
+/// figures and adds this period's activity.  When a filed balance sheet is
+/// also available it is not used for the computation:
 /// [`Frs105Accounts::check_previous_period_matches_filing`] compares the
 /// computed comparative column against it.
 pub struct PreviousPeriodData<'a> {
@@ -160,7 +168,7 @@ impl std::fmt::Display for PreviousPeriodMismatch {
 /// the current-period column from the current book, and the previous-period
 /// column from the previous-period book when one is supplied (see
 /// [`Frs105Accounts::with_prev_period_data`]).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct ComputedLines {
     fixed_assets: f64,
     current_assets: f64,
@@ -175,6 +183,54 @@ struct ComputedLines {
     capital_and_reserves: f64,
 }
 
+impl std::ops::Add for ComputedLines {
+    type Output = ComputedLines;
+
+    fn add(self, rhs: ComputedLines) -> ComputedLines {
+        ComputedLines {
+            fixed_assets: self.fixed_assets + rhs.fixed_assets,
+            current_assets: self.current_assets + rhs.current_assets,
+            prepayments_and_accrued_income: self.prepayments_and_accrued_income
+                + rhs.prepayments_and_accrued_income,
+            creditors_within_1_year: self.creditors_within_1_year + rhs.creditors_within_1_year,
+            net_current_assets: self.net_current_assets + rhs.net_current_assets,
+            total_assets_less_liabilities: self.total_assets_less_liabilities
+                + rhs.total_assets_less_liabilities,
+            creditors_after_1_year: self.creditors_after_1_year + rhs.creditors_after_1_year,
+            provisions_for_liabilities: self.provisions_for_liabilities
+                + rhs.provisions_for_liabilities,
+            accruals_and_deferred_income: self.accruals_and_deferred_income
+                + rhs.accruals_and_deferred_income,
+            net_assets: self.net_assets + rhs.net_assets,
+            capital_and_reserves: self.capital_and_reserves + rhs.capital_and_reserves,
+        }
+    }
+}
+
+impl std::ops::Sub for ComputedLines {
+    type Output = ComputedLines;
+
+    fn sub(self, rhs: ComputedLines) -> ComputedLines {
+        ComputedLines {
+            fixed_assets: self.fixed_assets - rhs.fixed_assets,
+            current_assets: self.current_assets - rhs.current_assets,
+            prepayments_and_accrued_income: self.prepayments_and_accrued_income
+                - rhs.prepayments_and_accrued_income,
+            creditors_within_1_year: self.creditors_within_1_year - rhs.creditors_within_1_year,
+            net_current_assets: self.net_current_assets - rhs.net_current_assets,
+            total_assets_less_liabilities: self.total_assets_less_liabilities
+                - rhs.total_assets_less_liabilities,
+            creditors_after_1_year: self.creditors_after_1_year - rhs.creditors_after_1_year,
+            provisions_for_liabilities: self.provisions_for_liabilities
+                - rhs.provisions_for_liabilities,
+            accruals_and_deferred_income: self.accruals_and_deferred_income
+                - rhs.accruals_and_deferred_income,
+            net_assets: self.net_assets - rhs.net_assets,
+            capital_and_reserves: self.capital_and_reserves - rhs.capital_and_reserves,
+        }
+    }
+}
+
 impl Frs105Accounts {
     /// Compute the statement of financial position from the ledgers and the
     /// company details.
@@ -186,7 +242,10 @@ impl Frs105Accounts {
     /// previous-period data yet, renders a blank comparative column.
     /// Supply the previous period afterwards with
     /// [`Self::with_prev_period_data`] (a previous-period chart of accounts;
-    /// a filed balance sheet alone cannot rebuild the previous CoA).
+    /// a filed balance sheet alone cannot rebuild the previous CoA).  Doing
+    /// so **seeds** the current column: it starts from the previous period's
+    /// closing figures and adds this period's activity, instead of computing
+    /// the current column from the book alone.
     pub fn new(
         gnucash: &GnucashBook,
         company: &Company,
@@ -201,6 +260,7 @@ impl Frs105Accounts {
             company: company.clone(),
             profile: profile.clone(),
             accounts: accounts_meta.clone(),
+            book: Some(gnucash.clone()),
             fixed_assets: col(current.fixed_assets),
             // Line A (called-up share capital not paid) has no account path:
             // it defaults to zero and is supplied via
@@ -219,17 +279,84 @@ impl Frs105Accounts {
         }
     }
 
-    /// Override the previous-period comparative column with a previous
-    /// period's chart of accounts: recompute the previous column from
-    /// [`PreviousPeriodData::book`] up to the day before the current period
-    /// starts.  The comparative column otherwise defaults to zeros (see
-    /// [`Self::new`]); when the previous-period CoA is the same book as the
-    /// current one, pass [`PreviousPeriodData::same_book`].
+    /// Supply the previous period's chart of accounts, recomputing both
+    /// columns from it:
+    ///
+    /// - the previous-period comparative column is computed from
+    ///   [`PreviousPeriodData::book`] up to the day before the current
+    ///   period starts;
+    /// - the current-period column is **seeded**: it starts from those
+    ///   previous-period closing figures and adds this period's activity
+    ///   (the current book's splits dated within the period).
+    ///
+    /// For a book that spans both periods ([`PreviousPeriodData::same_book`])
+    /// the seeded current column equals the full-history computation, so the
+    /// two are indistinguishable; for a current-period-only book the seeding
+    /// carries the opening balances forward instead of starting from zero
+    /// (a pending period with an empty book renders the balances unchanged,
+    /// current == previous).  To keep the current column computed purely
+    /// from the current book, use [`Self::with_prev_period_data_no_seed`].
     ///
     /// The optional filed balance sheet ([`PreviousPeriodData::filing`]) is
     /// not used here; verify the book against it with
     /// [`Self::check_previous_period_matches_filing`].
     pub fn with_prev_period_data(mut self, prev: &PreviousPeriodData) -> Self {
+        let period = self.accounts.period();
+        let prev_end = period.start - chrono::Duration::days(1);
+        let previous = Self::compute_lines(prev.book, prev_end);
+
+        // In-period activity: the current book's splits dated within the
+        // period (the full book up to the period end, minus the book's own
+        // pre-period portion).  `None` when the report was parsed from
+        // iXBRL and has no ledger.
+        let activity = match &self.book {
+            Some(book) => {
+                let full = Self::compute_lines(book, period.end);
+                let before = Self::compute_lines(book, prev_end);
+                full - before
+            }
+            None => ComputedLines::default(),
+        };
+        let current = previous + activity;
+
+        self.fixed_assets = [current.fixed_assets, previous.fixed_assets];
+        self.current_assets = [current.current_assets, previous.current_assets];
+        self.prepayments_and_accrued_income = [
+            current.prepayments_and_accrued_income,
+            previous.prepayments_and_accrued_income,
+        ];
+        self.creditors_within_1_year = [
+            current.creditors_within_1_year,
+            previous.creditors_within_1_year,
+        ];
+        self.net_current_assets = [current.net_current_assets, previous.net_current_assets];
+        self.total_assets_less_liabilities = [
+            current.total_assets_less_liabilities,
+            previous.total_assets_less_liabilities,
+        ];
+        self.creditors_after_1_year = [
+            current.creditors_after_1_year,
+            previous.creditors_after_1_year,
+        ];
+        self.provisions_for_liabilities = [
+            current.provisions_for_liabilities,
+            previous.provisions_for_liabilities,
+        ];
+        self.accruals_and_deferred_income = [
+            current.accruals_and_deferred_income,
+            previous.accruals_and_deferred_income,
+        ];
+        self.net_assets = [current.net_assets, previous.net_assets];
+        self.capital_and_reserves = [current.capital_and_reserves, previous.capital_and_reserves];
+        self
+    }
+
+    /// The opt-out variant of [`Self::with_prev_period_data`]: fills the
+    /// previous-period comparative column from [`PreviousPeriodData::book`]
+    /// (up to the day before the current period starts) but leaves the
+    /// current-period column as computed in [`Self::new`] — purely from the
+    /// current book, with no seeding from the previous period's figures.
+    pub fn with_prev_period_data_no_seed(mut self, prev: &PreviousPeriodData) -> Self {
         let period = self.accounts.period();
         let previous = Self::compute_lines(prev.book, period.start - chrono::Duration::days(1));
         self.fixed_assets[1] = previous.fixed_assets;
@@ -1016,6 +1143,9 @@ impl Frs105Accounts {
             company,
             profile,
             accounts,
+            // Parsed from iXBRL: no ledger, so the seeding step in
+            // `with_prev_period_data` has no book to read activity from.
+            book: None,
             fixed_assets: [
                 fact("uk-core:FixedAssets", "ctxt-15"),
                 fact("uk-core:FixedAssets", "ctxt-16"),
@@ -1157,29 +1287,6 @@ impl Frs105Accounts {
                 lines,
             })
         }
-    }
-
-    /// Carry the previous period's balances into the current period: a year
-    /// with no transactions leaves the balances unchanged, so the current
-    /// column takes the previous column's figures.  Use when the current
-    /// book has no transactions in the current period (e.g. a pending
-    /// period whose book is not yet populated) — the previous-period
-    /// figures then seed both columns and the statement renders the
-    /// balances carried forward instead of zeros.
-    pub fn with_carry_forward(mut self) -> Self {
-        self.fixed_assets[0] = self.fixed_assets[1];
-        self.called_up_share_capital_not_paid[0] = self.called_up_share_capital_not_paid[1];
-        self.current_assets[0] = self.current_assets[1];
-        self.prepayments_and_accrued_income[0] = self.prepayments_and_accrued_income[1];
-        self.creditors_within_1_year[0] = self.creditors_within_1_year[1];
-        self.net_current_assets[0] = self.net_current_assets[1];
-        self.total_assets_less_liabilities[0] = self.total_assets_less_liabilities[1];
-        self.creditors_after_1_year[0] = self.creditors_after_1_year[1];
-        self.provisions_for_liabilities[0] = self.provisions_for_liabilities[1];
-        self.accruals_and_deferred_income[0] = self.accruals_and_deferred_income[1];
-        self.net_assets[0] = self.net_assets[1];
-        self.capital_and_reserves[0] = self.capital_and_reserves[1];
-        self
     }
 
     /// Supply the called-up share capital not paid (line A of the FRS 105
@@ -2648,9 +2755,9 @@ mod tests {
 
     #[test]
     fn test_comparative_column_comes_from_the_previous_book() {
-        // The current column is computed from the current book, the
-        // comparative column from the previous-period book: two books with
-        // different balances, and each column reflects its own book.
+        // Two books with different balances: the opt-out variant keeps the
+        // current column computed purely from the current book, while the
+        // comparative column comes from the previous-period book.
         let company = example_company();
         let profile = example_profile();
         let accounts = example_accounts_meta();
@@ -2664,7 +2771,7 @@ mod tests {
             &profile,
             &accounts,
         )
-        .with_prev_period_data(&PreviousPeriodData {
+        .with_prev_period_data_no_seed(&PreviousPeriodData {
             book: &previous_book,
             filing: None,
         });
@@ -2685,12 +2792,45 @@ mod tests {
     }
 
     #[test]
-    fn test_with_carry_forward_after_empty_year_matches_previous() {
+    fn test_with_prev_period_data_seeds_current_from_previous_figures() {
+        // The default (seeded) variant starts the current column from the
+        // previous period's closing figures and adds this period's
+        // activity: same two books as above, the current column reads
+        // 2000 (previous closing) + 1000 (this period's bank transaction)
+        // = 3000, while the comparative column stays at the previous
+        // book's 2000.
+        let company = example_company();
+        let profile = example_profile();
+        let accounts = example_accounts_meta();
+        let period = accounts.period();
+        let current_book = bank_book(1000, period.end - chrono::Duration::days(30));
+        let previous_book = bank_book(2000, period.start - chrono::Duration::days(1));
+
+        let out = Frs105Accounts::new(
+            &current_book,
+            &company,
+            &profile,
+            &accounts,
+        )
+        .with_prev_period_data(&PreviousPeriodData {
+            book: &previous_book,
+            filing: None,
+        });
+
+        assert_eq!(out.current_assets, [3000.0, 2000.0]);
+        assert_eq!(out.net_current_assets, [3000.0, 2000.0]);
+        assert_eq!(out.total_assets_less_liabilities, [3000.0, 2000.0]);
+        assert_eq!(out.net_assets, [3000.0, 2000.0]);
+        assert_eq!(out.fixed_assets, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_empty_year_current_matches_previous_via_seeding() {
         // A pending period with no transactions yet: the current book is
-        // empty, so the current column computes as zero; the previous book
-        // carries the balances, and the carry-forward brings them into the
-        // current column too — a year with no activity leaves the balances
-        // unchanged (current == previous on every line).
+        // empty, so the seeded current column is the previous period's
+        // closing figures plus zero activity — a year with no activity
+        // leaves the balances unchanged (current == previous on every
+        // line), with no separate carry-forward step needed.
         let company = example_company();
         let profile = example_profile();
         let accounts = example_accounts_meta();
@@ -2706,8 +2846,7 @@ mod tests {
         .with_prev_period_data(&PreviousPeriodData {
             book: &previous_book,
             filing: None,
-        })
-        .with_carry_forward();
+        });
 
         // Every balance carried forward: current column == previous column.
         assert_eq!(out.fixed_assets, [0.0, 0.0]);
@@ -2803,6 +2942,7 @@ mod tests {
             company,
             profile,
             accounts,
+            book: None,
             fixed_assets: [100.0, 200.0],
             called_up_share_capital_not_paid: [0.0, 0.0],
             current_assets: [300.0, 400.0],

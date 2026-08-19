@@ -236,10 +236,11 @@ mod live_tests {
     /// accounts auto-generated *plausibly* from the filed balance sheet
     /// ([`crate::test_utils::plausible_previous_book`]), which must
     /// reconcile with the filing ([`Frs105Accounts::check_previous_period_matches_filing`]);
-    /// with no current-period transactions the balances carry forward
-    /// ([`Frs105Accounts::with_carry_forward`]), so every balance reads the
-    /// same in both columns.  The documents are written under `.cache`,
-    /// like the other live tests' artifacts.
+    /// with no current-period transactions the seeded current column
+    /// ([`Frs105Accounts::with_prev_period_data`]) equals the previous
+    /// column, so every balance reads the same in both columns.  The
+    /// documents are written under `.cache`, like the other live tests'
+    /// artifacts.
     #[tokio::test]
     #[cfg_attr(
         not(any(feature = "cached_live_tests", feature = "always_live_tests")),
@@ -357,12 +358,11 @@ mod live_tests {
 
         // The three documents: the previous-period comparative column is
         // computed from the previous CoA, and the pending period has no
-        // transactions, so the balances are unchanged — the previous-period
-        // figures carry forward into the current column too (see
-        // `Frs105Accounts::with_carry_forward`).
+        // transactions, so the seeded current column (previous-period
+        // figures + zero activity) equals the comparative column — the
+        // balances are unchanged (see `Frs105Accounts::with_prev_period_data`).
         let accounts = Frs105Accounts::new(&book, &company, &profile, &accounts_meta)
-            .with_prev_period_data(&prev)
-            .with_carry_forward();
+            .with_prev_period_data(&prev);
         // The generated previous CoA reconciles with the filed balance
         // sheet line for line (this is what the check validates).
         accounts
