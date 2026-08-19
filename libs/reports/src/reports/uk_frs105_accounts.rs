@@ -1984,7 +1984,7 @@ impl Frs105Accounts {
             ),
         ]);
 
-        let notes = elt("div", &[]).child(elt("div", &[]).children(vec![
+        let notes = elt("div", &[("class", "notes")]).child(elt("div", &[]).children(vec![
             statement_p(
                 "uk-direp:StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
                 vec![span_text(
@@ -2046,7 +2046,7 @@ impl Frs105Accounts {
         ));
         let approval = elt("div", &[]).child(elt("div", &[]).children(approval_children));
 
-        page(vec![elt("div", &[]).children(vec![
+        page(vec![elt("div", &[("class", "sheet-page")]).children(vec![
             self.page_header("Statement of financial position", HeaderSubtitle::AsAt),
             worksheet(vec![table("sheet table", rows)]),
             notes,

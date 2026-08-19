@@ -431,6 +431,23 @@
             done
             echo "all reports validate OK"
           '';
+
+          # Run the 3-report live test (the ct600 crate's
+          # `live_latest_accounts_full_year_reports` test): fetches the
+          # latest accounts filing and the company details from Companies
+          # House (cache-first), then generates all three documents for the
+          # pending period — the FRS 105 accounts, the FRS 105
+          # corporation-tax computation and the CT600 return — into
+          # .cache/tally-full-year/.  The company defaults to 14510633;
+          # override with COMPANY_NUMBER=<number>.  A warm cache runs fully
+          # offline; a cold one needs COMPANIES_HOUSE_API_KEY (or the
+          # sandbox key).
+          r3 = ''
+            set -e
+            cd "${wd}"
+            COMPANY_NUMBER="''${COMPANY_NUMBER:-14510633}" \
+              cargo test -p ct600 --lib companies_house::live_tests::live_latest_accounts_full_year_reports -- --nocapture
+          '';
           rct600 = ''${bin.ref-ct600} "$@" '';
 
           # Run the reference ct600 tool over the basic-1 pair: step 1

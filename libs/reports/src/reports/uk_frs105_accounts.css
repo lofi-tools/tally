@@ -26,20 +26,32 @@ body {
 
 }
 
+.titlepage {
+    /* The title block (logo, company name, report title) is centred
+       vertically in the middle of the page; the company number stays
+       pinned to the top-right corner. */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100%;
+    position: relative; 
+}
+
 .titlepage .company-number {
     text-align: right;
     font-size: small;
-    font-weight: bold; 
+    font-weight: bold;
+    position: absolute;
+    top: 0;
+    right: 0; 
 }
 
 .titlepage img {
     margin: auto;
     width: 25%;
     display: block;
-    padding-top: 12em;
-    padding-left: 0em;
-    padding-bottom: 1em;
-    padding-right: 0em; 
+    padding-bottom: 1em; 
 }
 
 .titlepage .company-name {
@@ -47,9 +59,7 @@ body {
     font-size: xx-large;
     font-weight: bold;
     padding-top: 1em;
-    padding-left: 0em;
-    padding-bottom: 1em;
-    padding-right: 0em; 
+    padding-bottom: 1em; 
 }
 
 .titlepage .title {
@@ -64,6 +74,21 @@ body {
     font-size: large;
     font-weight: bold;
     padding: 0.5rem; 
+}
+
+.sheet-page {
+    /* The balance-sheet page is a full-height column, so the statutory
+       notes and the approval block can be pinned to the bottom of the
+       page (the notes absorb the free space via `margin-top: auto`). */
+    display: flex;
+    flex-direction: column;
+    min-height: 100%; 
+}
+
+.sheet-page .notes {
+    /* Push the notes block (and the approval block after it) to the
+       bottom of the page, leaving the space above the statements. */
+    margin-top: auto; 
 }
 
 .page .header {
