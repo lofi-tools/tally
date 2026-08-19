@@ -930,8 +930,12 @@ impl Frs105Accounts {
         );
 
         let creditors_after_1_year = leaf("creditors after one year");
-        let provisions_for_liabilities = leaf("provisions for liabilities");
-        let accruals_and_deferred_income = leaf("accruals and deferred income");
+        // The ledger stores provisions and accruals as negative credit
+        // balances (like every other liability); the report renders them
+        // as positive magnitudes (the filed presentation), so the leaves
+        // are negated here.
+        let provisions_for_liabilities = -leaf("provisions for liabilities");
+        let accruals_and_deferred_income = -leaf("accruals and deferred income");
 
         // Net assets deduct the after-one-year creditors and the provisions
         // / accruals — the lines render as positive magnitudes (matching the

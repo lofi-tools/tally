@@ -248,7 +248,9 @@ pub fn plausible_previous_book(
     // Distribute each filed aggregate across its contributing accounts:
     // whole pounds, remainder to the last.  `total` carries the filed sign
     // (creditor lines negative); `negate` flips for the debit-side account
-    // types (equity / income / expense), which the reports negate again.
+    // types (equity / income / expense) and for provisions / accruals,
+    // which the reports negate again — so every liability ends up as a
+    // negative credit balance in the ledger (the double-entry convention).
     let f = &filing.figures;
     let mut postings: Vec<(usize, i64)> = Vec::new();
     let mut distribute = |targets: &[usize], total: f64, negate: bool| {
@@ -296,8 +298,8 @@ pub fn plausible_previous_book(
         false,
     );
     distribute(&[creditors_after_1yr], f.creditors_after_1_year, false);
-    distribute(&[provisions], f.provisions_for_liabilities, false);
-    distribute(&[accruals], f.accruals_and_deferred_income, false);
+    distribute(&[provisions], f.provisions_for_liabilities, true);
+    distribute(&[accruals], f.accruals_and_deferred_income, true);
     distribute(
         &[shareholdings, income, expenses, dividends, corp_tax_equity],
         f.capital_and_reserves,

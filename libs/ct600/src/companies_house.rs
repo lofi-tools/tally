@@ -239,8 +239,11 @@ mod live_tests {
     /// omitted the corporation-tax liability, so the comparative column
     /// restores the £2006.21 via a previous-year start-balance adjustment
     /// ([`Frs105Accounts::with_previous_year_adjustments`]), and the
-    /// current column settles it with the pending period's one transaction
-    /// — the 2025-08-31 payment in the ledger.  The documents are written
+    /// current column settles it with the pending period's two ledger
+    /// transactions — the 2025-08-31 CT payment and the 2025-09-30
+    /// settlement of the filed £540 provision for liabilities out of the
+    /// bank (so the current column's provision is zero while the
+    /// comparative keeps the filed 540).  The documents are written
     /// under `.cache`, like the other live tests' artifacts.
     #[tokio::test]
     #[cfg_attr(
@@ -364,11 +367,13 @@ mod live_tests {
         };
 
         // The pending period's ledger: the previous period's chart of
-        // accounts, with the period's one transaction so far — the
-        // 2025-08-31 payment settling the corporation tax the comparative
-        // column restores below (Dr the CT liability, Cr the bank).  The
-        // accounts are copied from the previous book (same GUIDs), so the
-        // payment's splits resolve against the same chart.
+        // accounts, with the period's two transactions — the 2025-08-31
+        // payment settling the corporation tax the comparative column
+        // restores below (Dr the CT liability, Cr the bank), and the
+        // 2025-09-30 settlement of the filed £540 provision for
+        // liabilities out of the bank.  The accounts are copied from the
+        // previous book (same GUIDs), so the transactions' splits resolve
+        // against the same chart.
         let owed_ct_guid = previous_book
             .raw_accounts()
             .iter()
@@ -383,16 +388,39 @@ mod live_tests {
             .expect("the plausible chart carries the bank account")
             .guid
             .clone();
+        let provisions_guid = previous_book
+            .raw_accounts()
+            .iter()
+            .find(|a| a.name == "Provisions")
+            .expect("the plausible chart carries the provisions account")
+            .guid
+            .clone();
         let book = GnucashBook::from_raw_parts(
             previous_book.raw_accounts().to_vec(),
-            vec![RawTransaction {
-                guid: "txn-ct-payment".into(),
-                post_datetime: chrono::NaiveDate::from_ymd_opt(2025, 8, 31)
-                    .unwrap()
-                    .and_hms_opt(12, 0, 0)
-                    .unwrap(),
-                description: "corporation tax paid (prior year)".into(),
-            }],
+            vec![
+                RawTransaction {
+                    guid: "txn-ct-payment".into(),
+                    post_datetime: chrono::NaiveDate::from_ymd_opt(2025, 8, 31)
+                        .unwrap()
+                        .and_hms_opt(12, 0, 0)
+                        .unwrap(),
+                    description: "corporation tax paid (prior year)".into(),
+                },
+                // The provision for liabilities (£540 on the filed balance
+                // sheet) crystallised and is settled out of the bank: Dr
+                // the provision (clears the −540 credit balance to 0 in
+                // the current column), Cr the bank.  A clean two-leg
+                // double entry — the ledger stores provisions as negative
+                // credit balances, like every other liability.
+                RawTransaction {
+                    guid: "txn-provision-settlement".into(),
+                    post_datetime: chrono::NaiveDate::from_ymd_opt(2025, 9, 30)
+                        .unwrap()
+                        .and_hms_opt(12, 0, 0)
+                        .unwrap(),
+                    description: "provision for liabilities settled (paid out)".into(),
+                },
+            ],
             vec![
                 RawSplit {
                     tx_guid: "txn-ct-payment".into(),
@@ -401,8 +429,18 @@ mod live_tests {
                 },
                 RawSplit {
                     tx_guid: "txn-ct-payment".into(),
-                    account_guid: bank_guid,
+                    account_guid: bank_guid.clone(),
                     value: "-2006.21".parse().unwrap(),
+                },
+                RawSplit {
+                    tx_guid: "txn-provision-settlement".into(),
+                    account_guid: provisions_guid,
+                    value: "540".parse().unwrap(),
+                },
+                RawSplit {
+                    tx_guid: "txn-provision-settlement".into(),
+                    account_guid: bank_guid.clone(),
+                    value: "-540".parse().unwrap(),
                 },
             ],
         );
@@ -466,16 +504,22 @@ mod live_tests {
         }];
         let accounts = accounts.with_previous_year_adjustments(&adjustments);
 
-        // The correction: the comparative column restores the omitted
+        // The corrections: the comparative column restores the omitted
         // liability (creditors −2006.21, retained earnings −2006.21), and
         // the current column nets it against the 2025-08-31 payment — the
         // liability clears (current creditors back to the filed figure) and
         // the bank is lower; net assets are down by the same £2006.21 in
-        // both columns.
+        // both columns.  The 2025-09-30 settlement of the filed £540
+        // provision for liabilities pays it out of the bank: the current
+        // column's provision drops to zero (the comparative keeps 540),
+        // the bank falls by a further £540, and net assets stay flat
+        // (current assets down 540, the provision deduction gone).
         println!(
-            "corrected balance sheet: creditors within 1 year {} / {}, net assets {} / {} (current / previous)",
+            "corrected balance sheet: creditors within 1 year {} / {}, provisions {} / {}, net assets {} / {} (current / previous)",
             accounts.creditors_within_1_year[0],
             accounts.creditors_within_1_year[1],
+            accounts.provisions_for_liabilities[0],
+            accounts.provisions_for_liabilities[1],
             accounts.net_assets[0],
             accounts.net_assets[1],
         );
@@ -505,12 +549,25 @@ mod live_tests {
             "the comparative column restores the omitted CT liability"
         );
         assert!(
-            (accounts.current_assets[0] - (bs.figures.current_assets - 2006.21)).abs() < 0.005,
-            "the payment reduces the current-period bank"
+            (accounts.current_assets[0] - (bs.figures.current_assets - 2006.21 - 540.0)).abs()
+                < 0.005,
+            "the bank pays the CT and settles the provision: current assets down £2006.21 + £540"
         );
         assert_eq!(
             accounts.current_assets[1], bs.figures.current_assets,
             "the comparative column keeps the filed current assets"
+        );
+        assert_eq!(
+            accounts.provisions_for_liabilities[0], 0.0,
+            "the provision is settled out of the current column"
+        );
+        assert_eq!(
+            accounts.provisions_for_liabilities[1], bs.figures.provisions_for_liabilities,
+            "the comparative column keeps the filed provision"
+        );
+        assert!(
+            (accounts.net_assets[0] - (bs.figures.net_assets - 2006.21)).abs() < 0.005,
+            "settling the provision via the bank leaves net assets flat"
         );
         let corp_tax = Frs105CorpTax::builder(&book, &company, &accounts_meta).build();
         let ct600 = Ct600Return::from_inputs(&accounts, &corp_tax);
