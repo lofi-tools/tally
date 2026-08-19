@@ -1144,14 +1144,57 @@ impl Frs105Accounts {
                 "ctxt-0",
                 profile.sic_codes.get(1).map(String::as_str).unwrap_or(""),
             ),
-            non_numeric("uk-bus:MainIndustrySector", "ctxt-3", ""),
+        ]);
+        // Dimensioned taxonomy facts: only emitted when the profile
+        // supplies a non-empty dimension value, matching the
+        // corresponding xbrli:context.
+        if !profile.industry_sector_dimension.is_empty() {
+            hidden_children.push(non_numeric(
+                "uk-bus:MainIndustrySector",
+                "ctxt-3",
+                &profile.industry_sector_dimension,
+            ));
+        }
+        hidden_children.extend(vec![
             non_numeric("uk-bus:EntityDormantTruefalse", "ctxt-0", "false"),
             non_numeric("uk-bus:EntityTradingStatus", "ctxt-0", ""),
-            non_numeric("uk-bus:AccountingStandardsApplied", "ctxt-4", ""),
-            non_numeric("uk-bus:AccountsType", "ctxt-5", ""),
-            non_numeric("uk-bus:AccountsStatusAuditedOrUnaudited", "ctxt-6", ""),
-            non_numeric("uk-bus:LegalFormEntity", "ctxt-7", ""),
-            non_numeric("uk-bus:CountryFormationOrIncorporation", "ctxt-8", ""),
+        ]);
+        if !self.accounts.accounting_standards_dimension.is_empty() {
+            hidden_children.push(non_numeric(
+                "uk-bus:AccountingStandardsApplied",
+                "ctxt-4",
+                &self.accounts.accounting_standards_dimension,
+            ));
+        }
+        if !self.accounts.accounts_type_dimension.is_empty() {
+            hidden_children.push(non_numeric(
+                "uk-bus:AccountsType",
+                "ctxt-5",
+                &self.accounts.accounts_type_dimension,
+            ));
+        }
+        if !self.accounts.accounts_status_dimension.is_empty() {
+            hidden_children.push(non_numeric(
+                "uk-bus:AccountsStatusAuditedOrUnaudited",
+                "ctxt-6",
+                &self.accounts.accounts_status_dimension,
+            ));
+        }
+        if !profile.legal_form_dimension.is_empty() {
+            hidden_children.push(non_numeric(
+                "uk-bus:LegalFormEntity",
+                "ctxt-7",
+                &profile.legal_form_dimension,
+            ));
+        }
+        if !profile.country_dimension.is_empty() {
+            hidden_children.push(non_numeric(
+                "uk-bus:CountryFormationOrIncorporation",
+                "ctxt-8",
+                &profile.country_dimension,
+            ));
+        }
+        hidden_children.extend(vec![
             non_numeric_fmt(
                 "uk-bus:DateFormationOrIncorporation",
                 "ctxt-1",
@@ -1242,7 +1285,7 @@ impl Frs105Accounts {
             "",
         )]);
 
-        let resources = elt("ix:resources", &[]).children(vec![
+        let mut resource_children = vec![
             context_duration(
                 "ctxt-0",
                 &company.company_number,
@@ -1265,7 +1308,11 @@ impl Frs105Accounts {
                 None,
                 None,
             ),
-            context_duration_full(
+        ];
+        // Dimensioned contexts: only emitted when the profile supplies a
+        // non-empty dimension value, matching the hidden-header facts.
+        if !profile.industry_sector_dimension.is_empty() {
+            resource_children.push(context_duration_full(
                 "ctxt-3",
                 &company.company_number,
                 &period_start,
@@ -1276,8 +1323,10 @@ impl Frs105Accounts {
                     "uk-bus:MainIndustrySectorDimension",
                     &profile.industry_sector_dimension,
                 )],
-            ),
-            context_duration_full(
+            ));
+        }
+        if !self.accounts.accounting_standards_dimension.is_empty() {
+            resource_children.push(context_duration_full(
                 "ctxt-4",
                 &company.company_number,
                 &period_start,
@@ -1288,8 +1337,10 @@ impl Frs105Accounts {
                     "uk-bus:AccountingStandardsDimension",
                     &self.accounts.accounting_standards_dimension,
                 )],
-            ),
-            context_duration_full(
+            ));
+        }
+        if !self.accounts.accounts_type_dimension.is_empty() {
+            resource_children.push(context_duration_full(
                 "ctxt-5",
                 &company.company_number,
                 &period_start,
@@ -1300,8 +1351,10 @@ impl Frs105Accounts {
                     "uk-bus:AccountsTypeDimension",
                     &self.accounts.accounts_type_dimension,
                 )],
-            ),
-            context_duration_full(
+            ));
+        }
+        if !self.accounts.accounts_status_dimension.is_empty() {
+            resource_children.push(context_duration_full(
                 "ctxt-6",
                 &company.company_number,
                 &period_start,
@@ -1312,8 +1365,10 @@ impl Frs105Accounts {
                     "uk-bus:AccountsStatusDimension",
                     &self.accounts.accounts_status_dimension,
                 )],
-            ),
-            context_duration_full(
+            ));
+        }
+        if !profile.legal_form_dimension.is_empty() {
+            resource_children.push(context_duration_full(
                 "ctxt-7",
                 &company.company_number,
                 &period_start,
@@ -1324,8 +1379,10 @@ impl Frs105Accounts {
                     "uk-bus:LegalFormEntityDimension",
                     &profile.legal_form_dimension,
                 )],
-            ),
-            context_duration_full(
+            ));
+        }
+        if !profile.country_dimension.is_empty() {
+            resource_children.push(context_duration_full(
                 "ctxt-8",
                 &company.company_number,
                 &period_start,
@@ -1336,8 +1393,9 @@ impl Frs105Accounts {
                     "uk-geo:CountriesRegionsDimension",
                     &profile.country_dimension,
                 )],
-            ),
-            context_duration(
+            ));
+        }
+        resource_children.extend(vec![context_duration(
                 "ctxt-9",
                 &company.company_number,
                 &prev_start,
@@ -1439,6 +1497,7 @@ impl Frs105Accounts {
             elt("xbrli:unit", &[("id", "pure")])
                 .child(elt_text("xbrli:measure", &[], "xbrli:pure")),
         ]);
+        let resources = elt("ix:resources", &[]).children(resource_children);
 
         let header = elt("ix:header", &[]).children(vec![hidden, refs, resources]);
 
