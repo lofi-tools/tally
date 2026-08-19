@@ -782,11 +782,11 @@ pub fn context_instant(
         &[("scheme", "http://www.companieshouse.gov.uk/")],
         scheme_id,
     ));
-    if let Some(d) = dim {
+    if let (Some(d), Some(v)) = (dim, val) {
         entity = entity.child(elt("xbrli:segment", &[]).child(elt_text(
             "xbrldi:explicitMember",
             &[("dimension", d)],
-            val.unwrap_or(""),
+            v,
         )));
     }
     elt("xbrli:context", &[("id", id)]).children(vec![
@@ -810,14 +810,15 @@ pub fn context_duration_full(
         &[("scheme", "http://www.companieshouse.gov.uk/")],
         scheme_id,
     ));
-    if typed_dim.is_some() || !explicit_dims.is_empty() {
+    let non_empty_explicit: Vec<_> = explicit_dims.iter().copied().filter(|(_, v)| !v.is_empty()).collect();
+    if typed_dim.is_some() || !non_empty_explicit.is_empty() {
         let mut segment = elt("xbrli:segment", &[]);
         if let Some(d) = typed_dim {
             segment = segment.child(elt("xbrldi:typedMember", &[("dimension", d)]).child(
                 elt_text("ct-comp:BusinessNameDomain", &[], typed_val.unwrap_or("")),
             ));
         }
-        for (dim, val) in explicit_dims {
+        for (dim, val) in &non_empty_explicit {
             segment = segment.child(elt_text(
                 "xbrldi:explicitMember",
                 &[("dimension", dim)],
