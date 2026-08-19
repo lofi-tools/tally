@@ -7,7 +7,9 @@ use snafu::Snafu;
 // `ixbrl-ir`); re-export them at their historical paths so callers keep
 // working unchanged.
 pub use core_model::company;
-pub use core_model::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
+pub use core_model::{
+    AccountingPeriod, AccountsMeta, Company, CompanyProfile, EmployeePeriod, Employees,
+};
 pub use ixbrl_ir::ixbrl_fmt;
 
 pub mod calc_corp_tax;

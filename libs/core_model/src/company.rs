@@ -179,6 +179,60 @@ impl AccountingPeriod {
     }
 }
 
+/// One employee's period of service — the span during which the person was
+/// employed under a contract of service (Companies Act 2006 s.411).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmployeePeriod {
+    /// The first day of employment (inclusive).
+    pub start: NaiveDate,
+    /// The last day of employment (inclusive); `None` while still employed.
+    pub end: Option<NaiveDate>,
+}
+
+impl EmployeePeriod {
+    /// Whether the person was employed at any point during the calendar
+    /// month starting on `month_start` — s.411's "whether throughout the
+    /// month or not", so the month in which someone starts or leaves still
+    /// counts them.
+    fn employed_during(&self, month_start: NaiveDate, month_end: NaiveDate) -> bool {
+        self.start <= month_end && self.end.is_none_or(|end| end >= month_start)
+    }
+}
+
+/// The company's employees — one [`EmployeePeriod`] per distinct employee.
+///
+/// The building block behind the statutory average number of employees
+/// (Companies Act 2006 s.411): [`Self::monthly_counts`] produces the per-
+/// month "monthly numbers", and [`Company::average_employees`] /
+/// [`Company::average_employees_for_year`] reduce them to the average.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Employees {
+    /// The employees, one period of service per person.
+    pub employees: Vec<EmployeePeriod>,
+}
+
+impl Employees {
+    /// The number of persons employed in each calendar month of `period` —
+    /// the s.411 "monthly number": everyone employed at any point in the
+    /// month counts, whether throughout the month or not.  One `(first day
+    /// of the month, count)` entry per calendar month the period spans.
+    pub fn monthly_counts(&self, period: &AccountingPeriod) -> Vec<(NaiveDate, u32)> {
+        let mut out = Vec::new();
+        let mut month_start = period.start.with_day(1).unwrap_or(period.start);
+        while month_start <= period.end {
+            let month_end = month_start + Months::new(1) - chrono::Duration::days(1);
+            let count = self
+                .employees
+                .iter()
+                .filter(|e| e.employed_during(month_start, month_end))
+                .count() as u32;
+            out.push((month_start, count));
+            month_start = month_start + Months::new(1);
+        }
+        out
+    }
+}
+
 /// The `accounts` sub-object of the config file (`accounts.*`).
 ///
 /// A set of accounts: the return period ([`AccountingPeriod`]), the
@@ -380,6 +434,42 @@ impl Company {
         };
         self.accounting_period_n(years_since_ard + 2)
     }
+
+    /// The average number of employees during `period` (Companies Act 2006
+    /// s.411(3)): the sum of the monthly numbers
+    /// ([`Employees::monthly_counts`]) divided by the number of months in
+    /// the period.
+    pub fn average_employees(&self, employees: &Employees, period: &AccountingPeriod) -> f64 {
+        let counts = employees.monthly_counts(period);
+        if counts.is_empty() {
+            return 0.0;
+        }
+        counts
+            .iter()
+            .map(|(_, count)| *count as f64)
+            .sum::<f64>()
+            / counts.len() as f64
+    }
+
+    /// The average number of employees for the financial year **ending** in
+    /// `year` — the accounting period whose end date falls in that year,
+    /// which is how the accounts report's employees note is keyed (e.g. for
+    /// a 30-November ARD, the year 2025 resolves to 1 Dec 2024 → 30 Nov
+    /// 2025).
+    pub fn average_employees_for_year(&self, employees: &Employees, year: i32) -> f64 {
+        self.average_employees(employees, &self.accounting_period_ending_in(year))
+    }
+
+    /// The accounting period whose end date falls in `year`, walking the
+    /// registration-date schedule.
+    fn accounting_period_ending_in(&self, year: i32) -> AccountingPeriod {
+        (0..=60)
+            .map(|n| self.accounting_period_n(n))
+            .find(|period| period.end.year() == year)
+            .unwrap_or_else(|| {
+                self.accounting_period_containing(NaiveDate::from_ymd_opt(year, 12, 31).unwrap())
+            })
+    }
 }
 
 #[cfg(test)]
@@ -392,6 +482,73 @@ mod tests {
         assert_eq!(c.name, "Acme Ltd");
         assert_eq!(c.tax_reference, "1234567890");
         assert_eq!(c.company_number, "9876543");
+    }
+
+    /// The employee-average computation (CA 2006 s.411): the monthly number
+    /// counts everyone employed at any point in the month, so the month of
+    /// leaving still counts the leaver, and the average is the sum of the
+    /// monthly numbers divided by the months in the financial year.
+    #[test]
+    fn test_employee_averages() {
+        let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).unwrap();
+
+        // The 14510633 schedule: registered 2022-11-28, ARD 30 November.
+        let mut company = Company::new("T", "1", "14510633");
+        company.registration_date = date(2022, 11, 28);
+        assert_eq!(company.first_ard(), date(2023, 11, 30));
+
+        // One employee, started on incorporation, removed 30 June 2025.
+        let employees = Employees {
+            employees: vec![EmployeePeriod {
+                start: company.registration_date,
+                end: Some(date(2025, 6, 30)),
+            }],
+        };
+
+        // FY ending 30 Nov 2024 (1 Dec 2023 → 30 Nov 2024): employed all 12
+        // months.
+        let fy2024 = company.accounting_period_n(2);
+        assert_eq!(employees.monthly_counts(&fy2024).len(), 12);
+        assert!(employees
+            .monthly_counts(&fy2024)
+            .iter()
+            .all(|(_, count)| *count == 1));
+        assert_eq!(company.average_employees(&employees, &fy2024), 1.0);
+        assert_eq!(company.average_employees_for_year(&employees, 2024), 1.0);
+
+        // FY ending 30 Nov 2025 (1 Dec 2024 → 30 Nov 2025): employed Dec
+        // 2024 → Jun 2025 (7 months), not employed Jul → Nov 2025 (5
+        // months) — the s.411 average is 7/12.
+        let fy2025 = company.accounting_period_n(3);
+        assert_eq!(company.accounting_period_ending_in(2025), fy2025);
+        let counts = employees.monthly_counts(&fy2025);
+        assert_eq!(counts.len(), 12);
+        assert_eq!(counts.iter().filter(|(_, c)| *c == 1).count(), 7);
+        assert_eq!(counts.iter().filter(|(_, c)| *c == 0).count(), 5);
+        assert_eq!(company.average_employees(&employees, &fy2025), 7.0 / 12.0);
+        assert_eq!(company.average_employees_for_year(&employees, 2025), 7.0 / 12.0);
+
+        // The month of leaving still counts the leaver: leaving on 15 June
+        // 2025 (mid-month) gives the same monthly numbers as 30 June.
+        let mid_june = Employees {
+            employees: vec![EmployeePeriod {
+                start: company.registration_date,
+                end: Some(date(2025, 6, 15)),
+            }],
+        };
+        assert_eq!(mid_june.monthly_counts(&fy2025), counts);
+
+        // A still-employed employee (no end date) counts through the end:
+        // employed from before the FY, all 12 months count.
+        let current = Employees {
+            employees: vec![EmployeePeriod {
+                start: date(2024, 6, 1),
+                end: None,
+            }],
+        };
+        assert_eq!(current.monthly_counts(&fy2025).len(), 12);
+        assert!(current.monthly_counts(&fy2025).iter().all(|(_, c)| *c == 1));
+        assert_eq!(company.average_employees_for_year(&current, 2025), 1.0);
     }
 
     #[test]

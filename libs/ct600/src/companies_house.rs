@@ -247,10 +247,12 @@ mod live_tests {
         ignore = "requires a Companies House API key for a cold cache"
     )]
     async fn live_latest_accounts_full_year_reports() {
+        use std::collections::HashMap;
+
         use chrono::Datelike;
         use reports::GnucashBook;
         use reports::reports::uk_frs105_accounts::{FilingDeadlines, Frs105Accounts, PreviousPeriodData};
-        use reports::{AccountsMeta, Company};
+        use reports::{AccountsMeta, Company, EmployeePeriod, Employees};
 
         use crate::ct600_return::Ct600Return;
 
@@ -311,6 +313,26 @@ mod live_tests {
         );
         let pending_end = pending.end;
         println!("pending period: {} → {}", pending.start, pending_end);
+
+        // The employees: a single employee who started on incorporation and
+        // was removed in June 2025.  The per-calendar-year averages are
+        // computed from the monthly numbers (CA 2006 s.411: the month of
+        // leaving still counts the leaver), keyed by period-end year like
+        // the report's employees note.
+        let employees = Employees {
+            employees: vec![EmployeePeriod {
+                start: company.registration_date,
+                end: Some(chrono::NaiveDate::from_ymd_opt(2025, 6, 30).unwrap()),
+            }],
+        };
+        let avg_2024 = company.average_employees_for_year(&employees, pending_end.year() - 1);
+        let avg_2025 = company.average_employees_for_year(&employees, pending_end.year());
+        println!("average employees: FY ending 2024 = {avg_2024}, FY ending 2025 = {avg_2025}");
+        // Employed all 12 months of the FY ending 30 Nov 2024, and only
+        // Dec 2024 → Jun 2025 (7 months) of the FY ending 30 Nov 2025.
+        assert_eq!(avg_2024, 1.0);
+        assert_eq!(avg_2025, 7.0 / 12.0);
+
         let accounts_meta = AccountsMeta {
             period: Some(pending),
             fy1_year: pending_end.year() - 1,
@@ -318,6 +340,10 @@ mod live_tests {
             // The signatory defaults to the first director (mirrors the
             // CLI/API resolve step).
             signed_by: profile.directors.first().cloned().unwrap_or_default(),
+            average_employees: HashMap::from([
+                (pending_end.year().to_string(), avg_2025.round() as u32),
+                ((pending_end.year() - 1).to_string(), avg_2024.round() as u32),
+            ]),
             ..AccountsMeta::default()
         };
 

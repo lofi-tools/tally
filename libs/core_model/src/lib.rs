@@ -11,7 +11,9 @@
 //! This crate is a leaf: no dependency on the reporting or client crates.
 
 pub mod company;
-pub use company::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
+pub use company::{
+    AccountingPeriod, AccountsMeta, Company, CompanyProfile, EmployeePeriod, Employees,
+};
 
 /// A filed balance sheet's figures for one period: the previous-period
 /// comparative column of the micro-entity accounts (FRS 105) report.
