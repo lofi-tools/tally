@@ -437,10 +437,18 @@ pub struct PreviousPeriodFigures {
   current column is computed from the current book; the previous-period
   comparative column **defaults to zeros**. The previous period's chart of
   accounts is supplied afterwards, as an optional override:
-  `.with_prev_period_data(&prev)` recomputes the comparative column from
-  `PreviousPeriodData::book` (a filed balance sheet cannot rebuild the CoA).
-  `PreviousPeriodData::filing` is an optional filed balance sheet, check-only.
-  `with_previous_year` is gone.
+  `.with_prev_period_data(&prev)` recomputes **both** columns — the
+  comparative from `PreviousPeriodData::book` up to the day before the
+  period starts, and the **seeded** current column = those previous-period
+  closing figures (the caller's figures act as an override: the current
+  book's own pre-period transactions are ignored entirely) plus this
+  period's activity, i.e. the current book's splits dated within the period
+  computed with the same per-line computations as a full-history book but
+  on the filtered transactions only (rounded per line after adding).
+  `PreviousPeriodData::filing` is an optional filed balance sheet, check-only
+  (a filed balance sheet cannot rebuild the CoA).  `with_previous_year` and
+  the old `with_carry_forward` are gone; `.with_prev_period_data_no_seed`
+  keeps the current column computed purely from the current book.
 
 ```rust
 pub struct PreviousPeriodData<'a> {

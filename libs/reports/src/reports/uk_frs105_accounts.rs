@@ -168,7 +168,7 @@ impl std::fmt::Display for PreviousPeriodMismatch {
 /// the current-period column from the current book, and the previous-period
 /// column from the previous-period book when one is supplied (see
 /// [`Frs105Accounts::with_prev_period_data`]).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct ComputedLines {
     fixed_assets: f64,
     current_assets: f64,
@@ -181,6 +181,28 @@ struct ComputedLines {
     accruals_and_deferred_income: f64,
     net_assets: f64,
     capital_and_reserves: f64,
+}
+
+impl ComputedLines {
+    /// Round every line to whole pence — kills the f64 representation noise
+    /// that appears when two rounded line sets are added or subtracted
+    /// (e.g. seeded current = previous figures + in-period activity).
+    fn rounded(self) -> ComputedLines {
+        let round2 = |v: f64| (v * 100.0).round() / 100.0;
+        ComputedLines {
+            fixed_assets: round2(self.fixed_assets),
+            current_assets: round2(self.current_assets),
+            prepayments_and_accrued_income: round2(self.prepayments_and_accrued_income),
+            creditors_within_1_year: round2(self.creditors_within_1_year),
+            net_current_assets: round2(self.net_current_assets),
+            total_assets_less_liabilities: round2(self.total_assets_less_liabilities),
+            creditors_after_1_year: round2(self.creditors_after_1_year),
+            provisions_for_liabilities: round2(self.provisions_for_liabilities),
+            accruals_and_deferred_income: round2(self.accruals_and_deferred_income),
+            net_assets: round2(self.net_assets),
+            capital_and_reserves: round2(self.capital_and_reserves),
+        }
+    }
 }
 
 impl std::ops::Add for ComputedLines {
@@ -244,8 +266,9 @@ impl Frs105Accounts {
     /// [`Self::with_prev_period_data`] (a previous-period chart of accounts;
     /// a filed balance sheet alone cannot rebuild the previous CoA).  Doing
     /// so **seeds** the current column: it starts from the previous period's
-    /// closing figures and adds this period's activity, instead of computing
-    /// the current column from the book alone.
+    /// closing figures (an override — the current book's own pre-period
+    /// transactions are ignored) and adds this period's activity, instead
+    /// of computing the current column from the book alone.
     pub fn new(
         gnucash: &GnucashBook,
         company: &Company,
@@ -286,8 +309,12 @@ impl Frs105Accounts {
     ///   [`PreviousPeriodData::book`] up to the day before the current
     ///   period starts;
     /// - the current-period column is **seeded**: it starts from those
-    ///   previous-period closing figures and adds this period's activity
-    ///   (the current book's splits dated within the period).
+    ///   previous-period closing figures (the caller's figures act as an
+    ///   **override** — the current book's own pre-period transactions are
+    ///   ignored entirely) and adds this period's activity, i.e. the
+    ///   current book's splits dated within the period, computed with the
+    ///   same per-line computations as a full-history book but on the
+    ///   filtered transactions only.
     ///
     /// For a book that spans both periods ([`PreviousPeriodData::same_book`])
     /// the seeded current column equals the full-history computation, so the
@@ -305,19 +332,20 @@ impl Frs105Accounts {
         let prev_end = period.start - chrono::Duration::days(1);
         let previous = Self::compute_lines(prev.book, prev_end);
 
-        // In-period activity: the current book's splits dated within the
-        // period (the full book up to the period end, minus the book's own
-        // pre-period portion).  `None` when the report was parsed from
-        // iXBRL and has no ledger.
+        // This period's activity: the current book's splits dated within
+        // the period, filtered explicitly (everything outside the period is
+        // ignored — the previous period is represented entirely by the
+        // caller's override).  `None` when the report was parsed from iXBRL
+        // and has no ledger.
         let activity = match &self.book {
             Some(book) => {
-                let full = Self::compute_lines(book, period.end);
-                let before = Self::compute_lines(book, prev_end);
-                full - before
+                Self::compute_lines_between(book, Some(period.start), Some(period.end))
             }
             None => ComputedLines::default(),
         };
-        let current = previous + activity;
+        // Previous-period figures + this period's activity, rounded per
+        // line (the sum of two rounded sets carries f64 noise).
+        let current = (previous + activity).rounded();
 
         self.fixed_assets = [current.fixed_assets, previous.fixed_assets];
         self.current_assets = [current.current_assets, previous.current_assets];
@@ -377,10 +405,22 @@ impl Frs105Accounts {
     /// sheet date): the account-path → type map, the splits collected as
     /// (date, path, value) and the "line" / derived computations.
     ///
-    /// Called twice by [`Self::new`]: with the current book up to the period
-    /// end, and with the previous-period book up to the day before the
-    /// current period starts.
+    /// Called by [`Self::new`] (with the current book up to the period end)
+    /// and by [`Self::with_prev_period_data`] (with the previous-period
+    /// book up to the day before the current period starts).
     fn compute_lines(book: &GnucashBook, end: chrono::NaiveDate) -> ComputedLines {
+        Self::compute_lines_between(book, None, Some(end))
+    }
+
+    /// Like [`Self::compute_lines`], but only splits dated within
+    /// `start..=end` contribute (`None` = unbounded on that side).  Used to
+    /// isolate a period's activity from a book that spans more than one
+    /// period.
+    fn compute_lines_between(
+        book: &GnucashBook,
+        start: Option<chrono::NaiveDate>,
+        end: Option<chrono::NaiveDate>,
+    ) -> ComputedLines {
         let accounts = book.raw_accounts();
 
         // Map account path -> GnuCash account type, for the debit flip.
@@ -418,7 +458,7 @@ impl Frs105Accounts {
         let line = |acct: &str| -> f64 {
             let mut total = 0.0;
             for (date, path, val) in &splits {
-                if *date > end {
+                if end.is_some_and(|e| *date > e) || start.is_some_and(|s| *date < s) {
                     continue;
                 }
                 if path == acct || path.starts_with(&format!("{acct}:")) {
@@ -2199,6 +2239,72 @@ mod tests {
         GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
     }
 
+    /// Like [`bank_book`], but with two bank transactions: `pre_amount`
+    /// dated `pre_date` and `in_amount` dated `in_date`, each balanced
+    /// against the invisible "Opening Balances" account.
+    fn two_bank_book(
+        pre_amount: i64,
+        pre_date: chrono::NaiveDate,
+        in_amount: i64,
+        in_date: chrono::NaiveDate,
+    ) -> GnucashBook {
+        let raw_accounts = vec![
+            crate::RawAccount {
+                guid: "root".into(),
+                name: "Root Account".into(),
+                r#type: "ROOT".into(),
+                parent_guid: String::new(),
+            },
+            crate::RawAccount {
+                guid: "bank".into(),
+                name: "Bank Accounts".into(),
+                r#type: "BANK".into(),
+                parent_guid: "root".into(),
+            },
+            crate::RawAccount {
+                guid: "opening".into(),
+                name: "Opening Balances".into(),
+                r#type: "EQUITY".into(),
+                parent_guid: "root".into(),
+            },
+        ];
+        let raw_txns = vec![
+            crate::RawTransaction {
+                guid: "txn-pre".into(),
+                post_datetime: pre_date.and_hms_opt(12, 0, 0).unwrap(),
+                description: String::new(),
+            },
+            crate::RawTransaction {
+                guid: "txn-in".into(),
+                post_datetime: in_date.and_hms_opt(12, 0, 0).unwrap(),
+                description: String::new(),
+            },
+        ];
+        let raw_splits = vec![
+            crate::RawSplit {
+                tx_guid: "txn-pre".into(),
+                account_guid: "bank".into(),
+                value: rucash::Num::from(pre_amount),
+            },
+            crate::RawSplit {
+                tx_guid: "txn-pre".into(),
+                account_guid: "opening".into(),
+                value: rucash::Num::from(-pre_amount),
+            },
+            crate::RawSplit {
+                tx_guid: "txn-in".into(),
+                account_guid: "bank".into(),
+                value: rucash::Num::from(in_amount),
+            },
+            crate::RawSplit {
+                tx_guid: "txn-in".into(),
+                account_guid: "opening".into(),
+                value: rucash::Num::from(-in_amount),
+            },
+        ];
+        GnucashBook::from_raw_parts(raw_accounts, raw_txns, raw_splits)
+    }
+
     /// The example company's identity fields from the JSON; the remaining
     /// `company` keys are the flattened [`CompanyProfile`] fields, and the
     /// top-level `accounts` sub-object holds the period and report metadata.
@@ -2822,6 +2928,71 @@ mod tests {
         assert_eq!(out.total_assets_less_liabilities, [3000.0, 2000.0]);
         assert_eq!(out.net_assets, [3000.0, 2000.0]);
         assert_eq!(out.fixed_assets, [0.0, 0.0]);
+    }
+
+    /// The seeded in-period activity — the current book's splits dated
+    /// within the period — is equivalent to the full-history computation up
+    /// to the period end minus the book's own pre-period portion: on a book
+    /// that spans both periods (basic-1, transactions 2018 → 2021) the two
+    /// agree line for line.  The implementation uses the filtered
+    /// computation directly (see [`Frs105Accounts::with_prev_period_data`]);
+    /// this test pins the equivalence to the `full − before` view.
+    #[tokio::test]
+    async fn test_in_period_activity_equals_full_minus_before() {
+        let (_, gnucash) = load_example().await;
+        let period = example_accounts_meta().period();
+        let full = Frs105Accounts::compute_lines(&gnucash, period.end);
+        let before = Frs105Accounts::compute_lines(
+            &gnucash,
+            period.start - chrono::Duration::days(1),
+        );
+        let filtered = Frs105Accounts::compute_lines_between(
+            &gnucash,
+            Some(period.start),
+            Some(period.end),
+        );
+        assert_eq!((full - before).rounded(), filtered);
+    }
+
+    #[test]
+    fn test_prev_period_data_ignores_current_book_pre_period_splits() {
+        // The caller's previous-period figures are an override: the current
+        // book's own pre-period transactions are ignored entirely, and only
+        // its in-period splits add on top of the override.
+        let company = example_company();
+        let profile = example_profile();
+        let accounts = example_accounts_meta();
+        let period = accounts.period();
+        // Current book: £500 before the period (ignored) + £1,000 in-period.
+        let current_book = two_bank_book(
+            500,
+            period.start - chrono::Duration::days(5),
+            1000,
+            period.end - chrono::Duration::days(30),
+        );
+        let previous_book = bank_book(2000, period.start - chrono::Duration::days(1));
+
+        // Seeded: 2000 (override) + 1000 (in-period) = 3000; the £500
+        // pre-period split does not leak into the current column.
+        let seeded = Frs105Accounts::new(&current_book, &company, &profile, &accounts)
+            .with_prev_period_data(&PreviousPeriodData {
+                book: &previous_book,
+                filing: None,
+            });
+        assert_eq!(seeded.current_assets, [3000.0, 2000.0]);
+        assert_eq!(seeded.net_current_assets, [3000.0, 2000.0]);
+        assert_eq!(seeded.total_assets_less_liabilities, [3000.0, 2000.0]);
+        assert_eq!(seeded.net_assets, [3000.0, 2000.0]);
+        assert_eq!(seeded.fixed_assets, [0.0, 0.0]);
+
+        // Opt-out: the current column stays the pure book computation
+        // (500 + 1000), with the comparative from the previous book.
+        let no_seed = Frs105Accounts::new(&current_book, &company, &profile, &accounts)
+            .with_prev_period_data_no_seed(&PreviousPeriodData {
+                book: &previous_book,
+                filing: None,
+            });
+        assert_eq!(no_seed.current_assets, [1500.0, 2000.0]);
     }
 
     #[test]
