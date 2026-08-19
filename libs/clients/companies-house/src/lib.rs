@@ -1708,6 +1708,66 @@ pub fn parse_filed_accounts(html: &str) -> Result<FiledBalanceSheet, String> {
     })
 }
 
+impl FiledBalanceSheet {
+    /// Check the parsed figures are internally consistent: the balance-sheet
+    /// identities must hold for the filed period, with the reports' sign
+    /// conventions (creditor lines negative, provisions and accruals
+    /// positive magnitudes):
+    ///
+    /// 1. `net current assets == current assets + prepayments and accrued
+    ///    income + creditors within one year`
+    /// 2. `total assets less liabilities == fixed assets + net current
+    ///    assets`
+    /// 3. `net assets == total assets less liabilities + creditors after
+    ///    one year − provisions for liabilities − accruals and deferred
+    ///    income`
+    /// 4. `net assets == capital and reserves` — the A − L = E tie.
+    ///
+    /// Called-up share capital not paid is *not* folded into these
+    /// identities: the filed presentation renders it as a standalone
+    /// disclosure line above fixed assets (the CH micro-entity template
+    /// excludes it from the totals).  The filed lines are whole pounds and
+    /// may be rounded independently by the preparer, so the tolerance is
+    /// one pound.  A violation means the parse read the wrong context, or
+    /// the document itself is internally inconsistent.
+    pub fn validate(&self) -> Result<(), String> {
+        let f = &self.figures;
+        let mut errors: Vec<String> = Vec::new();
+        let mut tie = |label: &str, computed: f64, derived: f64| {
+            if (computed - derived).abs() > 1.0 {
+                errors.push(format!("{label}: {computed}, but {derived}"));
+            }
+        };
+        tie(
+            "net current assets",
+            f.net_current_assets,
+            f.current_assets + f.prepayments_and_accrued_income + f.creditors_within_1_year,
+        );
+        tie(
+            "total assets less liabilities",
+            f.total_assets_less_liabilities,
+            f.fixed_assets + f.net_current_assets,
+        );
+        tie(
+            "net assets",
+            f.net_assets,
+            f.total_assets_less_liabilities + f.creditors_after_1_year
+                - f.provisions_for_liabilities
+                - f.accruals_and_deferred_income,
+        );
+        tie(
+            "net assets vs capital and reserves",
+            f.net_assets,
+            f.capital_and_reserves,
+        );
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
+        }
+    }
+}
+
 /// Whether the IR holds a numeric fact for `stem` (either taxonomy prefix)
 /// in the given context.
 fn has_fact(facts: &ParsedIxBrlFacts, ctx: &str, stem: &str) -> bool {
@@ -3413,6 +3473,30 @@ mod tests {
         // filed period's figures.
         assert_ne!(f.current_assets, 68_946.0);
         assert_ne!(f.creditors_within_1_year, -570.0);
+    }
+
+    /// The parsed fixtures satisfy the balance-sheet identities
+    /// ([`FiledBalanceSheet::validate`]): the filed lines tie exactly
+    /// (whole pounds), including the 2023 fixture whose called-up share
+    /// capital not paid (100) is a standalone disclosure line excluded
+    /// from the totals.
+    #[test]
+    fn filed_balance_sheets_validate() {
+        let bs = parse_filed_accounts(&ch_micro_entity_ixbrl()).expect("the fixture parses");
+        bs.validate().expect("the 2023 fixture satisfies the identities");
+        let bs = parse_filed_accounts(&ch_micro_entity_ixbrl_2024()).expect("the fixture parses");
+        bs.validate().expect("the 2024 fixture satisfies the identities");
+    }
+
+    /// An internally inconsistent filing is reported: a broken tie fails
+    /// [`FiledBalanceSheet::validate`] with the violated identity.
+    #[test]
+    fn filed_balance_sheet_validate_reports_an_inconsistent_filing() {
+        let mut bs =
+            parse_filed_accounts(&ch_micro_entity_ixbrl_2024()).expect("the fixture parses");
+        bs.figures.net_assets += 2.0;
+        let err = bs.validate().expect_err("the broken tie must fail");
+        assert!(err.contains("net assets"), "the net-assets tie is reported: {err}");
     }
 
     /// A company with registration 2024-01-01, whose cached profile announces

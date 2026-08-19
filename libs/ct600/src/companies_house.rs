@@ -615,4 +615,154 @@ mod live_tests {
         assert!(ct600_xml.contains("GovTalkMessage"));
         assert!(ct600_xml.contains(&ch_profile.company_number));
     }
+
+    /// The carried-forward property for a real company (default `14510633`):
+    /// parse the latest accounts filing, generate the plausible
+    /// previous-period chart of accounts, and compute the next period with
+    /// **no transactions** — every line of the current column equals the
+    /// previous column, the filed provision carries forward positive into
+    /// both columns, and the positive provision reduces the totals
+    /// identically.  Both columns satisfy the balance-sheet identities
+    /// ([`Frs105Accounts::validate`]), and the parsed filing is internally
+    /// consistent ([`FiledBalanceSheet::validate`]).
+    #[tokio::test]
+    #[cfg_attr(
+        not(any(feature = "cached_live_tests", feature = "always_live_tests")),
+        ignore = "requires a Companies House API key for a cold cache"
+    )]
+    async fn live_no_transactions_carries_forward() {
+        use chrono::Datelike;
+
+        use reports::GnucashBook;
+        use reports::reports::uk_frs105_accounts::{Frs105Accounts, PreviousPeriodData};
+        use reports::{AccountsMeta, Company, CompanyProfile};
+
+        let number = std::env::var("COMPANY_NUMBER").unwrap_or_else(|_| "14510633".to_string());
+        let client = live_client();
+
+        // The latest accounts filing, parsed into a balance sheet.
+        let filing = client
+            .latest_accounts_filing(&number)
+            .await
+            .expect("fetch the latest accounts filing")
+            .expect("the company has an accounts filing");
+        let bs = filing.balance_sheet;
+        // The parsed filing is internally consistent (the identities hold).
+        bs.validate()
+            .expect("the filed balance sheet satisfies the balance-sheet identities");
+
+        // The company: registration date from the profile, so the
+        // accounting-period schedule is the real one; the pending period is
+        // the accounting period after the filed one.
+        let ch_profile = client
+            .get_company_profile(&number)
+            .await
+            .expect("fetch the company profile");
+        let mut company = Company::new(
+            &ch_profile.company_name,
+            "1234567890", // the CH profile carries no tax reference; placeholder
+            &ch_profile.company_number,
+        );
+        company.registration_date = ch_profile
+            .date_of_creation
+            .as_deref()
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .expect("the profile carries the registration date");
+        let pending = company.accounting_period_containing(
+            bs.period_end
+                .succ_opt()
+                .expect("the filed period end has a successor"),
+        );
+        let accounts_meta = AccountsMeta {
+            period: Some(pending),
+            fy1_year: pending.end.year() - 1,
+            fy2_year: pending.end.year(),
+            ..AccountsMeta::default()
+        };
+
+        // The next period with no transactions: an empty current book, so
+        // the seeded current column is the previous period's closing
+        // figures plus zero activity.
+        let previous_book = crate::test_utils::plausible_previous_book(&bs);
+        let empty_book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
+        let accounts = Frs105Accounts::new(
+            &empty_book,
+            &company,
+            &CompanyProfile::default(),
+            &accounts_meta,
+        )
+        .with_prev_period_data(&PreviousPeriodData {
+            book: &previous_book,
+            filing: Some(&bs),
+        });
+
+        // The plausible previous-period CoA reconciles with the filing.
+        accounts
+            .check_previous_period_matches_filing(&bs)
+            .expect("the plausible previous-period CoA must reconcile with the filed balance sheet");
+
+        // No transactions in the pending period: every line of the current
+        // column equals the previous column (carried forward).
+        assert_eq!(accounts.fixed_assets[0], accounts.fixed_assets[1]);
+        assert_eq!(accounts.current_assets[0], accounts.current_assets[1]);
+        assert_eq!(
+            accounts.prepayments_and_accrued_income[0],
+            accounts.prepayments_and_accrued_income[1]
+        );
+        assert_eq!(
+            accounts.creditors_within_1_year[0],
+            accounts.creditors_within_1_year[1]
+        );
+        assert_eq!(accounts.net_current_assets[0], accounts.net_current_assets[1]);
+        assert_eq!(
+            accounts.total_assets_less_liabilities[0],
+            accounts.total_assets_less_liabilities[1]
+        );
+        assert_eq!(
+            accounts.creditors_after_1_year[0],
+            accounts.creditors_after_1_year[1]
+        );
+        // The filed provision carries forward positive into both columns.
+        assert!(
+            accounts.provisions_for_liabilities[0] > 0.0,
+            "the provision is a positive magnitude: {}",
+            accounts.provisions_for_liabilities[0]
+        );
+        assert_eq!(
+            accounts.provisions_for_liabilities[0],
+            accounts.provisions_for_liabilities[1]
+        );
+        assert_eq!(
+            accounts.provisions_for_liabilities[0],
+            bs.figures.provisions_for_liabilities,
+            "the carried-forward provision equals the filed figure"
+        );
+        assert_eq!(
+            accounts.accruals_and_deferred_income[0],
+            accounts.accruals_and_deferred_income[1]
+        );
+        assert_eq!(accounts.net_assets[0], accounts.net_assets[1]);
+        assert_eq!(accounts.capital_and_reserves[0], accounts.capital_and_reserves[1]);
+
+        // The positive provision reduces the totals: net assets are the
+        // total assets less liabilities minus the provision (creditors
+        // after one year and accruals are zero for this filing), and the
+        // sheet balances — net assets == capital and reserves == the filed
+        // figures.
+        assert!(
+            (accounts.net_assets[0]
+                - (accounts.total_assets_less_liabilities[0]
+                    - accounts.provisions_for_liabilities[0]))
+            .abs()
+                < 0.005,
+            "the positive provision reduces net assets below the total"
+        );
+        assert_eq!(accounts.net_assets[0], bs.figures.net_assets);
+        assert_eq!(accounts.capital_and_reserves[0], bs.figures.capital_and_reserves);
+
+        // Both columns satisfy the balance-sheet identities.
+        accounts
+            .validate()
+            .expect("both columns satisfy the balance-sheet identities");
+    }
 }

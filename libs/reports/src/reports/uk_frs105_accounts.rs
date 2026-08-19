@@ -434,6 +434,71 @@ fn line_mismatch_error(label: &'static str, computed: f64, filed: f64) -> Frs105
     }
 }
 
+/// One violated balance-sheet identity in a computed [`Frs105Accounts`]
+/// column: a line that doesn't tie to the lines it is derived from, or a
+/// sheet that doesn't balance (net assets ≠ capital and reserves).
+#[derive(Debug, PartialEq, Snafu)]
+#[snafu(context(suffix(Validate)))]
+pub enum BalanceSheetCheckError {
+    #[snafu(display(
+        "column {column}: net current assets {computed}, but current assets + prepayments \
+         and accrued income + creditors within one year = {derived}"
+    ))]
+    NetCurrentAssetsMismatch {
+        column: &'static str,
+        computed: f64,
+        derived: f64,
+    },
+    #[snafu(display(
+        "column {column}: total assets less liabilities {computed}, but fixed assets + net \
+         current assets + called up share capital not paid = {derived}"
+    ))]
+    TotalAssetsLessLiabilitiesMismatch {
+        column: &'static str,
+        computed: f64,
+        derived: f64,
+    },
+    #[snafu(display(
+        "column {column}: net assets {computed}, but total assets less liabilities + \
+         creditors after one year − provisions for liabilities − accruals and deferred \
+         income = {derived}"
+    ))]
+    NetAssetsMismatch {
+        column: &'static str,
+        computed: f64,
+        derived: f64,
+    },
+    #[snafu(display(
+        "column {column}: the balance sheet does not balance — net assets {net_assets}, \
+         capital and reserves + called up share capital not paid {capital_and_reserves}"
+    ))]
+    BalanceSheetDoesNotBalance {
+        column: &'static str,
+        net_assets: f64,
+        capital_and_reserves: f64,
+    },
+}
+
+/// All the balance-sheet identities violated by a computed
+/// [`Frs105Accounts`] ([`Frs105Accounts::validate`]): every broken tie in
+/// both columns, collected so the caller sees all of them at once instead
+/// of failing at the first.
+#[derive(Debug, Default, PartialEq)]
+pub struct BalanceSheetCheckErrors {
+    pub errors: Vec<BalanceSheetCheckError>,
+}
+
+impl std::fmt::Display for BalanceSheetCheckErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for error in &self.errors {
+            writeln!(f, "{error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for BalanceSheetCheckErrors {}
+
 /// The 12 balance-sheet lines computed from one book up to an end date —
 /// the current-period column from the current book, and the previous-period
 /// column from the previous-period book when one is supplied (see
@@ -1759,6 +1824,79 @@ impl Frs105Accounts {
             Ok(())
         } else {
             Err(CheckErrors { errors })
+        }
+    }
+
+    /// Verify the balance-sheet identities hold in **both** columns, with
+    /// the reports' sign conventions (creditor lines negative, provisions
+    /// and accruals positive magnitudes):
+    ///
+    /// 1. `net current assets == current assets + prepayments and accrued
+    ///    income + creditors within one year`
+    /// 2. `total assets less liabilities == fixed assets + net current
+    ///    assets + called up share capital not paid`
+    /// 3. `net assets == total assets less liabilities + creditors after
+    ///    one year − provisions for liabilities − accruals and deferred
+    ///    income`
+    /// 4. `net assets == capital and reserves + called up share capital
+    ///    not paid` — the fundamental A − L = E tie.
+    ///
+    /// Identities 1–3 hold by construction for the computed report (they
+    /// *are* the computation); identity 4 is the genuine check — it fails
+    /// when the underlying book is unbalanced.  Called-up share capital
+    /// not paid (line A) appears in 2 and 4 because the builder adds it to
+    /// the totals but not to `net_current_assets` or `capital_and_reserves`.
+    ///
+    /// Returns `Ok(())` when both columns tie; otherwise every violation
+    /// is collected into a [`BalanceSheetCheckErrors`] rather than failing
+    /// at the first.
+    pub fn validate(&self) -> Result<(), BalanceSheetCheckErrors> {
+        let mut errors = Vec::new();
+        for (i, column) in [(0usize, "current"), (1usize, "previous")] {
+            let net_current = self.current_assets[i]
+                + self.prepayments_and_accrued_income[i]
+                + self.creditors_within_1_year[i];
+            if (self.net_current_assets[i] - net_current).abs() > 0.005 {
+                errors.push(BalanceSheetCheckError::NetCurrentAssetsMismatch {
+                    column,
+                    computed: self.net_current_assets[i],
+                    derived: net_current,
+                });
+            }
+            let total = self.fixed_assets[i]
+                + self.net_current_assets[i]
+                + self.called_up_share_capital_not_paid[i];
+            if (self.total_assets_less_liabilities[i] - total).abs() > 0.005 {
+                errors.push(BalanceSheetCheckError::TotalAssetsLessLiabilitiesMismatch {
+                    column,
+                    computed: self.total_assets_less_liabilities[i],
+                    derived: total,
+                });
+            }
+            let net_assets = self.total_assets_less_liabilities[i]
+                + self.creditors_after_1_year[i]
+                - self.provisions_for_liabilities[i]
+                - self.accruals_and_deferred_income[i];
+            if (self.net_assets[i] - net_assets).abs() > 0.005 {
+                errors.push(BalanceSheetCheckError::NetAssetsMismatch {
+                    column,
+                    computed: self.net_assets[i],
+                    derived: net_assets,
+                });
+            }
+            let capital = self.capital_and_reserves[i] + self.called_up_share_capital_not_paid[i];
+            if (self.net_assets[i] - capital).abs() > 0.005 {
+                errors.push(BalanceSheetCheckError::BalanceSheetDoesNotBalance {
+                    column,
+                    net_assets: self.net_assets[i],
+                    capital_and_reserves: capital,
+                });
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(BalanceSheetCheckErrors { errors })
         }
     }
 
@@ -3967,5 +4105,70 @@ mod tests {
             }],
         }];
         let _ = base.with_previous_year_adjustments(&adjustments);
+    }
+
+    #[tokio::test]
+    async fn validate_passes_on_a_balanced_report() {
+        // A report computed from a balanced book ties on every identity in
+        // both columns.
+        let (company, gnucash) = load_example().await;
+        let accounts = Frs105Accounts::new(
+            &gnucash,
+            &company,
+            &example_profile(),
+            &example_accounts_meta(),
+        )
+        .with_prev_period_data(&prev_from_same_book(&gnucash));
+        accounts.validate().expect("the balanced report ties on every identity");
+    }
+
+    #[tokio::test]
+    async fn validate_reports_a_net_assets_mismatch() {
+        // Breaking the net-assets tie reports the derived-line mismatch and
+        // the balance-sheet-does-not-balance violation together.
+        let (company, gnucash) = load_example().await;
+        let mut accounts = Frs105Accounts::new(
+            &gnucash,
+            &company,
+            &example_profile(),
+            &example_accounts_meta(),
+        )
+        .with_prev_period_data(&prev_from_same_book(&gnucash));
+        accounts.net_assets[0] += 1.0;
+
+        let err = accounts.validate().expect_err("the broken tie must fail");
+        assert!(
+            err.errors
+                .iter()
+                .any(|e| matches!(e, BalanceSheetCheckError::NetAssetsMismatch { column: "current", .. })),
+            "the derived net-assets mismatch is reported: {err}"
+        );
+        assert!(
+            err.errors.iter().any(|e| matches!(
+                e,
+                BalanceSheetCheckError::BalanceSheetDoesNotBalance { column: "current", .. }
+            )),
+            "the sheet no longer balances: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_reports_a_net_current_assets_mismatch() {
+        // Breaking the net-current-assets tie in the previous column.
+        let (company, gnucash) = load_example().await;
+        let mut accounts = Frs105Accounts::new(
+            &gnucash,
+            &company,
+            &example_profile(),
+            &example_accounts_meta(),
+        )
+        .with_prev_period_data(&prev_from_same_book(&gnucash));
+        accounts.net_current_assets[1] += 0.5;
+
+        let err = accounts.validate().expect_err("the broken tie must fail");
+        assert!(err.errors.iter().any(|e| matches!(
+            e,
+            BalanceSheetCheckError::NetCurrentAssetsMismatch { column: "previous", .. }
+        )));
     }
 }
