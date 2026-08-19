@@ -28,6 +28,7 @@ use chrono::Datelike;
 use companies_house::FiledBalanceSheet;
 use core_model::{AccountingPeriod, AccountsMeta, Company, CompanyProfile};
 use ixbrl_ir::ixbrl_fmt::*;
+use snafu::Snafu;
 use crate::GnucashBook;
 
 /// The report title written into the generated document (the title page and
@@ -136,31 +137,240 @@ impl<'a> PreviousPeriodData<'a> {
     }
 }
 
-/// A previous-period chart of accounts that does not reconcile with the
-/// filed balance sheet: the per-line differences (computed from the book vs
-/// filed) and, when the filing's period does not align with the previous
-/// period, the two period ends.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreviousPeriodMismatch {
-    /// `(filing period end, previous period end)` when they differ.
-    pub period_mismatch: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
-    /// Per-line differences: `(label, computed from the book, filed)`.
-    pub lines: Vec<(&'static str, f64, f64)>,
+/// The account paths each FRS 105 balance-sheet line's computation reads
+/// (a path covers its child accounts too).  Shared by
+/// [`Frs105Accounts::compute_lines`] (the leaf lines sum these paths) and
+/// the previous-period check's error messages ([`Frs105CheckError`]), so
+/// the errors always name the accounts the computation actually used.
+const LINE_ACCOUNTS: [(&str, &[&str]); 8] = [
+    ("fixed assets", &["Assets:Capital Equipment"]),
+    (
+        "current assets",
+        &[
+            "Accounts Receivable",
+            "Assets:Owed To Us",
+            "VAT:Input",
+            "VAT:Settlement:Input",
+            "Assets:VAT Repayments Due",
+            "Bank Accounts",
+        ],
+    ),
+    ("prepayments and accrued income", &["Assets:Prepayments and Accrued Income"]),
+    (
+        "creditors within one year",
+        &[
+            "Accounts Payable",
+            "VAT:Output",
+            "VAT:Settlement:Output",
+            "Liabilities:Credit Cards",
+            "Liabilities:Owed Corporation Tax",
+        ],
+    ),
+    ("creditors after one year", &["Liabilities:Creditors After 1 Year"]),
+    ("provisions for liabilities", &["Liabilities:Provisions"]),
+    ("accruals and deferred income", &["Liabilities:Accruals and Deferred Income"]),
+    (
+        "capital and reserves",
+        &[
+            "Equity:Shareholdings",
+            "Income",
+            "Expenses",
+            "Equity:Dividends",
+            "Equity:Corporation Tax",
+        ],
+    ),
+];
+
+/// One mismatch between the previous-period accounts computed from the
+/// previous CoA and the previous period's filed balance sheet: a differing
+/// FRS 105 line (one variant per line, naming the accounts or derivation
+/// the computation read and the computed vs filed values) or the
+/// period-dates mismatch.
+#[derive(Debug, PartialEq, Snafu)]
+pub enum Frs105CheckError {
+    #[snafu(display("fixed assets: {accounts} computed {computed}, the filing has {filed}"))]
+    FixedAssetsMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display(
+        "called up share capital not paid: {accounts} computed {computed}, the filing has {filed}"
+    ))]
+    CalledUpShareCapitalNotPaidMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display("current assets: {accounts} computed {computed}, the filing has {filed}"))]
+    CurrentAssetsMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display(
+        "prepayments and accrued income: {accounts} computed {computed}, the filing has {filed}"
+    ))]
+    PrepaymentsAndAccruedIncomeMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display(
+        "creditors within one year: {accounts} computed {computed}, the filing has {filed}"
+    ))]
+    CreditorsWithinOneYearMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display("net current assets: {accounts} computed {computed}, the filing has {filed}"))]
+    NetCurrentAssetsMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display(
+        "total assets less liabilities: {accounts} computed {computed}, the filing has {filed}"
+    ))]
+    TotalAssetsLessLiabilitiesMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display(
+        "creditors after one year: {accounts} computed {computed}, the filing has {filed}"
+    ))]
+    CreditorsAfterOneYearMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display(
+        "provisions for liabilities: {accounts} computed {computed}, the filing has {filed}"
+    ))]
+    ProvisionsForLiabilitiesMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display(
+        "accruals and deferred income: {accounts} computed {computed}, the filing has {filed}"
+    ))]
+    AccrualsAndDeferredIncomeMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display("net assets: {accounts} computed {computed}, the filing has {filed}"))]
+    NetAssetsMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display("capital and reserves: {accounts} computed {computed}, the filing has {filed}"))]
+    CapitalAndReservesMismatch {
+        computed: f64,
+        filed: f64,
+        accounts: String,
+    },
+    #[snafu(display(
+        "period dates: the filing's period ends {filed_end}, the previous period ends {prev_end}"
+    ))]
+    PeriodDatesMismatch {
+        filed_end: chrono::NaiveDate,
+        prev_end: chrono::NaiveDate,
+    },
 }
 
-impl std::fmt::Display for PreviousPeriodMismatch {
+/// All the mismatches found by
+/// [`Frs105Accounts::check_previous_period_matches_filing`]: every
+/// differing line and/or the period-dates mismatch, collected so the caller
+/// sees all of them at once instead of failing at the first.
+#[derive(Debug, Default, PartialEq)]
+pub struct CheckErrors {
+    pub errors: Vec<Frs105CheckError>,
+}
+
+impl std::fmt::Display for CheckErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some((filed_end, prev_end)) = self.period_mismatch {
-            writeln!(
-                f,
-                "previous-period chart of accounts does not match the filing: filing period \
-                 ends {filed_end}, previous period ends {prev_end}"
-            )?;
-        }
-        for (label, computed, filed) in &self.lines {
-            writeln!(f, "  {label}: book computes {computed}, filing has {filed}")?;
+        for error in &self.errors {
+            writeln!(f, "{error}")?;
         }
         Ok(())
+    }
+}
+
+impl std::error::Error for CheckErrors {}
+
+/// The computation inputs a line reads, for the check's error messages:
+/// the account paths for the leaf lines ([`LINE_ACCOUNTS`]), the derivation
+/// for the derived lines, and the note for line A (no account path).
+fn line_accounts(label: &'static str) -> String {
+    match label {
+        "called up share capital not paid" => {
+            "no account path (line A of the FRS 105 format, supplied via \
+             with_called_up_share_capital_not_paid)"
+                .into()
+        }
+        "net current assets" => {
+            "derived: current assets + prepayments and accrued income + creditors within one year"
+                .into()
+        }
+        "total assets less liabilities" => {
+            "derived: fixed assets + current assets + prepayments and accrued income \
+             + creditors within one year"
+                .into()
+        }
+        "net assets" => {
+            "derived: total assets less liabilities − creditors after one year − provisions \
+             for liabilities − accruals and deferred income"
+                .into()
+        }
+        other => LINE_ACCOUNTS
+            .iter()
+            .find(|(l, _)| *l == other)
+            .map(|(_, paths)| paths.join(", "))
+            .expect("line label in LINE_ACCOUNTS"),
+    }
+}
+
+/// The [`Frs105CheckError`] variant for one differing line, carrying the
+/// computation's account inputs and the computed vs filed values.
+fn line_mismatch_error(label: &'static str, computed: f64, filed: f64) -> Frs105CheckError {
+    let accounts = line_accounts(label);
+    match label {
+        "fixed assets" => Frs105CheckError::FixedAssetsMismatch { computed, filed, accounts },
+        "called up share capital not paid" => {
+            Frs105CheckError::CalledUpShareCapitalNotPaidMismatch { computed, filed, accounts }
+        }
+        "current assets" => Frs105CheckError::CurrentAssetsMismatch { computed, filed, accounts },
+        "prepayments and accrued income" => {
+            Frs105CheckError::PrepaymentsAndAccruedIncomeMismatch { computed, filed, accounts }
+        }
+        "creditors within one year" => {
+            Frs105CheckError::CreditorsWithinOneYearMismatch { computed, filed, accounts }
+        }
+        "net current assets" => {
+            Frs105CheckError::NetCurrentAssetsMismatch { computed, filed, accounts }
+        }
+        "total assets less liabilities" => {
+            Frs105CheckError::TotalAssetsLessLiabilitiesMismatch { computed, filed, accounts }
+        }
+        "creditors after one year" => {
+            Frs105CheckError::CreditorsAfterOneYearMismatch { computed, filed, accounts }
+        }
+        "provisions for liabilities" => {
+            Frs105CheckError::ProvisionsForLiabilitiesMismatch { computed, filed, accounts }
+        }
+        "accruals and deferred income" => {
+            Frs105CheckError::AccrualsAndDeferredIncomeMismatch { computed, filed, accounts }
+        }
+        "net assets" => Frs105CheckError::NetAssetsMismatch { computed, filed, accounts },
+        "capital and reserves" => {
+            Frs105CheckError::CapitalAndReservesMismatch { computed, filed, accounts }
+        }
+        other => unreachable!("unknown line label {other}"),
     }
 }
 
@@ -478,24 +688,22 @@ impl Frs105Accounts {
         // Round to whole pence so computed values match the reference exactly.
         let round2 = |v: f64| (v * 100.0).round() / 100.0;
 
-        let fixed_assets = round2(line("Assets:Capital Equipment"));
+        // Leaf lines: each sums its [`LINE_ACCOUNTS`] paths (a path covers
+        // its child accounts) and rounds once — the same paths the previous-
+        // period check's error messages name.
+        let leaf = |label: &str| -> f64 {
+            let paths = LINE_ACCOUNTS
+                .iter()
+                .find(|(l, _)| *l == label)
+                .expect("line label in LINE_ACCOUNTS")
+                .1;
+            round2(paths.iter().map(|path| line(path)).sum())
+        };
 
-        let debtors = line("Accounts Receivable") + line("Assets:Owed To Us");
-        let vat_refund_due = line("VAT:Input")
-            + line("VAT:Settlement:Input")
-            + line("Assets:VAT Repayments Due");
-        let bank = line("Bank Accounts");
-        let current_assets = round2(debtors + vat_refund_due + bank);
-
-        let prepayments_and_accrued_income =
-            round2(line("Assets:Prepayments and Accrued Income"));
-
-        let trade_creditors = line("Accounts Payable");
-        let other_creditors = line("VAT:Output")
-            + line("VAT:Settlement:Output")
-            + line("Liabilities:Credit Cards")
-            + line("Liabilities:Owed Corporation Tax");
-        let creditors_within_1_year = round2(trade_creditors + other_creditors);
+        let fixed_assets = leaf("fixed assets");
+        let current_assets = leaf("current assets");
+        let prepayments_and_accrued_income = leaf("prepayments and accrued income");
+        let creditors_within_1_year = leaf("creditors within one year");
 
         let net_current_assets = round2(
             current_assets + prepayments_and_accrued_income + creditors_within_1_year,
@@ -505,9 +713,9 @@ impl Frs105Accounts {
                 + creditors_within_1_year,
         );
 
-        let creditors_after_1_year = round2(line("Liabilities:Creditors After 1 Year"));
-        let provisions_for_liabilities = round2(line("Liabilities:Provisions"));
-        let accruals_and_deferred_income = round2(line("Liabilities:Accruals and Deferred Income"));
+        let creditors_after_1_year = leaf("creditors after one year");
+        let provisions_for_liabilities = leaf("provisions for liabilities");
+        let accruals_and_deferred_income = leaf("accruals and deferred income");
 
         // Net assets deduct the after-one-year creditors and the provisions
         // / accruals — the lines render as positive magnitudes (matching the
@@ -519,12 +727,7 @@ impl Frs105Accounts {
                 - accruals_and_deferred_income,
         );
 
-        let share_capital_equity = line("Equity:Shareholdings");
-        let profit_loss = line("Income") + line("Expenses");
-        let dividends = line("Equity:Dividends");
-        let corporation_tax = line("Equity:Corporation Tax");
-        let capital_and_reserves =
-            round2(share_capital_equity + profit_loss + dividends + corporation_tax);
+        let capital_and_reserves = leaf("capital and reserves");
 
         ComputedLines {
             fixed_assets,
@@ -1251,23 +1454,25 @@ impl Frs105Accounts {
 
     /// Verify the previous-period comparative column against a filed balance
     /// sheet: the comparative column was computed from the previous-period
-    /// chart of accounts ([`Self::new`]'s `prev.book`), and each of the 12
-    /// lines is compared with the filing's figures.  The filing's period end
-    /// must also align with the previous period's end (the day before the
-    /// current period starts).
+    /// chart of accounts ([`Self::with_prev_period_data`]'s `prev.book`),
+    /// and each of the 12 lines is compared with the filing's figures.  The
+    /// filing's period end must also align with the previous period's end
+    /// (the day before the current period starts).
     ///
     /// Returns `Ok(())` when the book reconciles with the filing;
-    /// [`PreviousPeriodMismatch`] (per-line differences, and any period
-    /// misalignment) otherwise.
+    /// otherwise every mismatch is collected into a [`CheckErrors`] — one
+    /// [`Frs105CheckError`] per differing line (naming the accounts or
+    /// derivation the computation read) and/or the period-dates mismatch —
+    /// rather than failing at the first.
     pub fn check_previous_period_matches_filing(
         &self,
         filing: &FiledBalanceSheet,
-    ) -> Result<(), PreviousPeriodMismatch> {
+    ) -> Result<(), CheckErrors> {
         let prev_end = self.accounts.period().start - chrono::Duration::days(1);
-        let mut lines: Vec<(&'static str, f64, f64)> = Vec::new();
+        let mut errors: Vec<Frs105CheckError> = Vec::new();
         let mut check = |label: &'static str, computed: f64, filed: f64| {
             if (computed - filed).abs() > 0.005 {
-                lines.push((label, computed, filed));
+                errors.push(line_mismatch_error(label, computed, filed));
             }
         };
         check("fixed assets", self.fixed_assets[1], filing.figures.fixed_assets);
@@ -1318,14 +1523,16 @@ impl Frs105Accounts {
             self.capital_and_reserves[1],
             filing.figures.capital_and_reserves,
         );
-        let period_mismatch = (filing.period_end != prev_end).then_some((filing.period_end, prev_end));
-        if lines.is_empty() && period_mismatch.is_none() {
+        if filing.period_end != prev_end {
+            errors.push(Frs105CheckError::PeriodDatesMismatch {
+                filed_end: filing.period_end,
+                prev_end,
+            });
+        }
+        if errors.is_empty() {
             Ok(())
         } else {
-            Err(PreviousPeriodMismatch {
-                period_mismatch,
-                lines,
-            })
+            Err(CheckErrors { errors })
         }
     }
 
@@ -3082,12 +3289,22 @@ mod tests {
         let err = out
             .check_previous_period_matches_filing(&conflicting)
             .expect_err("the conflicting filing must not reconcile");
-        assert!(err
-            .lines
-            .iter()
-            .any(|(label, computed, filed)| *label == "current assets"
-                && *computed == 2000.0
-                && *filed == 5000.0));
+        assert!(err.errors.iter().any(|e| matches!(
+            e,
+            Frs105CheckError::CurrentAssetsMismatch {
+                computed,
+                filed,
+                accounts,
+            } if *computed == 2000.0 && *filed == 5000.0
+                && accounts.contains("Bank Accounts")
+        )));
+        // The collector displays every mismatch, naming the line, the
+        // accounts the computation read and both values.
+        let display = format!("{err}");
+        assert!(display.contains("current assets"));
+        assert!(display.contains("Bank Accounts"));
+        assert!(display.contains("2000"));
+        assert!(display.contains("5000"));
 
         // A filing for a different period is flagged too.
         let wrong_period = FiledBalanceSheet {
@@ -3097,10 +3314,14 @@ mod tests {
         let err = out
             .check_previous_period_matches_filing(&wrong_period)
             .expect_err("the wrong-period filing must not reconcile");
-        assert_eq!(
-            err.period_mismatch,
-            Some((prev_end - chrono::Duration::days(10), prev_end))
-        );
+        assert!(err.errors.iter().any(|e| matches!(
+            e,
+            Frs105CheckError::PeriodDatesMismatch {
+                filed_end,
+                prev_end: reported_prev_end,
+            } if *filed_end == prev_end - chrono::Duration::days(10)
+                && *reported_prev_end == prev_end
+        )));
     }
 
     #[test]

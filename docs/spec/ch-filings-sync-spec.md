@@ -467,7 +467,7 @@ impl Frs105Accounts {
     pub fn check_previous_period_matches_filing(
         &self,
         filing: &FiledBalanceSheet,
-    ) -> Result<(), PreviousPeriodMismatch> { /* 12 lines vs the filing + period_end */ }
+    ) -> Result<(), CheckErrors> { /* every mismatch collected: 12 line variants + period */ }
 }
 ```
 
@@ -485,9 +485,12 @@ let accounts = Frs105Accounts::new(
 
 - **tally-cli**: same `same_book` pattern (it runs from a local config + ledger).
 - **Unit test**: `test_check_previous_period_matches_filing` — a previous book
-  that reconciles passes, a conflicting one reports exactly the differing lines,
-  and a wrong-period filing is flagged via `period_mismatch`. The
-  `ct600::test_utils::plausible_previous_book` generator builds a plausible
+  that reconciles passes, a conflicting one reports exactly the differing lines
+  (each as a [`Frs105CheckError`] variant naming the accounts the computation
+  read), and a wrong-period filing is flagged via the `PeriodDatesMismatch`
+  variant; all mismatches are collected into `CheckErrors` rather than failing
+  at the first. The `ct600::test_utils::plausible_previous_book` generator
+  builds a plausible
   previous-period CoA from a filing (aggregates distributed across the
   contributing accounts, reports' sign convention) and the live full-year test
   asserts it reconciles.
