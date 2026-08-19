@@ -1872,6 +1872,58 @@ impl OfficerList {
     }
 }
 
+/// Build the reports' descriptive company profile ([`core_model::CompanyProfile`])
+/// from a fetched Companies House profile and its officers: the
+/// registered-office address (premises, line 1, line 2 → address lines;
+/// region → county; locality → location; postal code → postcode), the SIC
+/// codes, the jurisdiction and the current directors
+/// ([`OfficerList::directors`] — officers in a director role who have not
+/// resigned).  Companies House does not hold the remaining profile fields
+/// (contacts, accountant/auditor, taxonomy dimensions, logo), so they stay
+/// blank for the config to supply.
+pub fn reports_company_profile(
+    profile: &CompanyProfile,
+    officers: Option<&OfficerList>,
+) -> core_model::CompanyProfile {
+    core_model::CompanyProfile {
+        directors: officers.map(OfficerList::directors).unwrap_or_default(),
+        address_lines: profile
+            .registered_office_address
+            .as_ref()
+            .map(|a| {
+                [
+                    a.premises.as_deref(),
+                    a.address_line_1.as_deref(),
+                    a.address_line_2.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+            })
+            .unwrap_or_default(),
+        county: profile
+            .registered_office_address
+            .as_ref()
+            .and_then(|a| a.region.clone())
+            .filter(|s| !s.is_empty()),
+        location: profile
+            .registered_office_address
+            .as_ref()
+            .and_then(|a| a.locality.clone())
+            .unwrap_or_default(),
+        postcode: profile
+            .registered_office_address
+            .as_ref()
+            .and_then(|a| a.postal_code.clone())
+            .unwrap_or_default(),
+        sic_codes: profile.sic_codes.clone().unwrap_or_default(),
+        jurisdiction: profile.jurisdiction.clone().unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
 /// The next accounting period to file, with its filing deadlines.
 ///
 /// See [`CompaniesHouseClient::next_accounting_period`] for how the dates are
@@ -2733,6 +2785,59 @@ mod tests {
             .expect("serving from cache should succeed");
         assert_eq!(fetched.items.len(), 4);
         assert_eq!(fetched.directors(), vec!["A Bloggs", "C Jones Ltd"]);
+    }
+
+    /// `reports_company_profile` maps the fetched profile + officers onto the
+    /// reports' descriptive profile: the address (premises + lines 1/2, with
+    /// the empty line dropped), county, location, postcode, SIC codes,
+    /// jurisdiction and the current directors; the fields Companies House
+    /// does not hold stay blank.  With no officers the directors stay empty.
+    #[test]
+    fn reports_company_profile_maps_profile_and_directors() {
+        let mut ch = fixture_profile("14510633", "TEST LTD");
+        ch.registered_office_address = Some(RegisteredOfficeAddress {
+            premises: Some("1".to_string()),
+            address_line_1: Some("High Street".to_string()),
+            address_line_2: Some(String::new()),
+            care_of: None,
+            country: None,
+            locality: Some("London".to_string()),
+            po_box: None,
+            postal_code: Some("SW1A 1AA".to_string()),
+            region: Some("Greater London".to_string()),
+        });
+        ch.sic_codes = Some(vec!["62020".to_string()]);
+        let officers = OfficerList {
+            items: vec![
+                Officer {
+                    name: Some("A Bloggs".to_string()),
+                    officer_role: Some("director".to_string()),
+                    appointed_on: None,
+                    resigned_on: None,
+                },
+                Officer {
+                    name: Some("B Smith".to_string()),
+                    officer_role: Some("secretary".to_string()),
+                    appointed_on: None,
+                    resigned_on: None,
+                },
+            ],
+        };
+
+        let profile = reports_company_profile(&ch, Some(&officers));
+        assert_eq!(profile.directors, vec!["A Bloggs"]);
+        assert_eq!(profile.address_lines, vec!["1", "High Street"]);
+        assert_eq!(profile.county.as_deref(), Some("Greater London"));
+        assert_eq!(profile.location, "London");
+        assert_eq!(profile.postcode, "SW1A 1AA");
+        assert_eq!(profile.sic_codes, vec!["62020"]);
+        assert_eq!(profile.jurisdiction, "England/Wales");
+        // Fields Companies House does not hold stay blank.
+        assert_eq!(profile.contact_name, "");
+        assert_eq!(profile.logo_b64, None);
+
+        let no_officers = reports_company_profile(&ch, None);
+        assert!(no_officers.directors.is_empty());
     }
 
     /// The cached filing history is served without any network access, and the

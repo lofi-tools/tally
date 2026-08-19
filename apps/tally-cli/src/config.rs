@@ -408,7 +408,7 @@ impl AccountsConfig {
             fy2_year: self.fy2_year,
             associated_companies: self.associated_companies.unwrap_or(0),
             report_date: self.report_date,
-            authorised_date: self.authorised_date,
+            authorised_date: Some(self.authorised_date),
             incorporation_date: self.incorporation_date.unwrap_or_default(),
             signed_by: self.signed_by.unwrap_or_default(),
             // The employee counts default to 1 for each of the two financial
@@ -1379,7 +1379,7 @@ mod tests {
         );
         let meta = file.accounts.into_meta();
         assert_eq!(meta.report_date, date(2021, 3, 1));
-        assert_eq!(meta.authorised_date, date(2021, 2, 1));
+        assert_eq!(meta.authorised_date, Some(date(2021, 2, 1)));
         assert_eq!(meta.signed_by, "");
         assert_eq!(
             meta.average_employees,

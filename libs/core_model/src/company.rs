@@ -213,8 +213,12 @@ pub struct AccountsMeta {
     pub associated_companies: u32,
     /// Date the report was published / issued.
     pub report_date: NaiveDate,
-    /// Date the financial statements were authorised for issue.
-    pub authorised_date: NaiveDate,
+    /// Date the financial statements were authorised for issue (the signing
+    /// date).  `None` = not supplied: the accounts builder defaults it to
+    /// one day before the earliest filing deadline, capped at today (see
+    /// `Frs105Accounts::signing_date`).
+    #[serde(default)]
+    pub authorised_date: Option<NaiveDate>,
     /// Date of incorporation / formation.
     pub incorporation_date: NaiveDate,
     /// Name of the director who signed the report.
@@ -247,7 +251,7 @@ impl Default for AccountsMeta {
             fy2_year: DEFAULT_FY2_YEAR,
             associated_companies: 0,
             report_date: NaiveDate::default(),
-            authorised_date: NaiveDate::default(),
+            authorised_date: None,
             incorporation_date: NaiveDate::default(),
             signed_by: String::new(),
             average_employees: HashMap::new(),

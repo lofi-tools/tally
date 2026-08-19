@@ -66,6 +66,13 @@ pub struct Frs105Accounts {
     /// `None` for reports parsed from iXBRL ([`Self::from_ixbrl_node`]),
     /// which have no ledger.
     book: Option<GnucashBook>,
+    /// The filing deadlines the default signing date is capped by, when no
+    /// explicit `authorised_date` is supplied: the earliest of the accounts
+    /// (Companies House) and CT600 (HMRC) deadlines.  Defaults to the
+    /// period-end schedule (9 / 12 months after the period end); override
+    /// with [`Self::with_signing_deadlines`] when the real deadlines are
+    /// known (e.g. the company profile's `next_accounts`).
+    filing_deadlines: FilingDeadlines,
     /// Tangible / fixed assets.
     pub fixed_assets: [f64; 2],
     /// Called-up share capital not paid — line A of the FRS 105
@@ -102,6 +109,47 @@ pub struct Frs105Accounts {
     /// Capital and reserves (share capital + profit/loss + dividends +
     /// corporation tax).
     pub capital_and_reserves: [f64; 2],
+}
+
+/// The filing deadlines that cap the default signing date: the deadline to
+/// file the accounts with Companies House and the deadline to file the
+/// CT600 corporation-tax return with HMRC.  [`Frs105Accounts::signing_date`]
+/// defaults to one day before the **earliest** of the two, capped at today.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilingDeadlines {
+    /// Deadline to file the accounts with Companies House (the profile's
+    /// `next_accounts.due_on`, else 9 months after the period end).
+    pub companies_house_accounts: chrono::NaiveDate,
+    /// Deadline to file the CT600 corporation-tax return with HMRC (12
+    /// months after the period end).
+    pub hmrc_ct600: chrono::NaiveDate,
+}
+
+impl FilingDeadlines {
+    /// The default deadlines from the period end: the accounts are due 9
+    /// months after the period end, the CT600 12 months after.
+    pub fn from_period_end(period_end: chrono::NaiveDate) -> Self {
+        Self {
+            companies_house_accounts: period_end + chrono::Months::new(9),
+            hmrc_ct600: period_end + chrono::Months::new(12),
+        }
+    }
+
+    /// The earliest of the two deadlines — the binding one for the signing
+    /// date.
+    pub fn earliest(&self) -> chrono::NaiveDate {
+        self.companies_house_accounts.min(self.hmrc_ct600)
+    }
+}
+
+/// The default signing date: one day before `earliest_deadline`, capped at
+/// `today` — the financial statements cannot be authorised in the future,
+/// and must be signed before the last day to file.
+pub fn default_signing_date(
+    today: chrono::NaiveDate,
+    earliest_deadline: chrono::NaiveDate,
+) -> chrono::NaiveDate {
+    (earliest_deadline - chrono::Duration::days(1)).min(today)
 }
 
 /// The previous period's input to the accounts builder: the full chart of
@@ -494,6 +542,7 @@ impl Frs105Accounts {
             profile: profile.clone(),
             accounts: accounts_meta.clone(),
             book: Some(gnucash.clone()),
+            filing_deadlines: FilingDeadlines::from_period_end(period.end),
             fixed_assets: col(current.fixed_assets),
             // Line A (called-up share capital not paid) has no account path:
             // it defaults to zero and is supplied via
@@ -510,6 +559,28 @@ impl Frs105Accounts {
             net_assets: col(current.net_assets),
             capital_and_reserves: col(current.capital_and_reserves),
         }
+    }
+
+    /// The date the financial statements were authorised for issue (the
+    /// signing date): the explicitly-supplied `accounts.authorised_date`,
+    /// else the default — one day before the earliest filing deadline
+    /// ([`FilingDeadlines::earliest`]), capped at today (the statements
+    /// cannot be authorised in the future).  Override the deadlines with
+    /// [`Self::with_signing_deadlines`].
+    pub fn signing_date(&self) -> chrono::NaiveDate {
+        self.accounts.authorised_date.unwrap_or_else(|| {
+            default_signing_date(chrono::Utc::now().date_naive(), self.filing_deadlines.earliest())
+        })
+    }
+
+    /// Override the filing deadlines the default signing date is capped by
+    /// ([`Self::signing_date`]) with the real ones — e.g. from the company
+    /// profile's `next_accounts.due_on` and the CT600 deadline (see
+    /// `companies_house::next_accounting_period_from`).  Only affects the
+    /// default: an explicitly-supplied `accounts.authorised_date` wins.
+    pub fn with_signing_deadlines(mut self, deadlines: FilingDeadlines) -> Self {
+        self.filing_deadlines = deadlines;
+        self
     }
 
     /// Supply the previous period's chart of accounts, recomputing both
@@ -787,7 +858,7 @@ impl Frs105Accounts {
             non_numeric_fmt(
                 "uk-core:DateAuthorisationFinancialStatementsForIssue",
                 "ctxt-2",
-                &format_date(&self.accounts.authorised_date),
+                &format_date(&self.signing_date()),
                 "ixt2:datedaymonthyearen",
             ),
             non_numeric_fmt(
@@ -1368,7 +1439,9 @@ impl Frs105Accounts {
         // earlier `accounts` binding.
         let accounts = AccountsMeta {
             report_date: parse_date(&text("uk-bus:BusinessReportPublicationDate")),
-            authorised_date: parse_date(&text("uk-core:DateAuthorisationFinancialStatementsForIssue")),
+            authorised_date: Some(parse_date(
+                &text("uk-core:DateAuthorisationFinancialStatementsForIssue"),
+            )),
             incorporation_date: parse_date(&text("uk-bus:DateFormationOrIncorporation")),
             signed_by: String::new(), // not serialised to iXBRL
             average_employees: HashMap::from([
@@ -1389,6 +1462,9 @@ impl Frs105Accounts {
             // Parsed from iXBRL: no ledger, so the seeding step in
             // `with_prev_period_data` has no book to read activity from.
             book: None,
+            // The signing date is recovered from the document (explicit);
+            // the deadlines only back the default when it is absent.
+            filing_deadlines: FilingDeadlines::from_period_end(period_end),
             fixed_assets: [
                 fact("uk-core:FixedAssets", "ctxt-15"),
                 fact("uk-core:FixedAssets", "ctxt-16"),
@@ -1925,7 +2001,7 @@ impl Frs105Accounts {
                 span(vec![date_fact(
                     "uk-core:DateAuthorisationFinancialStatementsForIssue",
                     "ctxt-2",
-                    &self.accounts.authorised_date,
+                    &self.signing_date(),
                 )]),
                 span_text("."),
             ])),
@@ -2401,6 +2477,11 @@ mod tests {
     /// column is computed from its own history (the historical behaviour).
     fn prev_from_same_book(book: &GnucashBook) -> PreviousPeriodData<'_> {
         PreviousPeriodData { book, filing: None }
+    }
+
+    /// A calendar date, for the tests' readability.
+    fn date(y: i32, m: u32, d: u32) -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
     }
 
     /// A book with one transaction dated `date`: a "Bank Accounts" split of
@@ -3332,11 +3413,13 @@ mod tests {
         let company = example_company();
         let profile = example_profile();
         let accounts = example_accounts_meta();
+        let period_end = accounts.period().end;
         let base = Frs105Accounts {
             company,
             profile,
             accounts,
             book: None,
+            filing_deadlines: FilingDeadlines::from_period_end(period_end),
             fixed_assets: [100.0, 200.0],
             called_up_share_capital_not_paid: [0.0, 0.0],
             current_assets: [300.0, 400.0],
@@ -3409,6 +3492,82 @@ mod tests {
     }
 
 
+
+    #[test]
+    fn default_signing_date_is_day_before_deadline_capped_at_today() {
+        // The deadline is still ahead: the signing date is today.
+        assert_eq!(
+            default_signing_date(date(2025, 6, 1), date(2025, 9, 30)),
+            date(2025, 6, 1)
+        );
+        // The deadline has passed: one day before the last day to file.
+        assert_eq!(
+            default_signing_date(date(2025, 10, 1), date(2025, 9, 30)),
+            date(2025, 9, 29)
+        );
+    }
+
+    #[test]
+    fn filing_deadlines_from_period_end_and_earliest() {
+        let deadlines = FilingDeadlines::from_period_end(date(2024, 11, 30));
+        assert_eq!(deadlines.companies_house_accounts, date(2025, 8, 30));
+        assert_eq!(deadlines.hmrc_ct600, date(2025, 11, 30));
+        // The accounts deadline is the binding one.
+        assert_eq!(deadlines.earliest(), date(2025, 8, 30));
+    }
+
+    #[test]
+    fn signing_date_explicit_wins_and_deadlines_override_the_default() {
+        let company = example_company();
+        let profile = example_profile();
+        let book = GnucashBook::from_raw_parts(Vec::new(), Vec::new(), Vec::new());
+        let period = AccountingPeriod {
+            start: date(2024, 1, 1),
+            end: date(2024, 11, 30),
+        };
+        let meta = AccountsMeta {
+            period: Some(period),
+            authorised_date: None,
+            ..example_accounts_meta()
+        };
+
+        // No explicit signing date: it defaults to one day before the
+        // earliest deadline (accounts 9 months after the period end),
+        // capped at today.
+        let accounts = Frs105Accounts::new(&book, &company, &profile, &meta);
+        let today = chrono::Utc::now().date_naive();
+        assert_eq!(
+            accounts.signing_date(),
+            default_signing_date(today, date(2025, 8, 30))
+        );
+
+        // Overriding the deadlines re-defaults from the given ones.
+        let overridden = accounts.clone().with_signing_deadlines(FilingDeadlines {
+            companies_house_accounts: date(2025, 11, 29),
+            hmrc_ct600: date(2025, 11, 30),
+        });
+        assert_eq!(
+            overridden.signing_date(),
+            default_signing_date(today, date(2025, 11, 29))
+        );
+
+        // An explicitly-supplied date wins over both the default and the
+        // deadline override.
+        let explicit = Frs105Accounts::new(
+            &book,
+            &company,
+            &profile,
+            &AccountsMeta {
+                authorised_date: Some(date(2024, 2, 1)),
+                ..meta.clone()
+            },
+        );
+        assert_eq!(explicit.signing_date(), date(2024, 2, 1));
+        let explicit = explicit.with_signing_deadlines(FilingDeadlines::from_period_end(
+            period.end,
+        ));
+        assert_eq!(explicit.signing_date(), date(2024, 2, 1));
+    }
 
     #[test]
     fn test_format_date() {

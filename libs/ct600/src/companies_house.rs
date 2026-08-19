@@ -17,7 +17,7 @@ pub use companies_house::{
     FilingHistory, FilingHistoryItem, FilingHistoryLinks, FormType, IncorporationFiling,
     LastAccounts, NextAccounts, NextAccountingPeriod, Officer, OfficerChangeAction,
     OfficerChangeFiling, OfficerList, OtherFiling, PreviousPeriodFigures, RegisteredOfficeAddress,
-    TypedFiling, next_accounting_period_from, parse_filed_accounts,
+    TypedFiling, next_accounting_period_from, parse_filed_accounts, reports_company_profile,
 };
 
 use crate::form::CompanyFormValues;
@@ -249,8 +249,8 @@ mod live_tests {
     async fn live_latest_accounts_full_year_reports() {
         use chrono::Datelike;
         use reports::GnucashBook;
-        use reports::reports::uk_frs105_accounts::{Frs105Accounts, PreviousPeriodData};
-        use reports::{AccountsMeta, Company, CompanyProfile};
+        use reports::reports::uk_frs105_accounts::{FilingDeadlines, Frs105Accounts, PreviousPeriodData};
+        use reports::{AccountsMeta, Company};
 
         use crate::ct600_return::Ct600Return;
 
@@ -289,42 +289,19 @@ mod live_tests {
             .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
             .expect("the profile carries the registration date");
 
-        // The reports' company profile: the CH API model has no
-        // contact / accountant / auditor fields (those are config-only), so
-        // the report profile carries what the API provides (address, SIC,
-        // jurisdiction) and defaults the rest.
-        let profile = CompanyProfile {
-            address_lines: ch_profile
-                .registered_office_address
-                .as_ref()
-                .map(|a| {
-                    [a.address_line_1.as_deref(), a.address_line_2.as_deref()]
-                        .into_iter()
-                        .flatten()
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            county: ch_profile
-                .registered_office_address
-                .as_ref()
-                .and_then(|a| a.region.clone())
-                .filter(|s| !s.is_empty()),
-            location: ch_profile
-                .registered_office_address
-                .as_ref()
-                .and_then(|a| a.locality.clone())
-                .unwrap_or_default(),
-            postcode: ch_profile
-                .registered_office_address
-                .as_ref()
-                .and_then(|a| a.postal_code.clone())
-                .unwrap_or_default(),
-            sic_codes: ch_profile.sic_codes.clone().unwrap_or_default(),
-            jurisdiction: ch_profile.jurisdiction.clone().unwrap_or_default(),
-            ..Default::default()
-        };
+        // The reports' company profile is built from the fetched profile and
+        // its officers: address, SIC, jurisdiction and the current directors
+        // (the CH API model has no contact / accountant / auditor fields —
+        // those are config-only and stay blank).
+        let officers = client
+            .get_officers(&number)
+            .await
+            .expect("fetch the officers");
+        let profile = reports_company_profile(&ch_profile, Some(&officers));
+        assert!(
+            !profile.directors.is_empty(),
+            "the current directors are auto-fetched from Companies House"
+        );
 
         // The pending period: the accounting period after the filed one.
         let pending = company.accounting_period_containing(
@@ -332,11 +309,15 @@ mod live_tests {
                 .succ_opt()
                 .expect("the filed period end has a successor"),
         );
-        println!("pending period: {} → {}", pending.start, pending.end);
+        let pending_end = pending.end;
+        println!("pending period: {} → {}", pending.start, pending_end);
         let accounts_meta = AccountsMeta {
             period: Some(pending),
-            fy1_year: pending.end.year() - 1,
-            fy2_year: pending.end.year(),
+            fy1_year: pending_end.year() - 1,
+            fy2_year: pending_end.year(),
+            // The signatory defaults to the first director (mirrors the
+            // CLI/API resolve step).
+            signed_by: profile.directors.first().cloned().unwrap_or_default(),
             ..AccountsMeta::default()
         };
 
@@ -361,8 +342,30 @@ mod live_tests {
         // transactions, so the seeded current column (previous-period
         // figures + zero activity) equals the comparative column — the
         // balances are unchanged (see `Frs105Accounts::with_prev_period_data`).
+        // The signing date is not supplied in this test: it defaults to one
+        // day before the earliest filing deadline (accounts vs CT600),
+        // capped at today.  The real deadlines come from the profile's
+        // `next_accounts.due_on` (the pending period's accounts due date)
+        // and the period end (the CT600 due date, 12 months after).
+        let accounts_deadline = ch_profile
+            .accounts
+            .as_ref()
+            .and_then(|a| a.next_accounts.as_ref())
+            .and_then(|n| n.due_on.as_deref())
+            .or_else(|| {
+                ch_profile
+                    .accounts
+                    .as_ref()
+                    .and_then(|a| a.next_due.as_deref())
+            })
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .unwrap_or_else(|| pending_end + chrono::Months::new(9));
         let accounts = Frs105Accounts::new(&book, &company, &profile, &accounts_meta)
-            .with_prev_period_data(&prev);
+            .with_prev_period_data(&prev)
+            .with_signing_deadlines(FilingDeadlines {
+                companies_house_accounts: accounts_deadline,
+                hmrc_ct600: pending_end + chrono::Months::new(12),
+            });
         // The generated previous CoA reconciles with the filed balance
         // sheet line for line (this is what the check validates).
         accounts
@@ -407,6 +410,21 @@ mod live_tests {
         // both images instead of emitting empty data URIs.
         assert!(!accounts_html.contains("alt=\"Company logo\""));
         assert!(!accounts_html.contains("alt=\"Director's signature\""));
+        // The directors auto-fetched from Companies House are listed, and
+        // the signatory defaults to the first director.
+        assert!(
+            accounts_html.contains(&profile.directors[0]),
+            "the report lists the auto-fetched directors"
+        );
+        assert!(accounts_html.contains(&accounts_meta.signed_by));
+        // The signing date defaulted to one day before the earliest filing
+        // deadline (accounts vs CT600), capped at today.
+        let today = chrono::Utc::now().date_naive();
+        let earliest_deadline = accounts_deadline.min(pending_end + chrono::Months::new(12));
+        assert_eq!(
+            accounts.signing_date(),
+            (earliest_deadline - chrono::Duration::days(1)).min(today)
+        );
         assert!(corp_tax_html.contains("Corporation Tax Statement"));
         assert!(ct600_xml.contains("GovTalkMessage"));
         assert!(ct600_xml.contains(&ch_profile.company_number));
