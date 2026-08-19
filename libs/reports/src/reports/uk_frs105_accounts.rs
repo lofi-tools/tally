@@ -1077,13 +1077,13 @@ impl Frs105Accounts {
             ),
             non_numeric_fmt(
                 "uk-bus:StartDateForPeriodCoveredByReport",
-                "ctxt-1",
+                "ctxt-22",
                 &format_date(&period_start),
                 "ixt2:datedaymonthyearen",
             ),
             non_numeric_fmt(
                 "uk-bus:EndDateForPeriodCoveredByReport",
-                "ctxt-1",
+                "ctxt-2",
                 &format_date(&period_end),
                 "ixt2:datedaymonthyearen",
             ),
@@ -1209,7 +1209,20 @@ impl Frs105Accounts {
                 "ctxt-9",
                 &self.accounts.average_employees_for(prev_end.year()).to_string(),
             ),
-            non_numeric("uk-core:DirectorSigningFinancialStatements", "ctxt-11", ""),
+        ]);
+        {
+            let signing_idx = profile
+                .directors
+                .iter()
+                .position(|d| d == &self.accounts.signed_by)
+                .unwrap_or(0);
+            hidden_children.push(non_numeric(
+                "uk-core:DirectorSigningFinancialStatements",
+                &format!("ctxt-{}", 10 + signing_idx),
+                "",
+            ));
+        }
+        hidden_children.extend(vec![
             non_numeric(
                 "uk-bus:NameContactDepartmentOrPerson",
                 "ctxt-13",
@@ -1412,24 +1425,24 @@ impl Frs105Accounts {
                 None,
                 &[("uk-bus:EntityOfficersDimension", "uk-bus:Director1")],
             ),
-            context_duration_full(
-                "ctxt-11",
-                &company.company_number,
-                &period_start,
-                &period_end,
-                None,
-                None,
-                &[("uk-bus:EntityOfficersDimension", "uk-bus:Director2")],
-            ),
-            context_duration_full(
-                "ctxt-12",
-                &company.company_number,
-                &period_start,
-                &period_end,
-                None,
-                None,
-                &[("uk-bus:EntityOfficersDimension", "uk-bus:Director3")],
-            ),
+        ]);
+        for (i, dim_val) in ["uk-bus:Director2", "uk-bus:Director3"]
+            .iter()
+            .enumerate()
+        {
+            if profile.directors.len() > i + 1 {
+                resource_children.push(context_duration_full(
+                    &format!("ctxt-{}", 11 + i),
+                    &company.company_number,
+                    &period_start,
+                    &period_end,
+                    None,
+                    None,
+                    &[("uk-bus:EntityOfficersDimension", dim_val)],
+                ));
+            }
+        }
+        resource_children.extend(vec![
             context_duration_full(
                 "ctxt-13",
                 &company.company_number,
@@ -1492,6 +1505,7 @@ impl Frs105Accounts {
                 None,
                 None,
             ),
+            context_instant("ctxt-22", &company.company_number, &period_start, None, None),
             elt("xbrli:unit", &[("id", "GBP")])
                 .child(elt_text("xbrli:measure", &[], "iso4217:GBP")),
             elt("xbrli:unit", &[("id", "pure")])
