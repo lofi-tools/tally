@@ -53,6 +53,12 @@ fn non_empty_or<'a>(value: &'a str, default: &'a str) -> &'a str {
     }
 }
 
+/// The fallback text for `DescriptionPrincipalActivities` when the profile
+/// leaves it blank — the same placeholder the real 14510633 filing uses
+/// (Companies House's validator requires actual text on this fact, an empty
+/// tag is reported as "missing").  Parsed back as blank (`None`).
+const DEFAULT_PRINCIPAL_ACTIVITIES: &str = "No description of principal activity";
+
 /// Previous-period balance-sheet figures — the comparative column of the
 /// statement of financial position when the ledger doesn't cover the
 /// previous period (e.g. sourced from the company's last filed accounts at
@@ -1160,14 +1166,18 @@ impl Frs105Accounts {
             ),
         ]);
         // JFCVC.3312 makes the principal-activities description mandatory;
-        // when the profile leaves it blank the fact is emitted empty (like
-        // EntityTradingStatus).  Its position here (after the balance-sheet
-        // date, before the SIC codes) must match the reference fixture's
-        // fact order.
+        // when the profile leaves it blank the fact is emitted with the
+        // placeholder text (an empty tag is reported as "missing" by
+        // Companies House's validator).  Its position here (after the
+        // balance-sheet date, before the SIC codes) must match the
+        // reference fixture's fact order.
         hidden_children.push(non_numeric(
             "uk-bus:DescriptionPrincipalActivities",
             "ctxt-0",
-            profile.activities.as_deref().unwrap_or(""),
+            profile
+                .activities
+                .as_deref()
+                .unwrap_or(DEFAULT_PRINCIPAL_ACTIVITIES),
         ));
         hidden_children.extend(vec![
             non_numeric(
@@ -1712,7 +1722,10 @@ impl Frs105Accounts {
             website_description: opt_text("uk-bus:DescriptionOrOtherInformationOnWebsite"),
             vat_registration: opt_text("uk-bus:VATRegistrationNumber"),
             sic_codes,
-            activities: opt_text("uk-bus:DescriptionPrincipalActivities"),
+            // The placeholder counts as "no description" on the way back in
+            // (a blank profile round-trips to `None`).
+            activities: opt_text("uk-bus:DescriptionPrincipalActivities")
+                .filter(|v| v != DEFAULT_PRINCIPAL_ACTIVITIES),
             jurisdiction: String::new(), // not serialised to iXBRL
             accountant_name: text("uk-accrep:NameAccountantResponsible"),
             accountant_business: text("uk-bus:NameEntityAccountants"),
@@ -3440,8 +3453,10 @@ mod tests {
         assert!(html.contains("uk-bus:NameContactDepartmentOrPerson"));
         assert!(html.contains("uk-bus:PostalCodeZip"));
         // JFCVC.3312 makes the principal-activities description mandatory:
-        // it is still tagged when the profile leaves it blank (empty text).
+        // it is still tagged when the profile leaves it blank, with the
+        // placeholder text.
         assert!(html.contains("uk-bus:DescriptionPrincipalActivities"));
+        assert!(html.contains(">No description of principal activity</ix:nonNumeric>"));
 
         // Round trip: the blank fields come back absent.
         let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
