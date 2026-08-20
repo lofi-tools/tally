@@ -146,6 +146,14 @@ pub fn validate(doc: &Document, taxonomy: &Taxonomy, rules: &Rules, lang: Lang) 
             ctx.check_category_dispatch(txmy);
         }
         DocKind::Computation => {
+            // The ct-comp mandatory items come from the taxonomy's own
+            // definition linkbase (ct-comp-2023-definition-mandatoryItems.xml,
+            // role MandatoryItemsRequired, requires-element arcs) — see
+            // jfcvc-v4.json.  This is a presence requirement (if a reportable
+            // item is present, CompanyName must be; CompanyName requires the
+            // rest), not the accounts-style period alignment, so it has its
+            // own check.
+            ctx.check_ct_comp_mandatory_items();
             // JFCVC.3315 also applies to computation (officer dimensions).
             ctx.check_generic_dimension_members();
         }
@@ -755,6 +763,43 @@ impl<'a> Ctx<'a> {
                     None,
                 );
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // ct-comp mandatory items (taxonomy MandatoryItemsRequired linkbase)
+    // ------------------------------------------------------------------
+
+    /// The ct-comp taxonomy declares its mandatory items in its own
+    /// definition linkbase (`ct-comp-2023-definition-mandatoryItems.xml`, role
+    /// `MandatoryItemsRequired`, `requires-element` arcs): every reportable
+    /// item requires CompanyName, and CompanyName requires TaxReference, the
+    /// two period-of-account dates, the two return-period dates and
+    /// CompanyIsAPartnerInAFirm.  This is a *presence* requirement — if any
+    /// computation fact is present, the whole mandatory set must be too — not
+    /// the accounts-style period alignment, so each mandatory concept just
+    /// needs at least one valid fact.
+    fn check_ct_comp_mandatory_items(&mut self) {
+        let Some(ttype) = self.rules.taxonomy_type("ct-comp") else {
+            return;
+        };
+        let missing: Vec<&str> = ttype
+            .mandatory
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|concept| !self.has_valid_fact(concept))
+            .collect();
+        if !missing.is_empty() {
+            let mut sorted = missing;
+            sorted.sort_unstable();
+            self.error(
+                "HMRC.MandatoryItemsRequired",
+                format!(
+                    "The following ct-comp mandatory concepts (per the taxonomy's MandatoryItemsRequired linkbase) are not tagged on a fact: {}",
+                    sorted.join(", ")
+                ),
+                None,
+            );
         }
     }
 
@@ -1757,6 +1802,23 @@ mod tests {
         assert!(
             report.issues.iter().any(|i| i.code == "schema.gYearValue"),
             "expected schema.gYearValue, got: {:?}",
+            report.issues
+        );
+
+        // 4. Remove a ct-comp mandatory item (per the taxonomy's
+        //    MandatoryItemsRequired linkbase).  CompanyName is the root of the
+        //    requires-element chain.  (The whole element must go, not just the
+        //    name attribute, or the dangling `<ix:nonNumeric ` tag breaks the
+        //    XML parse.)
+        let removed_mandatory = html.replace(
+            "<ix:nonNumeric name=\"ct-comp:CompanyName\" contextRef=\"ctxt-0\">Example Biz Ltd.</ix:nonNumeric>",
+            "",
+        );
+        let doc = crate::document::parse(&removed_mandatory);
+        let report = validate(&doc, &taxonomy, &rules, Lang::English);
+        assert!(
+            report.issues.iter().any(|i| i.code == "HMRC.MandatoryItemsRequired"),
+            "expected HMRC.MandatoryItemsRequired, got: {:?}",
             report.issues
         );
     }
