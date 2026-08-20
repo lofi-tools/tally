@@ -59,6 +59,19 @@ fn non_empty_or<'a>(value: &'a str, default: &'a str) -> &'a str {
 /// tag is reported as "missing").  Parsed back as blank (`None`).
 const DEFAULT_PRINCIPAL_ACTIVITIES: &str = "No description of principal activity";
 
+/// The language the report's statement narratives are written in.
+///
+/// Welsh reports (a requirement for filing in Welsh) additionally tag a
+/// `ReportPrincipalLanguage` fact with the `LanguagesDimension`/`Welsh`
+/// member, so validators (Arelle's validate/UK plugin and the in-process
+/// `validate-uk` checker) select the Welsh statement-text patterns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReportLanguage {
+    #[default]
+    English,
+    Welsh,
+}
+
 /// Previous-period balance-sheet figures — the comparative column of the
 /// statement of financial position when the ledger doesn't cover the
 /// previous period (e.g. sourced from the company's last filed accounts at
@@ -104,6 +117,11 @@ pub struct Frs105Accounts {
     filing_deadlines: FilingDeadlines,
     /// Tangible / fixed assets.
     pub fixed_assets: [f64; 2],
+    /// The language of the statement narratives ([`ReportLanguage`], default
+    /// English).  Welsh statements are emitted with the standard Welsh
+    /// wording and a `ReportPrincipalLanguage` / `LanguagesDimension`/`Welsh`
+    /// fact + context pair, so validators pick the Welsh text patterns.
+    pub language: ReportLanguage,
     /// Called-up share capital not paid — line A of the FRS 105
     /// balance-sheet format, shown above fixed assets: the amount called
     /// up on allotted shares but not yet received as at the balance-sheet
@@ -638,6 +656,7 @@ impl Frs105Accounts {
             book: Some(gnucash.clone()),
             prev_book: None,
             filing_deadlines: FilingDeadlines::from_period_end(period.end),
+            language: ReportLanguage::default(),
             fixed_assets: col(current.fixed_assets),
             // Line A (called-up share capital not paid) has no account path:
             // it defaults to zero and is supplied via
@@ -675,6 +694,15 @@ impl Frs105Accounts {
     /// default: an explicitly-supplied `accounts.authorised_date` wins.
     pub fn with_signing_deadlines(mut self, deadlines: FilingDeadlines) -> Self {
         self.filing_deadlines = deadlines;
+        self
+    }
+
+    /// Emit the statement narratives in the given language.  Welsh reports
+    /// get the standard Welsh statement wording plus a
+    /// `ReportPrincipalLanguage` / `LanguagesDimension`/`Welsh` fact, so the
+    /// UK validators apply the Welsh text patterns.
+    pub fn with_language(mut self, language: ReportLanguage) -> Self {
+        self.language = language;
         self
     }
 
@@ -1224,6 +1252,13 @@ impl Frs105Accounts {
             "",
         ));
         hidden_children.push(non_numeric("uk-bus:LegalFormEntity", "ctxt-7", ""));
+        if self.language == ReportLanguage::Welsh {
+            hidden_children.push(non_numeric(
+                "uk-bus:ReportPrincipalLanguage",
+                "ctxt-lang",
+                "",
+            ));
+        }
         if !profile.country_dimension.is_empty() {
             hidden_children.push(non_numeric(
                 "uk-bus:CountryFormationOrIncorporation",
@@ -1427,6 +1462,20 @@ impl Frs105Accounts {
                 )],
             ));
         }
+        // Welsh reports carry a ReportPrincipalLanguage fact on a context
+        // with the LanguagesDimension/Welsh member, signalling the Welsh
+        // statement-text patterns to the UK validators.
+        if self.language == ReportLanguage::Welsh {
+            resource_children.push(context_duration_full(
+                "ctxt-lang",
+                &company.company_number,
+                &period_start,
+                &period_end,
+                None,
+                None,
+                &[("lang:LanguagesDimension", "lang:Welsh")],
+            ));
+        }
         resource_children.extend(vec![context_duration(
                 "ctxt-9",
                 &company.company_number,
@@ -1566,11 +1615,11 @@ impl Frs105Accounts {
 
         let body = doc.to_xml_string();
         // The reference serialises with lxml using HTML semantics: non-ASCII
-        // punctuation is written as ASCII entities and empty spans keep
-        // explicit open/close tags.  Reproduce both here.
-        let body = body
-            .replace('\u{00A0}', "&#160;")
-            .replace('\u{00A3}', "&#163;")
+        // characters (punctuation, and the Welsh statement text's ï/â etc.)
+        // are written as ASCII numeric entities and empty spans keep
+        // explicit open/close tags.  Reproduce both here, so the document
+        // stays valid ASCII (its declared encoding).
+        let body = escape_non_ascii(&body)
             // lxml (the reference) writes apostrophes raw in attributes.
             .replace("&apos;", "'")
             .replace("<span/>", "<span></span>");
@@ -1771,6 +1820,7 @@ impl Frs105Accounts {
             // `with_prev_period_data` has no book to read activity from.
             book: None,
             prev_book: None,
+            language: ReportLanguage::default(),
             // The signing date is recovered from the document (explicit);
             // the deadlines only back the default when it is absent.
             filing_deadlines: FilingDeadlines::from_period_end(period_end),
@@ -2342,40 +2392,82 @@ impl Frs105Accounts {
             ),
         ]);
 
-        let notes = elt("div", &[("class", "notes")]).child(elt("div", &[]).children(vec![
-            statement_p(
-                "uk-direp:StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
-                vec![span_text(
-                    "These financial statements have been prepared in accordance with the micro-entity provisions and delivered in accordance with the provisions applicable under the small companies regime.",
-                )],
-            ),
-            statement_p(
-                "uk-direp:StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies",
-                vec![
-                    span_text("For the accounting period ending "),
-                    span(vec![date_fact(
-                        "uk-bus:EndDateForPeriodCoveredByReport",
-                        "ctxt-1",
-                        &self.accounts.period().end,
-                    )]),
-                    span_text(
-                        " the company was entitled to exemption from audit under section 477 of the Companies Act 2006 relating to small companies.",
-                    ),
-                ],
-            ),
-            statement_p(
-                "uk-direp:StatementThatMembersHaveNotRequiredCompanyToObtainAnAudit",
-                vec![span_text(
-                    "The members have not required the company to obtain an audit of its financial statements for the accounting period in accordance with section 476.",
-                )],
-            ),
-            statement_p(
-                "uk-direp:StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct",
-                vec![span_text(
-                    "The directors acknowledge their responsibilities for complying with the requirements of the Act with respect to accounting records and the preparation of financial statements.",
-                )],
-            ),
-        ]));
+        // The statement narratives, in the report language.  The Welsh
+        // wording below is the standard Welsh model text and is checked by
+        // the UK validators' Welsh patterns (the cy phrase groups in
+        // validate-uk's jfcvc-v4.json rules).
+        let statements = if self.language == ReportLanguage::Welsh {
+            vec![
+                statement_p(
+                    "uk-direp:StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
+                    vec![span_text(
+                        "Mae'r datganiadau ariannol hyn wedi eu paratoi yn unol â darpariaethau'r drefn micro-gwmnïau a'u cyflwyno yn unol â'r darpariaethau sy'n gymwys o dan y drefn ar gyfer cwmnïau bach.",
+                    )],
+                ),
+                statement_p(
+                    "uk-direp:StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies",
+                    vec![
+                        span_text("Am y cyfnod cyfrifo sy'n dod i ben "),
+                        span(vec![date_fact(
+                            "uk-bus:EndDateForPeriodCoveredByReport",
+                            "ctxt-1",
+                            &self.accounts.period().end,
+                        )]),
+                        span_text(
+                            " roedd y cwmni wedi'i eithrio rhag archwiliad o dan adran 477 o Ddeddf Cwmnïau 2006 sy'n ymwneud â chwmnïau bach.",
+                        ),
+                    ],
+                ),
+                statement_p(
+                    "uk-direp:StatementThatMembersHaveNotRequiredCompanyToObtainAnAudit",
+                    vec![span_text(
+                        "Mae'r aelodau heb ei gwneud yn ofynnol i'r cwmni gael archwiliad o'i ddatganiadau ariannol ar gyfer y cyfnod cyfrifo yn unol ag adran 476.",
+                    )],
+                ),
+                statement_p(
+                    "uk-direp:StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct",
+                    vec![span_text(
+                        "Mae'r cyfarwyddwyr yn cydnabod eu cyfrifoldebau o ran cydymffurfio â gofynion y Ddeddf o ran cofnodion cyfrifeg a pharatoi datganiadau ariannol.",
+                    )],
+                ),
+            ]
+        } else {
+            vec![
+                statement_p(
+                    "uk-direp:StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
+                    vec![span_text(
+                        "These financial statements have been prepared in accordance with the micro-entity provisions and delivered in accordance with the provisions applicable under the small companies regime.",
+                    )],
+                ),
+                statement_p(
+                    "uk-direp:StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies",
+                    vec![
+                        span_text("For the accounting period ending "),
+                        span(vec![date_fact(
+                            "uk-bus:EndDateForPeriodCoveredByReport",
+                            "ctxt-1",
+                            &self.accounts.period().end,
+                        )]),
+                        span_text(
+                            " the company was entitled to exemption from audit under section 477 of the Companies Act 2006 relating to small companies.",
+                        ),
+                    ],
+                ),
+                statement_p(
+                    "uk-direp:StatementThatMembersHaveNotRequiredCompanyToObtainAnAudit",
+                    vec![span_text(
+                        "The members have not required the company to obtain an audit of its financial statements for the accounting period in accordance with section 476.",
+                    )],
+                ),
+                statement_p(
+                    "uk-direp:StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct",
+                    vec![span_text(
+                        "The directors acknowledge their responsibilities for complying with the requirements of the Act with respect to accounting records and the preparation of financial statements.",
+                    )],
+                ),
+            ]
+        };
+        let notes = elt("div", &[("class", "notes")]).child(elt("div", &[]).children(statements));
 
         let mut approval_children = vec![
             elt("p", &[]).child(span(vec![
@@ -2817,6 +2909,21 @@ fn format_date(d: &chrono::NaiveDate) -> String {
     format!("{}\u{00A0}{}\u{00A0}{}", day, month, year)
 }
 
+/// Escape every non-ASCII character as a decimal numeric entity, so the
+/// document body stays valid ASCII (the declared `encoding='ASCII'` — the
+/// reference tool's lxml HTML serialisation writes e.g. `&#239;` for `ï`).
+fn escape_non_ascii(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c <= '\u{7F}' {
+            out.push(c);
+        } else {
+            out.push_str(&format!("&#{};", c as u32));
+        }
+    }
+    out
+}
+
 /// XML namespace declarations for the accounts document.
 #[rustfmt::skip]
 pub const ACCTS_HTML_ATTRS: &[(&str, &str)] = &[
@@ -2834,6 +2941,7 @@ pub const ACCTS_HTML_ATTRS: &[(&str, &str)] = &[
     ("xmlns:uk-core", "http://xbrl.frc.org.uk/fr/2023-01-01/core"),
     ("xmlns:uk-direp", "http://xbrl.frc.org.uk/reports/2023-01-01/direp"),
     ("xmlns:uk-geo", "http://xbrl.frc.org.uk/cd/2023-01-01/countries"),
+    ("xmlns:lang", "http://xbrl.frc.org.uk/cd/2023-01-01/languages"),
 ];
 
 #[cfg(test)]
@@ -3371,6 +3479,66 @@ mod tests {
         assert_eq!(
             out, expected,
             "accounts output must match the reference fixture"
+        );
+    }
+
+    /// The Welsh report: standard Welsh statement narratives, a
+    /// `ReportPrincipalLanguage` fact on a `LanguagesDimension`/`Welsh`
+    /// context (so validators select the Welsh text patterns), and the whole
+    /// document passing the in-process JFCVC checker (which auto-detects the
+    /// language and applies the Welsh statement patterns).
+    #[tokio::test]
+    async fn test_welsh_report_emits_welsh_statements_and_validates() {
+        let (company, gnucash) = load_example().await;
+        let accounts = Frs105Accounts::new(
+            &gnucash,
+            &company,
+            &example_profile(),
+            &example_accounts_meta(),
+        )
+        .with_prev_period_data(&prev_from_same_book(&gnucash))
+        .with_language(ReportLanguage::Welsh);
+        let out = accounts.to_ixbrl();
+
+        // The four statement narratives are in Welsh (not English) ...
+        // (The document serialises as pure ASCII, so the Welsh â/ï in the
+        // text appear as numeric entities, e.g. â = &#226;.)
+        assert!(out.contains("wedi eu paratoi yn unol &#226;"), "welsh micro-entities statement");
+        assert!(out.contains("wedi'i eithrio rhag archwiliad o dan adran 477"), "welsh s477 statement");
+        assert!(out.contains("aelodau heb ei gwneud yn ofynnol i'r cwmni gael archwiliad"), "welsh audit-exemption statement");
+        assert!(out.contains("cyfarwyddwyr yn cydnabod eu cyfrifoldebau"), "welsh directors statement");
+        assert!(
+            !out.contains("These financial statements have been prepared"),
+            "english statement must not appear in a welsh report"
+        );
+
+        // ... and the language is declared: a ReportPrincipalLanguage fact on
+        // a context with the LanguagesDimension/Welsh member.
+        assert!(out.contains("uk-bus:ReportPrincipalLanguage"), "report-language fact");
+        assert!(out.contains("lang:LanguagesDimension"), "language dimension");
+        assert!(out.contains("lang:Welsh"), "welsh dimension member");
+        assert!(out.contains("xmlns:lang=\"http://xbrl.frc.org.uk/cd/2023-01-01/languages\""), "languages namespace");
+
+        // Write the Rust output for external validation (arelle).
+        std::fs::create_dir_all(cache_dir("ixbrl-rs-tests")).unwrap();
+        std::fs::write(
+            cache_path("ixbrl-rs-tests", "accts-micro-welsh-basic-1.html"),
+            &out,
+        )
+        .unwrap();
+
+        // End-to-end: the in-process checker auto-detects Welsh and applies
+        // the Welsh statement patterns — the report must come out clean
+        // (no errors, no warnings).
+        let report = validate_uk::Validator::new().validate(&out);
+        for issue in &report.issues {
+            eprintln!("[{}] {} @ {}", issue.code, issue.message, issue.location.as_deref().unwrap_or("-"));
+        }
+        assert!(report.is_ok(), "welsh report must validate clean: {:?}", report.issues);
+        assert!(
+            report.warnings().next().is_none(),
+            "welsh report must have no warnings: {:?}",
+            report.issues
         );
     }
 
@@ -3930,6 +4098,7 @@ mod tests {
             accounts,
             book: None,
             prev_book: None,
+            language: ReportLanguage::default(),
             filing_deadlines: FilingDeadlines::from_period_end(period_end),
             fixed_assets: [100.0, 200.0],
             called_up_share_capital_not_paid: [0.0, 0.0],

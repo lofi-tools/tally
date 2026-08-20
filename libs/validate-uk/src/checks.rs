@@ -95,8 +95,31 @@ pub fn taxonomy_type(doc: &Document) -> Option<&'static str> {
     None
 }
 
+/// The document's report language, from a `ReportPrincipalLanguage` fact
+/// tagged on a context with `LanguagesDimension`/`Welsh` (like Arelle's
+/// `ValidateUK._lang`).  Documents that don't declare a language default to
+/// the caller-supplied language.
+pub fn doc_lang(doc: &Document) -> Lang {
+    for f in doc.facts.iter().filter(|f| f.local_name == "ReportPrincipalLanguage") {
+        if let Some(ctx) = doc.contexts.get(&f.context_ref) {
+            if ctx.member_for("LanguagesDimension").is_some_and(|m| m == "Welsh") {
+                return Lang::Welsh;
+            }
+        }
+    }
+    Lang::English
+}
+
 /// Run every check applicable to the document.
 pub fn validate(doc: &Document, taxonomy: &Taxonomy, rules: &Rules, lang: Lang) -> Report {
+    // A document that declares Welsh (`ReportPrincipalLanguage` with
+    // `LanguagesDimension`/Welsh) selects the Welsh statement-text patterns,
+    // like Arelle's plugin.
+    let lang = if doc_lang(doc) == Lang::Welsh {
+        Lang::Welsh
+    } else {
+        lang
+    };
     let mut ctx = Ctx {
         doc,
         taxonomy,
@@ -471,6 +494,70 @@ impl<'a> Ctx<'a> {
                     )
                     .with_location(loc.clone()),
                 );
+            }
+
+            // XSD pattern facet (e.g. taxReferenceItemType must match
+            // `[0-9]{10}`; taxDistrictItemType `[0-9]{3}`).  The taxonomy's
+            // patterns are all `[0-9]{N}` digit-count forms; anything else is
+            // skipped (never false-positives).
+            if let Some(pattern) = concept.pattern.as_deref() {
+                if !f.value.trim().is_empty() {
+                    match digit_count_pattern(pattern) {
+                        Some(n) if f.value.trim().chars().count() != n
+                            || !f.value.trim().chars().all(|c| c.is_ascii_digit()) =>
+                        {
+                            issues.push(
+                                Issue::error(
+                                    "schema.patternValue",
+                                    format!(
+                                        "Concept {} has a value {:?} that does not match the pattern facet {:?} ({} digits).",
+                                        f.local_name, f.value, pattern, n
+                                    ),
+                                )
+                                .with_location(loc.clone()),
+                            );
+                        }
+                        // pattern matched, or the pattern is an unsupported
+                        // shape (Some(_) matched / None = skip)
+                        _ => {}
+                    }
+                }
+            }
+
+            // XSD minLength facet (e.g. nonEmptyStringItemType: value must
+            // not be empty).
+            if let Some(min_len) = concept.min_length() {
+                if !f.is_nil && f.value.trim().chars().count() < min_len {
+                    issues.push(
+                        Issue::error(
+                            "schema.minLength",
+                            format!(
+                                "Concept {} has a value {:?} shorter than the minLength facet {}.",
+                                f.local_name, f.value, min_len
+                            ),
+                        )
+                        .with_location(loc.clone()),
+                    );
+                }
+            }
+
+            // gYear facts (e.g. FinancialYear1CoveredByTheReturn) must be a
+            // four-digit year.
+            if concept.data_type.ends_with("gYearItemType") && !f.value.trim().is_empty() {
+                let v = f.value.trim();
+                let ok = v.len() == 4 && v.chars().all(|c| c.is_ascii_digit());
+                if !ok {
+                    issues.push(
+                        Issue::error(
+                            "schema.gYearValue",
+                            format!(
+                                "Concept {} has a value {:?} that is not a four-digit year (gYearItemType).",
+                                f.local_name, f.value
+                            ),
+                        )
+                        .with_location(loc.clone()),
+                    );
+                }
             }
 
             // Boolean values.
@@ -1376,6 +1463,22 @@ fn is_word_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// Interpret an XSD pattern facet of the `[0-9]{N}` shape (the only form the
+/// UK taxonomies use: `taxReferenceItemType` `[0-9]{10}`, `taxDistrictItemType`
+/// `[0-9]{3}`) as a required digit count.  Returns `None` for any other
+/// pattern shape so the caller can skip the check rather than guess.
+fn digit_count_pattern(pattern: &str) -> Option<usize> {
+    let p = pattern.trim();
+    if p.len() < 6 || !p.starts_with("[0-9]{") || !p.ends_with('}') {
+        return None;
+    }
+    let inner = &p[6..p.len() - 1];
+    if inner.is_empty() || !inner.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    inner.parse().ok()
+}
+
 /// Whether the numeric facts in a duplicate group are consistent: numeric
 /// facts are compared after rounding to the coarsest declared decimals,
 /// text facts by exact value.
@@ -1608,6 +1711,144 @@ mod tests {
             "expected JFCVC.3312 for missing mandatory concept, got: {:?}",
             report.issues
         );
+    }
+
+    /// Mutate the corp-tax fixture into the ct-comp schema-facet failure
+    /// modes and check the exact schema.* codes are produced: tax reference
+    /// pattern facet, non-empty string minLength, and gYear lexical.
+    #[test]
+    fn mutated_ct_comp_facets_produce_expected_codes() {
+        let (taxonomy, rules) = setup();
+        let html = include_str!("../../../example_data/basic-1/output-corp-tax.html");
+
+        // 1. TaxReference does not match the [0-9]{10} pattern facet.
+        let bad_tax_ref = html.replace(
+            "name=\"ct-comp:TaxReference\" contextRef=\"ctxt-0\">8596148860</ix:nonNumeric>",
+            "name=\"ct-comp:TaxReference\" contextRef=\"ctxt-0\">ABCDEFGHIJ</ix:nonNumeric>",
+        );
+        let doc = crate::document::parse(&bad_tax_ref);
+        let report = validate(&doc, &taxonomy, &rules, Lang::English);
+        assert!(
+            report.issues.iter().any(|i| i.code == "schema.patternValue"),
+            "expected schema.patternValue, got: {:?}",
+            report.issues
+        );
+
+        // 2. CompanyName (nonEmptyStringItemType) with an empty value.
+        let empty_name = html.replace(
+            "name=\"ct-comp:CompanyName\" contextRef=\"ctxt-0\">Example Biz Ltd.</ix:nonNumeric>",
+            "name=\"ct-comp:CompanyName\" contextRef=\"ctxt-0\"></ix:nonNumeric>",
+        );
+        let doc = crate::document::parse(&empty_name);
+        let report = validate(&doc, &taxonomy, &rules, Lang::English);
+        assert!(
+            report.issues.iter().any(|i| i.code == "schema.minLength"),
+            "expected schema.minLength, got: {:?}",
+            report.issues
+        );
+
+        // 3. FinancialYear1CoveredByTheReturn (gYearItemType) not a year.
+        let bad_year = html.replace(
+            "name=\"ct-comp:FinancialYear1CoveredByTheReturn\" contextRef=\"ctxt-1\">2019</ix:nonNumeric>",
+            "name=\"ct-comp:FinancialYear1CoveredByTheReturn\" contextRef=\"ctxt-1\">20XX</ix:nonNumeric>",
+        );
+        let doc = crate::document::parse(&bad_year);
+        let report = validate(&doc, &taxonomy, &rules, Lang::English);
+        assert!(
+            report.issues.iter().any(|i| i.code == "schema.gYearValue"),
+            "expected schema.gYearValue, got: {:?}",
+            report.issues
+        );
+    }
+
+    /// The generator's Welsh statement narratives must satisfy the checker's
+    /// Welsh (cy) phrase groups — the exact `contains_phrase` path the
+    /// validator uses.  The texts below are the ones
+    /// `reports::uk_frs105_accounts` emits for `ReportLanguage::Welsh`.
+    #[test]
+    fn welsh_statement_patterns_match_generator_texts() {
+        let rules = Rules::embedded();
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                "Co.Micro",
+                "StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
+                "Mae'r datganiadau ariannol hyn wedi eu paratoi yn unol â darpariaethau'r drefn micro-gwmnïau a'u cyflwyno yn unol â'r darpariaethau sy'n gymwys o dan y drefn ar gyfer cwmnïau bach.",
+            ),
+            (
+                "Co.Sec477",
+                "StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies",
+                "Am y cyfnod cyfrifo sy'n dod i ben 31 December 2020 roedd y cwmni wedi'i eithrio rhag archwiliad o dan adran 477 o Ddeddf Cwmnïau 2006 sy'n ymwneud â chwmnïau bach.",
+            ),
+            (
+                "Co.AuditNR",
+                "StatementThatMembersHaveNotRequiredCompanyToObtainAnAudit",
+                "Mae'r aelodau heb ei gwneud yn ofynnol i'r cwmni gael archwiliad o'i ddatganiadau ariannol ar gyfer y cyfnod cyfrifo yn unol ag adran 476.",
+            ),
+            (
+                "Co.DirResp",
+                "StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct",
+                "Mae'r cyfarwyddwyr yn cydnabod eu cyfrifoldebau o ran cydymffurfio â gofynion y Ddeddf o ran cofnodion cyfrifeg a pharatoi datganiadau ariannol.",
+            ),
+        ];
+        for (code, concept, welsh_text) in cases {
+            let pattern = rules
+                .text_pattern(code)
+                .unwrap_or_else(|| panic!("{code}: no text pattern"));
+            assert_eq!(&pattern.concept, concept, "{code}: concept mismatch");
+            let cy = pattern.cy.as_ref().expect("welsh pattern present");
+            for (gi, group) in cy.groups.iter().enumerate() {
+                assert!(
+                    group.iter().any(|phrase| contains_phrase(welsh_text, phrase)),
+                    "{code} group {gi}: none of {:?} found in: {welsh_text}",
+                    group
+                );
+            }
+            // The English text must NOT satisfy the Welsh pattern (the two
+            // languages are distinct checks).
+            let en_ok = cy.groups.iter().all(|g| {
+                g.iter().any(|p| contains_phrase(
+                    "These financial statements have been prepared in accordance with the micro-entity provisions.",
+                    p,
+                ))
+            });
+            assert!(!en_ok, "{code}: english text must not match the welsh pattern");
+        }
+    }
+
+    /// Language auto-detection: a ReportPrincipalLanguage fact on a context
+    /// with LanguagesDimension/Welsh selects the Welsh patterns.
+    #[test]
+    fn welsh_language_is_auto_detected() {
+        let html = r#"<html xmlns="http://www.w3.org/1999/xhtml" xmlns:ix="http://www.xbrl.org/2013/inlineXBRL" xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:uk-bus="http://xbrl.frc.org.uk/cd/2023-01-01/business" xmlns:lang="http://xbrl.frc.org.uk/cd/2023-01-01/languages"><body><ix:header><ix:hidden>
+        <xbrli:context id="c0"><xbrli:entity><xbrli:identifier scheme="http://www.companieshouse.gov.uk/">12345678</xbrli:identifier><xbrli:segment><xbrldi:explicitMember dimension="lang:LanguagesDimension">lang:Welsh</xbrldi:explicitMember></xbrli:segment></xbrli:entity><xbrli:period><xbrli:startDate>2020-01-01</xbrli:startDate><xbrli:endDate>2020-12-31</xbrli:endDate></xbrli:period></xbrli:context>
+        <ix:nonNumeric name="uk-bus:ReportPrincipalLanguage" contextRef="c0"></ix:nonNumeric>
+        </ix:hidden></ix:header></body></html>"#;
+        let doc = crate::document::parse(html);
+        assert_eq!(doc_lang(&doc), Lang::Welsh);
+
+        // The English fixture declares no language -> English.
+        let en = crate::document::parse(include_str!(
+            "../../../example_data/basic-1/output-accounts.html"
+        ));
+        assert_eq!(doc_lang(&en), Lang::English);
+    }
+
+    /// The Welsh patterns are distinct and enforced: the English fixture's
+    /// statements fail them when Welsh is forced.
+    #[test]
+    fn english_statements_fail_welsh_patterns() {
+        let (taxonomy, rules) = setup();
+        let doc = crate::document::parse(include_str!(
+            "../../../example_data/basic-1/output-accounts.html"
+        ));
+        let report = validate(&doc, &taxonomy, &rules, Lang::Welsh);
+        for code in ["Co.Micro", "Co.Sec477", "Co.AuditNR", "Co.DirResp"] {
+            assert!(
+                report.issues.iter().any(|i| i.code == code),
+                "expected {code} to fail under the Welsh patterns, got: {:?}",
+                report.issues
+            );
+        }
     }
 
     /// JFCVC.3314: two facts of the same concept on the same context/unit

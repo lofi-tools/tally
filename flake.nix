@@ -357,14 +357,7 @@
               }
               {
                 name = "api";
-                command = ''
-                  # # Source .env with `set -a` so quoted values survive (the
-                  # # OTEL auth header contains a space — an unquoted export
-                  # # splits the token off and Traceway 401s everything).
-                  set -a; [ -f "${wd}/.env" ] && . "${wd}/.env" || true; set +a
-                  ${bin.await-db}
-                  cargo run -p tally-api
-                '';
+                command = '' ${bin.await-db};  cargo run -p tally-api '';
               }
               { name = "web"; command = "${bin.web}"; }
             ]}
@@ -476,6 +469,18 @@
                 -f "$path" -v --validationExitCode --captureWarnings
             done
             echo "all generated documents validate OK (UK plugin)"
+          '';
+
+          # Compare the in-process Rust checker (validate-uk) with Arelle's
+          # validate/UK plugin over the same generated documents, bucketing
+          # findings by error code so divergences are visible.  Known
+          # divergences (e.g. Arelle misclassifying ct-comp computation
+          # documents as accounts) are annotated.  Runs in the devShell
+          # (needs cargo + arelle): `nix develop -c validate-compare`.
+          validate-compare = ''
+            set -e
+            cd "${wd}"
+            cargo run -q -p validate-compare "$@"
           '';
 
           # Run the 3-report live test (the ct600 crate's
@@ -695,7 +700,6 @@
           # apps/tally-api/README.md).  .env is sourced with `set -a` so
           # quoted values survive (the OTEL auth header contains a space).
           api = ''
-            # set -a; [ -f "${wd}/.env" ] && . "${wd}/.env" || true; set +a
             cargo run -p tally-api
           '';
 

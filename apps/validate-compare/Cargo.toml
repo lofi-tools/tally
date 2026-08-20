@@ -1,0 +1,9 @@
+[package]
+name = "validate-compare"
+version = "0.1.0"
+edition = "2024"
+description = "Compare the in-process validate-uk checker against Arelle's validate/UK plugin on generated documents"
+
+[dependencies]
+anyhow.workspace = true
+validate-uk = { path = "../../libs/validate-uk" }

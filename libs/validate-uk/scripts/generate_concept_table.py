@@ -2,14 +2,16 @@
 """Generate the embedded UK taxonomy concept table used by the validate-uk crate.
 
 The checker needs per-concept metadata (data type, periodType, balance,
-enumeration values) to run schema-level checks.  That metadata lives in the
-FRC / HMRC XSDs, which are not vendored in this repo (they are downloaded on
-demand, e.g. by the flake).  This script extracts the subset of concepts that
-the report generators actually emit, plus the types they reference, and writes
-a compact JSON table that is embedded in the crate via `include_str!`.
+enumeration values, pattern / minLength facets) to run schema-level checks.
+That metadata lives in the FRC / HMRC XSDs, which are not vendored in this
+repo (they are downloaded on demand, e.g. by the flake).  This script
+embeds the **full ct-comp computation taxonomy** (every concept, so
+computation documents from any tool are schema-checked) plus the FRC
+concepts the report generators emit, and writes a compact JSON table that is
+embedded in the crate via `include_str!`.
 
-Regenerate after the generators start emitting new concepts, or when the
-taxonomy version changes:
+Regenerate after the taxonomy version changes, or when the generators start
+emitting new FRC concepts:
 
     python3 libs/validate-uk/scripts/generate_concept_table.py \
         --xsd-dir /path/to/taxonomy \
@@ -23,8 +25,11 @@ The XSDs needed (all 2023-01-01):
   - types.xsd        (FRC general types, incl. fixedItemType)
   - direp.xsd        (uk-direp statement concepts)
   - countries.xsd    (uk-geo)
+  - languages.xsd    (uk-lang language dimension + members)
   - dpl.xsd          (dpl computation line items)
   - ct-comp.xsd      (ct-comp computation concepts)
+  - ct-comp-types-2023.xsd  (ct-comp type facets: tax reference / district
+                             patterns, non-empty string minLength)
 """
 from __future__ import annotations
 
@@ -53,6 +58,10 @@ def _attr_local(el, local: str):
 def collect_concepts(xsd_paths: list[Path]) -> dict[str, dict]:
     """Extract element and simpleType definitions from a set of XSD files."""
     concepts: dict[str, dict] = {}
+    # Named type facets: type local name -> (pattern, minLength).  Extracted
+    # from the ct-comp types schema (taxReferenceItemType etc.) in a first
+    # pass, then attached to the elements that reference those types.
+    facets: dict[str, tuple[str | None, int | None]] = {}
 
     def add(name: str, **kw) -> None:
         d = {"name": name}
@@ -66,7 +75,51 @@ def collect_concepts(xsd_paths: list[Path]) -> dict[str, dict]:
             d["t"] = kw["typ"]
         if kw.get("enum"):
             d["e"] = kw["enum"]
+        if kw.get("pat"):
+            d["pat"] = kw["pat"]
+        if kw.get("ml") is not None:
+            d["ml"] = kw["ml"]
         concepts.setdefault(name, d)
+
+    def collect_type_facets(root) -> None:
+        """Record pattern / minLength facets for named simple and complex
+        types (the ct-comp types schema defines taxReferenceItemType,
+        taxDistrictItemType, nonEmptyStringItemType, nonEmptyString)."""
+        for el in root.iter():
+            tag = qname(el.tag)
+            name = el.attrib.get("name")
+            if not name:
+                continue
+            if tag not in ("simpleType", "complexType"):
+                continue
+            restriction = None
+            if tag == "simpleType":
+                restriction = el.find(f"{XS}restriction")
+            else:
+                sc = el.find(f"{XS}simpleContent")
+                restriction = sc.find(f"{XS}restriction") if sc is not None else None
+            if restriction is None:
+                continue
+            pattern = None
+            min_len = None
+            for c in restriction:
+                ct = qname(c.tag)
+                if ct == "pattern":
+                    pattern = c.attrib.get("value")
+                elif ct == "minLength":
+                    v = c.attrib.get("value")
+                    if v:
+                        min_len = int(v)
+            if pattern or min_len is not None:
+                # Keyed by the type's own name (taxReferenceItemType etc.):
+                # elements reference these by name via their `type` attribute.
+                facets[name] = (pattern, min_len)
+
+    # Global first pass: named-type facets, across every file, before any
+    # element is processed (the ct-comp types file lists after ct-comp-2.xsd,
+    # but its elements reference those types).
+    for path in xsd_paths:
+        collect_type_facets(ET.parse(path).getroot())
 
     for path in xsd_paths:
         root = ET.parse(path).getroot()
@@ -97,8 +150,9 @@ def collect_concepts(xsd_paths: list[Path]) -> dict[str, dict]:
                         if enums:
                             typ = rest.attrib.get("base") or "enum"
                 kind = typ.rpartition(":")[2] if typ else None
+                pattern, min_len = facets.get(kind, (None, None))
                 add(name, period=period, balance=balance, nillable=nillable,
-                    typ=kind, enum=enums or None)
+                    typ=kind, enum=enums or None, pat=pattern, ml=min_len)
             elif tag == "simpleType":
                 name = el.attrib.get("name")
                 if not name:
@@ -142,8 +196,10 @@ def main() -> None:
         xsd_dir / "types.xsd",
         xsd_dir / "direp.xsd",
         xsd_dir / "countries.xsd",
+        xsd_dir / "languages.xsd",
         xsd_dir / "dpl.xsd",
         xsd_dir / "ct-comp-2.xsd",
+        xsd_dir / "ct-comp-types-2023.xsd",
     ]
     missing = [p for p in xsd_files if not p.exists()]
     if missing:
@@ -151,6 +207,23 @@ def main() -> None:
 
     concepts = collect_concepts(xsd_files)
     used = used_concepts([Path(f) for f in args.fixtures])
+
+    # Welsh reports use the language dimension + report-language marker even
+    # though the English fixtures never reference them — keep them and their
+    # types.
+    used |= {"Welsh", "LanguagesDimension", "ReportPrincipalLanguage"}
+
+    # The full ct-comp computation taxonomy is embedded, not just the subset
+    # the generators emit: the checker validates computation documents
+    # produced by any tool, so every ct-comp concept must be known.  (The FRC
+    # accounts concepts stay fixture-filtered — the generators only emit a
+    # small slice of the full FRS-2022 taxonomy.)
+    ct_comp = set()
+    ct_root = ET.parse(Path(args.xsd_dir) / "ct-comp-2.xsd").getroot()
+    for el in ct_root.iter():
+        if qname(el.tag) == "element" and el.attrib.get("name"):
+            ct_comp.add(el.attrib["name"])
+    used |= ct_comp
 
     # Also keep the types the used concepts reference (e.g. fixedItemType).
     keep = set(used)

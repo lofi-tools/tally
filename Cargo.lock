@@ -3479,6 +3479,7 @@ dependencies = [
  "snafu",
  "test_utils",
  "tokio",
+ "validate-uk",
 ]
 
 [[package]]
@@ -5556,6 +5557,14 @@ dependencies = [
  "serde_core",
  "sha1_smol",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "validate-compare"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "validate-uk",
 ]
 
 [[package]]

@@ -26,3 +26,6 @@ serde_json_lenient.workspace = true
 flate2 = "1"
 # Shared repo-root resolution + fixtures for the test suite.
 test_utils = { path = "../test_utils" }
+# In-process JFCVC / UK taxonomy validation — used to check the generated
+# documents (English and Welsh) against the same rules Arelle enforces.
+validate-uk = { path = "../validate-uk" }
