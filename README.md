@@ -275,3 +275,4 @@ The UTR can also come from `COMPANY_UNIQUE_TAXPAYER_REF`, which wins over
 - [Corporation tax iXBRL (2018)](https://assets.publishing.service.gov.uk/media/5d84bef7e5274a27c2c6d5aa/CT_Online_XBRL_Technical_Pack_2.0.pdf#2#1)
 - [Corp taxation manual](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm01000)
 - [Corp Tax calculation](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955)
+- [HMRC API docs](https://developer.service.hmrc.gov.uk/api-documentation/docs/api/service/api-example-microservice/1.0/oas/page)
