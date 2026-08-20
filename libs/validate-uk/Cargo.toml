@@ -1,0 +1,12 @@
+[package]
+name = "validate-uk"
+version = "0.1.0"
+edition = "2024"
+description = "In-process JFCVC / UK taxonomy validation for generated iXBRL documents (rules-driven, no Arelle)"
+
+[dependencies]
+# The shared iXBRL intermediate representation (XmlNode) is used to parse
+# both the generated documents and the taxonomy XSD files.
+ixbrl-ir = { path = "../ixbrl-ir" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

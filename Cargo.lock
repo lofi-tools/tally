@@ -4461,6 +4461,7 @@ dependencies = [
  "tempfile",
  "test_utils",
  "tokio",
+ "validate-uk",
 ]
 
 [[package]]
@@ -5555,6 +5556,15 @@ dependencies = [
  "serde_core",
  "sha1_smol",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "validate-uk"
+version = "0.1.0"
+dependencies = [
+ "ixbrl-ir",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

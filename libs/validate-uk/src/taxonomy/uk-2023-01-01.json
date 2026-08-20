@@ -1,0 +1,765 @@
+{
+ "AbridgedAccounts": {
+  "n": true,
+  "name": "AbridgedAccounts",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "AccountingStandardsApplied": {
+  "n": true,
+  "name": "AccountingStandardsApplied",
+  "p": "duration",
+  "t": "fixedItemType"
+ },
+ "AccountsStatusAuditedOrUnaudited": {
+  "n": true,
+  "name": "AccountsStatusAuditedOrUnaudited",
+  "p": "duration",
+  "t": "fixedItemType"
+ },
+ "AccountsType": {
+  "n": true,
+  "name": "AccountsType",
+  "p": "duration",
+  "t": "fixedItemType"
+ },
+ "AccruedLiabilitiesDeferredIncome": {
+  "b": "credit",
+  "n": true,
+  "name": "AccruedLiabilitiesDeferredIncome",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "AddressLine1": {
+  "n": true,
+  "name": "AddressLine1",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "AddressLine2": {
+  "n": true,
+  "name": "AddressLine2",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "AdjustedTradingProfitOfThisPeriod": {
+  "name": "AdjustedTradingProfitOfThisPeriod",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME": {
+  "name": "AdjustmentsAdditionalDeductionForQualifyingRDExpenditureSME",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "AdjustmentsCreativeProductionCompanyAdjustment": {
+  "name": "AdjustmentsCreativeProductionCompanyAdjustment",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "AdministrativeExpenses": {
+  "b": "debit",
+  "n": true,
+  "name": "AdministrativeExpenses",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "AfterOneYear": {
+  "n": true,
+  "name": "AfterOneYear",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "AreaCode": {
+  "n": true,
+  "name": "AreaCode",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "AuditAccountancyCosts": {
+  "b": "debit",
+  "name": "AuditAccountancyCosts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "AuditExempt-NoAccountantsReport": {
+  "n": true,
+  "name": "AuditExempt-NoAccountantsReport",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "AverageNumberEmployeesDuringPeriod": {
+  "n": true,
+  "name": "AverageNumberEmployeesDuringPeriod",
+  "p": "duration",
+  "t": "decimalItemType"
+ },
+ "BalanceSheetDate": {
+  "n": true,
+  "name": "BalanceSheetDate",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "BankCharges": {
+  "b": "debit",
+  "name": "BankCharges",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "BusinessReportPublicationDate": {
+  "n": true,
+  "name": "BusinessReportPublicationDate",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "Company": {
+  "name": "Company",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "CompanyIsAPartnerInAFirm": {
+  "name": "CompanyIsAPartnerInAFirm",
+  "p": "duration",
+  "t": "booleanItemType"
+ },
+ "CompanyName": {
+  "name": "CompanyName",
+  "p": "instant",
+  "t": "nonEmptyStringItemType"
+ },
+ "CorporationTaxChargeable": {
+  "name": "CorporationTaxChargeable",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "CorporationTaxChargeablePayable": {
+  "name": "CorporationTaxChargeablePayable",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "CountryCode": {
+  "n": true,
+  "name": "CountryCode",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "CountryFormationOrIncorporation": {
+  "n": true,
+  "name": "CountryFormationOrIncorporation",
+  "p": "duration",
+  "t": "fixedItemType"
+ },
+ "CountyRegion": {
+  "n": true,
+  "name": "CountyRegion",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "Creditors": {
+  "b": "credit",
+  "n": true,
+  "name": "Creditors",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "CurrentAssets": {
+  "b": "debit",
+  "n": true,
+  "name": "CurrentAssets",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "DateAuthorisationFinancialStatementsForIssue": {
+  "n": true,
+  "name": "DateAuthorisationFinancialStatementsForIssue",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "DateFormationOrIncorporation": {
+  "n": true,
+  "name": "DateFormationOrIncorporation",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "DescriptionActivity": {
+  "name": "DescriptionActivity",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "DescriptionOrOtherInformationOnWebsite": {
+  "n": true,
+  "name": "DescriptionOrOtherInformationOnWebsite",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "DescriptionPrincipalActivities": {
+  "n": true,
+  "name": "DescriptionPrincipalActivities",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "Director1": {
+  "n": true,
+  "name": "Director1",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "Director2": {
+  "n": true,
+  "name": "Director2",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "Director3": {
+  "n": true,
+  "name": "Director3",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "DirectorSigningFinancialStatements": {
+  "n": true,
+  "name": "DirectorSigningFinancialStatements",
+  "p": "duration",
+  "t": "fixedItemType"
+ },
+ "E-mailAddress": {
+  "n": true,
+  "name": "E-mailAddress",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "EndDateForPeriodCoveredByReport": {
+  "n": true,
+  "name": "EndDateForPeriodCoveredByReport",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "EndOfPeriodCoveredByReturn": {
+  "name": "EndOfPeriodCoveredByReturn",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "EnglandWales": {
+  "n": true,
+  "name": "EnglandWales",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "EntityCurrentLegalOrRegisteredName": {
+  "n": true,
+  "name": "EntityCurrentLegalOrRegisteredName",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "EntityDormantTruefalse": {
+  "n": true,
+  "name": "EntityDormantTruefalse",
+  "p": "duration",
+  "t": "booleanItemType"
+ },
+ "EntityTradingStatus": {
+  "n": true,
+  "name": "EntityTradingStatus",
+  "p": "duration",
+  "t": "fixedItemType"
+ },
+ "Equity": {
+  "b": "credit",
+  "n": true,
+  "name": "Equity",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "FY1AmountOfProfitChargeableAtFirstRate": {
+  "name": "FY1AmountOfProfitChargeableAtFirstRate",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "FY1FirstRateOfTax": {
+  "name": "FY1FirstRateOfTax",
+  "p": "duration",
+  "t": "decimalItemType"
+ },
+ "FY1TaxAtFirstRate": {
+  "name": "FY1TaxAtFirstRate",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "FY2AmountOfProfitChargeableAtFirstRate": {
+  "name": "FY2AmountOfProfitChargeableAtFirstRate",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "FY2FirstRateOfTax": {
+  "name": "FY2FirstRateOfTax",
+  "p": "duration",
+  "t": "decimalItemType"
+ },
+ "FY2TaxAtFirstRate": {
+  "name": "FY2TaxAtFirstRate",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "FinancialYear1CoveredByTheReturn": {
+  "name": "FinancialYear1CoveredByTheReturn",
+  "p": "duration",
+  "t": "gYearItemType"
+ },
+ "FinancialYear2CoveredByTheReturn": {
+  "name": "FinancialYear2CoveredByTheReturn",
+  "p": "duration",
+  "t": "gYearItemType"
+ },
+ "FixedAssets": {
+  "b": "debit",
+  "n": true,
+  "name": "FixedAssets",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "GrossProfitLoss": {
+  "b": "credit",
+  "n": true,
+  "name": "GrossProfitLoss",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "GroupReliefClaimed": {
+  "name": "GroupReliefClaimed",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "GroupReliefClaimedForCarriedForwardLosses": {
+  "name": "GroupReliefClaimedForCarriedForwardLosses",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "ITComputingCosts": {
+  "b": "debit",
+  "name": "ITComputingCosts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "IncomeTaxExpenseCredit": {
+  "b": "debit",
+  "n": true,
+  "name": "IncomeTaxExpenseCredit",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "Item1": {
+  "name": "Item1",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "Landline": {
+  "n": true,
+  "name": "Landline",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "LegalFormEntity": {
+  "n": true,
+  "name": "LegalFormEntity",
+  "p": "duration",
+  "t": "fixedItemType"
+ },
+ "LocalNumber": {
+  "n": true,
+  "name": "LocalNumber",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "LossesFromMiscellaneousTransactions": {
+  "name": "LossesFromMiscellaneousTransactions",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "M-ProfessionalScientificTechnicalActivities": {
+  "n": true,
+  "name": "M-ProfessionalScientificTechnicalActivities",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "MainIndustrySector": {
+  "n": true,
+  "name": "MainIndustrySector",
+  "p": "duration",
+  "t": "fixedItemType"
+ },
+ "MainPoolAnnualInvestmentAllowance": {
+  "name": "MainPoolAnnualInvestmentAllowance",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "ManagementExpenses": {
+  "name": "ManagementExpenses",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "MarginalRateReliefForRingFenceTradesPayable": {
+  "name": "MarginalRateReliefForRingFenceTradesPayable",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "Micro-entities": {
+  "n": true,
+  "name": "Micro-entities",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "NameContactDepartmentOrPerson": {
+  "n": true,
+  "name": "NameContactDepartmentOrPerson",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "NameEntityAccountants": {
+  "n": true,
+  "name": "NameEntityAccountants",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "NameEntityAuditors": {
+  "n": true,
+  "name": "NameEntityAuditors",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "NameEntityOfficer": {
+  "n": true,
+  "name": "NameEntityOfficer",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "NameOfProductionSoftware": {
+  "name": "NameOfProductionSoftware",
+  "p": "instant",
+  "t": "stringItemType"
+ },
+ "NameProductionSoftware": {
+  "n": true,
+  "name": "NameProductionSoftware",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "NetAssetsLiabilities": {
+  "b": "debit",
+  "n": true,
+  "name": "NetAssetsLiabilities",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "NetChargeableGains": {
+  "name": "NetChargeableGains",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "NetCorporationTaxPayable": {
+  "name": "NetCorporationTaxPayable",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "NetCurrentAssetsLiabilities": {
+  "b": "debit",
+  "n": true,
+  "name": "NetCurrentAssetsLiabilities",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "NetTradingProfits": {
+  "name": "NetTradingProfits",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "OtherOperationalAdministrationCosts": {
+  "b": "debit",
+  "name": "OtherOperationalAdministrationCosts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "PensionCostsDefinedContributionPlan": {
+  "b": "debit",
+  "n": true,
+  "name": "PensionCostsDefinedContributionPlan",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "PeriodOfAccountEndDate": {
+  "name": "PeriodOfAccountEndDate",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "PeriodOfAccountStartDate": {
+  "name": "PeriodOfAccountStartDate",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "Post-lossReform": {
+  "name": "Post-lossReform",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "PostalCodeZip": {
+  "n": true,
+  "name": "PostalCodeZip",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "PrepaymentsAccruedIncomeNotExpressedWithinCurrentAssetSubtotal": {
+  "b": "debit",
+  "n": true,
+  "name": "PrepaymentsAccruedIncomeNotExpressedWithinCurrentAssetSubtotal",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "PrincipalLocation-CityOrTown": {
+  "n": true,
+  "name": "PrincipalLocation-CityOrTown",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "PrintingPostageStationeryCosts": {
+  "b": "debit",
+  "name": "PrintingPostageStationeryCosts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "PrivateLimitedCompanyLtd": {
+  "n": true,
+  "name": "PrivateLimitedCompanyLtd",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "ProfitLoss": {
+  "b": "credit",
+  "n": true,
+  "name": "ProfitLoss",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "ProfitLossBeforeTax": {
+  "b": "credit",
+  "n": true,
+  "name": "ProfitLossBeforeTax",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "ProfitLossPerAccounts": {
+  "name": "ProfitLossPerAccounts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "ProfitsBeforeChargesAndGroupRelief": {
+  "name": "ProfitsBeforeChargesAndGroupRelief",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "ProfitsBeforeOtherDeductionsAndReliefs": {
+  "name": "ProfitsBeforeOtherDeductionsAndReliefs",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "ProvisionsForLiabilitiesBalanceSheetSubtotal": {
+  "b": "credit",
+  "n": true,
+  "name": "ProvisionsForLiabilitiesBalanceSheetSubtotal",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "QualifyingDonations": {
+  "name": "QualifyingDonations",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "ReportTitle": {
+  "n": true,
+  "name": "ReportTitle",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "SICCodeRecordedUKCompaniesHouse1": {
+  "n": true,
+  "name": "SICCodeRecordedUKCompaniesHouse1",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "SICCodeRecordedUKCompaniesHouse2": {
+  "n": true,
+  "name": "SICCodeRecordedUKCompaniesHouse2",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "StartDateForPeriodCoveredByReport": {
+  "n": true,
+  "name": "StartDateForPeriodCoveredByReport",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "StartOfPeriodCoveredByReturn": {
+  "name": "StartOfPeriodCoveredByReturn",
+  "p": "instant",
+  "t": "dateItemType"
+ },
+ "StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime": {
+  "n": true,
+  "name": "StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies": {
+  "n": true,
+  "name": "StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct": {
+  "n": true,
+  "name": "StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "StatementThatMembersHaveNotRequiredCompanyToObtainAnAudit": {
+  "n": true,
+  "name": "StatementThatMembersHaveNotRequiredCompanyToObtainAnAudit",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "SubscriptionsCosts": {
+  "b": "debit",
+  "name": "SubscriptionsCosts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "SubsidisedQualifyingExpenditureOnIn-HouseDirectRD": {
+  "name": "SubsidisedQualifyingExpenditureOnIn-HouseDirectRD",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TaxChargeable": {
+  "name": "TaxChargeable",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TaxPayable": {
+  "name": "TaxPayable",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TaxReference": {
+  "name": "TaxReference",
+  "p": "instant",
+  "t": "taxReferenceItemType"
+ },
+ "TelecommunicationsCosts": {
+  "b": "debit",
+  "name": "TelecommunicationsCosts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TotalAssetsLessCurrentLiabilities": {
+  "b": "debit",
+  "n": true,
+  "name": "TotalAssetsLessCurrentLiabilities",
+  "p": "instant",
+  "t": "monetaryItemType"
+ },
+ "TotalCosts": {
+  "b": "debit",
+  "name": "TotalCosts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TotalProfitsChargeableToCorporationTax": {
+  "name": "TotalProfitsChargeableToCorporationTax",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TotalReliefsAndDeductionsInTermsOfTaxPayable": {
+  "name": "TotalReliefsAndDeductionsInTermsOfTaxPayable",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "Trade": {
+  "name": "Trade",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "TradingLossesBroughtForward": {
+  "name": "TradingLossesBroughtForward",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TradingLossesOfThisOrLaterAP": {
+  "name": "TradingLossesOfThisOrLaterAP",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TravelSubsistenceCosts": {
+  "b": "debit",
+  "name": "TravelSubsistenceCosts",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "TurnoverRevenue": {
+  "b": "credit",
+  "n": true,
+  "name": "TurnoverRevenue",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "UK": {
+  "n": true,
+  "name": "UK",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "UKCompaniesHouseRegisteredNumber": {
+  "n": true,
+  "name": "UKCompaniesHouseRegisteredNumber",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "UnitedKingdom": {
+  "n": true,
+  "name": "UnitedKingdom",
+  "p": "duration",
+  "t": "domainItemType"
+ },
+ "VATRegistrationNumber": {
+  "n": true,
+  "name": "VATRegistrationNumber",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "VersionOfProductionSoftware": {
+  "name": "VersionOfProductionSoftware",
+  "p": "instant",
+  "t": "stringItemType"
+ },
+ "VersionProductionSoftware": {
+  "n": true,
+  "name": "VersionProductionSoftware",
+  "p": "duration",
+  "t": "stringItemType"
+ },
+ "WagesSalaries": {
+  "b": "debit",
+  "n": true,
+  "name": "WagesSalaries",
+  "p": "duration",
+  "t": "monetaryItemType"
+ },
+ "WebsiteMainPageURL": {
+  "n": true,
+  "name": "WebsiteMainPageURL",
+  "p": "duration",
+  "t": "anyURIItemType"
+ },
+ "WithinOneYear": {
+  "n": true,
+  "name": "WithinOneYear",
+  "p": "duration",
+  "t": "domainItemType"
+ }
+}

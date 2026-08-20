@@ -1192,15 +1192,15 @@ impl Frs105Accounts {
             ),
         ]);
         // Dimensioned taxonomy facts: the JFCVC-mandatory ones (ctxt-4..7)
-        // are always emitted with the fallback values above; the voluntary
-        // ones (ctxt-3, ctxt-8) only when the profile supplies a non-empty
-        // dimension value, matching the corresponding xbrli:context.
+        // are always emitted as empty markers; the voluntary ones (ctxt-3,
+        // ctxt-8) only when the profile supplies a non-empty dimension value,
+        // matching the corresponding xbrli:context.  MainIndustrySector and
+        // CountryFormationOrIncorporation are `types:fixedItemType` like the
+        // four mandatory markers — the fact must be empty; the member is
+        // carried by the context's dimension (the FRC taxonomy rejects a
+        // non-empty value: xmlSchema length 0).
         if !profile.industry_sector_dimension.is_empty() {
-            hidden_children.push(non_numeric(
-                "uk-bus:MainIndustrySector",
-                "ctxt-3",
-                &profile.industry_sector_dimension,
-            ));
+            hidden_children.push(non_numeric("uk-bus:MainIndustrySector", "ctxt-3", ""));
         }
         hidden_children.extend(vec![
             non_numeric("uk-bus:EntityDormantTruefalse", "ctxt-0", "false"),
@@ -1228,7 +1228,7 @@ impl Frs105Accounts {
             hidden_children.push(non_numeric(
                 "uk-bus:CountryFormationOrIncorporation",
                 "ctxt-8",
-                &profile.country_dimension,
+                "",
             ));
         }
         hidden_children.extend(vec![

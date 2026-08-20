@@ -38,6 +38,8 @@ log = "0.4"
 # unification.
 ct600 = { path = "../../libs/ct600", default-features = false }
 reports = { path = "../../libs/reports" }
+# In-process JFCVC / UK taxonomy validation (no Arelle needed).
+validate-uk = { path = "../../libs/validate-uk" }
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -38,6 +38,8 @@ use reports::GnucashBook;
 enum Command {
     /// Produce the CT600 corporation-tax return.
     Ct600,
+    /// Validate a generated iXBRL document in-process (JFCVC + UK taxonomy).
+    Validate,
 }
 
 impl Command {
@@ -51,6 +53,7 @@ impl Command {
         }
         match command.as_str() {
             "ct600" => Ok(Command::Ct600),
+            "validate" => Ok(Command::Validate),
             other => bail!("unknown command '{other}'\n\n{USAGE}"),
         }
     }
@@ -62,6 +65,7 @@ impl Command {
                 let args = parse_ct600_args()?;
                 run_ct600(args).await
             }
+            Command::Validate => run_validate(),
         }
     }
 }
@@ -98,9 +102,15 @@ fn parse_ct600_args() -> Result<CliArgs> {
 
 const USAGE: &str = "\
 usage: tally ct600 --config-path <config> --book <book> [--out <dir>] [--accounts-made-up-to <date>]
+       tally validate <file> [--taxonomy-dir <dir>]
 
-Produce (not submit) the CT600 corporation-tax return.
+Commands:
+  ct600       produce (not submit) the CT600 corporation-tax return
+  validate    validate a generated iXBRL document in-process against the
+              JFCVC v4.0 rules and the UK taxonomy concept table (no Arelle
+              needed); exits non-zero on validation errors
 
+ct600 options:
   --config-path <config>    JSON config: company + accounts metadata
   --book <book>             GnuCash ledger (input.gnucash)
   --out <dir>               output directory (default: the tally repo's
@@ -110,7 +120,63 @@ Produce (not submit) the CT600 corporation-tax return.
                             date at which the accounts are made (YYYY-MM-DD);
                             deduce the return period as the 12 months ending
                             on it, instead of the config's period or the
-                            Companies House default";
+                            Companies House default
+
+validate options:
+  <file>                    the iXBRL document to validate (accounts or
+                            computation)
+  --taxonomy-dir <dir>      directory of downloaded taxonomy XSDs (bus.xsd,
+                            frc-core.xsd, ...) for full schema checks;
+                            defaults to the embedded concept table
+";
+
+/// Run `tally validate <file>`: parse the flags, run the in-process checker,
+/// print findings like Arelle log lines, and exit non-zero on errors.
+fn run_validate() -> Result<()> {
+    use validate_uk::Validator;
+
+    let mut rest = std::env::args().skip(2); // skip program + subcommand
+    let mut file = None;
+    let mut taxonomy_dir = None;
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--taxonomy-dir" => taxonomy_dir = Some(next_value(&mut rest, &arg)?),
+            "-h" | "--help" => {
+                println!("{USAGE}");
+                std::process::exit(0);
+            }
+            other if file.is_none() => file = Some(PathBuf::from(other)),
+            other => bail!("unknown argument '{other}'\n\n{USAGE}"),
+        }
+    }
+    let file = file.context("missing <file>: the iXBRL document to validate")?;
+
+    let validator = match taxonomy_dir {
+        Some(dir) => Validator::with_taxonomy_dir(&dir)
+            .map_err(|e| anyhow::anyhow!(e))?,
+        None => Validator::new(),
+    };
+    let html = std::fs::read_to_string(&file)
+        .with_context(|| format!("cannot read {}", file.display()))?;
+    let report = validator.validate(&html);
+
+    let file_name = file.display().to_string();
+    if report.issues.is_empty() {
+        println!("validation OK (no issues)");
+        return Ok(());
+    }
+    let mut had_error = false;
+    for issue in &report.issues {
+        if issue.kind == validate_uk::IssueKind::Error {
+            had_error = true;
+        }
+        eprintln!("{}", issue.to_log_line(&file_name));
+    }
+    if had_error {
+        std::process::exit(1);
+    }
+    Ok(())
+}
 
 /// Entry point: parse the subcommand, run it, and print a concise error
 /// (no backtrace) on failure.

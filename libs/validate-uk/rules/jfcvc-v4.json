@@ -1,0 +1,226 @@
+{
+  "source": "JFCVC v4.0 (2020-06-09) + HMRC iXBRL style guide v2.2, extracted from Arelle's validate/UK plugin (arelle/plugin/validate/UK/__init__.py and ValidateUK.py). Concept local names only (namespace prefixes are resolved by the checker).",
+  "taxonomyTypes": {
+    "ukGAAP": {
+      "mandatory": [
+        "AverageNumberEmployeesDuringPeriod", "EntityCurrentLegalOrRegisteredName",
+        "StartDateForPeriodCoveredByReport", "EndDateForPeriodCoveredByReport",
+        "BalanceSheetDate", "DateApprovalAccounts", "NameDirectorSigningAccounts",
+        "EntityDormant", "EntityTrading", "DateSigningDirectorsReport", "DirectorSigningReport"
+      ]
+    },
+    "charities": {
+      "mandatory": [
+        "AverageNumberEmployeesDuringPeriod", "EntityCurrentLegalOrRegisteredName",
+        "StartDateForPeriodCoveredByReport", "EndDateForPeriodCoveredByReport",
+        "BalanceSheetDate", "DateAuthorisationFinancialStatementsForIssue",
+        "DirectorSigningFinancialStatements", "EntityDormantTruefalse", "EntityTradingStatus",
+        "AccountingStandardsApplied", "AccountsStatusAuditedOrUnaudited"
+      ],
+      "mustHaveOne": [
+        "CharityRegistrationNumberEnglandWales", "CharityRegistrationNumberScotland",
+        "CharityRegistrationNumberNorthernIreland"
+      ]
+    },
+    "ukIFRS": {
+      "mandatory": [
+        "AverageNumberEmployeesDuringPeriod", "EntityCurrentLegalOrRegisteredName",
+        "StartDateForPeriodCoveredByReport", "EndDateForPeriodCoveredByReport",
+        "BalanceSheetDate", "DateAuthorisationFinancialStatementsForIssue",
+        "ExplanationOfBodyOfAuthorisation", "EntityDormant", "EntityTrading",
+        "DateSigningDirectorsReport", "DirectorSigningReport"
+      ]
+    },
+    "FRS": {
+      "mandatory": [
+        "AverageNumberEmployeesDuringPeriod", "EntityCurrentLegalOrRegisteredName",
+        "StartDateForPeriodCoveredByReport", "EndDateForPeriodCoveredByReport",
+        "BalanceSheetDate", "DateAuthorisationFinancialStatementsForIssue",
+        "DirectorSigningFinancialStatements", "EntityDormantTruefalse", "EntityTradingStatus",
+        "AccountingStandardsApplied", "AccountsStatusAuditedOrUnaudited",
+        "LegalFormEntity", "DescriptionPrincipalActivities", "AccountsTypeFullOrAbbreviated"
+      ]
+    },
+    "FRS-2022": {
+      "mandatory": [
+        "AverageNumberEmployeesDuringPeriod", "EntityCurrentLegalOrRegisteredName",
+        "StartDateForPeriodCoveredByReport", "EndDateForPeriodCoveredByReport",
+        "BalanceSheetDate", "DateAuthorisationFinancialStatementsForIssue",
+        "DirectorSigningFinancialStatements", "EntityDormantTruefalse", "EntityTradingStatus",
+        "AccountingStandardsApplied", "AccountsStatusAuditedOrUnaudited",
+        "LegalFormEntity", "DescriptionPrincipalActivities", "AccountsType"
+      ]
+    },
+    "ct-comp": {
+      "_note": "The HMRC computation taxonomy (ct-comp) is validated by the ct-comp schema and HMRC's CT600 spec, not by the JFCVC accounts rule set. Arelle's plugin misclassifies ct-comp documents as accounts (its 2020 namespace regex predates the hmrc.gov.uk ct-comp namespace) and wrongly demands the FRS-2022 mandatory set; this checker instead recognises ct-comp and skips the accounts mandatory-items rule.",
+      "mandatory": []
+    }
+  },
+  "genericDimensionValidations": {
+    "SpecificDiscontinuedOperation": { "min": 1, "max": 8, "facts": ["DescriptionDiscontinuedOperationOrNon-currentAssetsOrDisposalGroupHeldForSale"] },
+    "SpecificNon-currentAssetsDisposalGroupHeldForSale": { "min": 1, "max": 8, "facts": ["DescriptionDiscontinuedOperationOrNon-currentAssetsOrDisposalGroupHeldForSale"] },
+    "Chairman": { "facts": ["NameEntityOfficer"] },
+    "ChiefExecutive": { "facts": ["NameEntityOfficer"] },
+    "ChairmanChiefExecutive": { "facts": ["NameEntityOfficer"] },
+    "SeniorPartnerLimitedLiabilityPartnership": { "facts": ["NameEntityOfficer"] },
+    "CorporateTrustee": { "min": 1, "max": 3, "facts": ["NameEntityOfficer"] },
+    "DirectorOfCorporateTrustee": { "facts": ["NameEntityOfficer"] },
+    "CustodianTrustee": { "facts": ["NameEntityOfficer"] },
+    "Trustee": { "min": 1, "max": 20, "facts": ["NameEntityOfficer"] },
+    "CompanySecretary": { "min": 1, "max": 2, "facts": ["NameEntityOfficer"] },
+    "CompanySecretaryDirector": { "min": 1, "max": 2, "facts": ["NameEntityOfficer"] },
+    "Director": { "min": 1, "max": 40, "facts": ["NameEntityOfficer"] },
+    "PartnerLLP": { "min": 1, "max": 20, "facts": ["NameEntityOfficer"] },
+    "ReportableOperatingSegment": { "min": 1, "max": 20, "facts": ["NameIndividualSegment"] },
+    "ProductService": { "min": 1, "max": 12, "facts": ["NameIndividualSegment"] },
+    "MajorCustomer": { "min": 1, "max": 12, "facts": ["NameIndividualSegment"] },
+    "SpecificBusinessCombination": { "min": 1, "max": 10, "facts": ["NameAcquiredEntity"] },
+    "ConsumableBiologicalAssetClass": { "min": 1, "max": 5, "facts": ["NameOrDescriptionBiologicalAssetClass"] },
+    "BearerBiologicalAssetClass": { "min": 1, "max": 5, "facts": ["NameOrDescriptionBiologicalAssetClass"] },
+    "Subsidiary": { "min": 1, "max": 200, "facts": ["NameSubsidiary"] },
+    "Associate": { "min": 1, "max": 50, "facts": ["NameAssociate"] },
+    "JointVenture": { "min": 1, "max": 50, "facts": ["NameJointVenture"] },
+    "UnconsolidatedStructuredEntity": { "min": 1, "max": 5, "facts": ["NameUnconsolidatedStructuredEntity"] },
+    "IntermediateParent": { "min": 1, "max": 5, "facts": ["NameOrDescriptionRelatedPartyIfNotDefinedByAnotherTag"] },
+    "EntityWithJointControlOrSignificantInfluence": { "min": 1, "max": 5, "facts": ["NameOrDescriptionRelatedPartyIfNotDefinedByAnotherTag"] },
+    "OtherGroupMember": { "min": 1, "max": 8, "facts": ["NameOrDescriptionRelatedPartyIfNotDefinedByAnotherTag"] },
+    "KeyManagementIndividualGroup": { "min": 1, "max": 5, "facts": ["NameOrDescriptionRelatedPartyIfNotDefinedByAnotherTag"] },
+    "CloseFamilyMember": { "min": 1, "max": 5, "facts": ["NameOrDescriptionRelatedPartyIfNotDefinedByAnotherTag"] },
+    "EntityControlledByKeyManagementPersonnel": { "min": 1, "max": 5, "facts": ["NameOrDescriptionRelatedPartyIfNotDefinedByAnotherTag"] },
+    "OtherRelatedPartyRelationshipType1ComponentTotalRelatedParties": { "facts": ["NameOrDescriptionRelatedPartyIfNotDefinedByAnotherTag"] },
+    "OtherRelatedPartyRelationshipType2ComponentTotalRelatedParties": { "facts": ["NameOrDescriptionRelatedPartyIfNotDefinedByAnotherTag"] },
+    "OrdinaryShareClass": { "min": 1, "max": 5, "facts": ["DescriptionShareType"] },
+    "PreferenceShareClass": { "min": 1, "max": 5, "facts": ["DescriptionShareType"] },
+    "DeferredShareClass": { "min": 1, "max": 5, "facts": ["DescriptionShareType"] },
+    "OtherShareClass": { "min": 1, "max": 5, "facts": ["DescriptionShareType"] },
+    "Share-basedArrangement": { "min": 1, "max": 8, "facts": ["NameShare-basedPaymentArrangement"] },
+    "Grant": { "min": 1, "max": 10, "facts": ["NameOrDescriptionGrantUnderShare-basedPaymentArrangement"] },
+    "PensionPlan": { "min": 1, "max": 6, "facts": ["NameDefinedContributionPlan", "NameDefinedBenefitPlan"] },
+    "Post-employmentMedicalPlan": { "min": 1, "max": 2, "facts": ["NameDefinedContributionPlan", "NameDefinedBenefitPlan"] },
+    "OtherPost-employmentBenefitPlan": { "min": 1, "max": 2, "facts": ["NameDefinedContributionPlan", "NameDefinedBenefitPlan"] },
+    "OtherContractType": { "min": 1, "max": 2, "facts": ["DescriptionOtherContractType"] },
+    "OtherDurationType": { "min": 1, "max": 2, "facts": ["DescriptionOtherContractDurationType"] },
+    "OtherChannelType": { "min": 1, "max": 2, "facts": ["DescriptionOtherSalesChannelType"] },
+    "SalesChannel": { "min": 1, "max": 2, "facts": ["DescriptionOtherSalesChannelType"] }
+  },
+  "textPatterns": {
+    "Ch.DirResp": {
+      "concept": "StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct",
+      "en": { "groups": [["Director acknowledges", "Directors acknowledge", "Trustees acknowledge", "Trustee acknowledges"], ["responsibilities"], ["Companies Act 2006", "the Act"]] },
+      "cy": { "groups": [["Cyfarwyddwyr yn cydnabod", "Cyfarwyddwr yn cydnabod", "ymddiriedolwyr yn cydnabod", "ymddiriedolwr yn cydnabod"], ["cyfrifoldebau"], ["Ddeddf Cwmn\u00efau 2006", "y ddeddf"]] }
+    },
+    "Co.Abrid": {
+      "concept": "StatementThatMembersHaveAgreedToPreparationAbridgedAccountsUnderSection444CompaniesAct2006",
+      "en": { "groups": [["Members", "Member"], ["agreed", "consented"], ["preparation"], ["abridged"]] },
+      "cy": { "groups": [["Aelodau", "Aelod"], ["wedi cytuno", "cydsynio"], ["paratoi"], ["talfyredig"]] }
+    },
+    "Co.AuditNR": {
+      "concept": "StatementThatMembersHaveNotRequiredCompanyToObtainAnAudit",
+      "en": { "groups": [["Member has", "Members have"], ["not required the company to obtain an audit"]] },
+      "cy": { "groups": [["aelodau heb ei gwneud yn ofynnol i'r cwmni gael archwiliad", "aelod heb ei gwneud yn ofynnol i'r cwmni gael archwiliad"]] }
+    },
+    "Co.DirResp": {
+      "concept": "StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct",
+      "en": { "groups": [["Director acknowledges", "Directors acknowledge"], ["responsibilities"], ["Companies Act 2006", "the Act"]] },
+      "cy": { "groups": [["Cyfarwyddwyr yn cydnabod", "Cyfarwyddwr yn cydnabod"], ["cyfrifoldebau"], ["Ddeddf Cwmn\u00efau 2006", "y ddeddf"]] }
+    },
+    "Co.Micro": {
+      "concept": "StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
+      "en": { "groups": [["Prepared"], ["in accordance with"], ["provisions"], ["micro"]] },
+      "cy": { "groups": [["wedi eu paratoi"], ["yn unol \u00e2"], ["darpariaethau"], ["micro"]] }
+    },
+    "Co.Sec477": {
+      "concept": "StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies",
+      "en": { "groups": [["Exempt", "Exemption"], ["section 477 of the Companies Act 2006"]] },
+      "cy": { "groups": [["Wedi'i eithrio", "Eithriad"], ["adran 477 o Ddeddf Cwmn\u00efau 2006"]] }
+    },
+    "Co.Sec480": {
+      "concept": "StatementThatCompanyEntitledToExemptionFromAuditUnderSection480CompaniesAct2006RelatingToDormantCompanies",
+      "en": { "groups": [["Exempt", "Exemption"], ["section 480 of the Companies Act 2006"]] },
+      "cy": { "groups": [["Wedi'i eithrio", "Eithriad"], ["adran 480 o Ddeddf Cwmn\u00efau 2006"]] }
+    },
+    "Co.SmCo": {
+      "concept": "StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
+      "en": { "groups": [["Prepared in accordance with"], ["provisions"], ["small companies"]] },
+      "cy": { "groups": [["Paratowyd yn unol \u00e2"], ["darpariaethau"], ["cwmn\u00efau bach"]] }
+    },
+    "Lp.Abrid": {
+      "concept": "StatementThatMembersHaveAgreedToPreparationAbridgedAccountsUnderSection444CompaniesAct2006",
+      "en": { "groups": [["Members", "Member"], ["agreed", "consented"], ["preparation"], ["abridged"]] },
+      "cy": { "groups": [["Aelodau", "Aelod"], ["wedi cytuno", "cydsynio"], ["paratoi"], ["talfyredig"]] }
+    },
+    "Lp.MemResp": {
+      "concept": "StatementThatDirectorsAcknowledgeTheirResponsibilitiesUnderCompaniesAct",
+      "en": { "groups": [["Members acknowledge", "Member acknowledges"], ["responsibilities"], ["Companies Act 2006", "the Act"], ["Limited Liability Partnership", "LLP"]] },
+      "cy": { "groups": [["Aelodau'n cydnabod", "Aelod yn cydnabod"], ["cyfrifoldebau"], ["Ddeddf Cwmn\u00efau 2006", "y Ddeddf"], ["Partneriaeth Atebolrwydd Cyfyngedig", "PAC"]] }
+    },
+    "Lp.Micro": {
+      "concept": "StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
+      "en": { "groups": [["Prepared"], ["in accordance with"], ["provisions"], ["micro"]] },
+      "cy": { "groups": [["wedi eu paratoi"], ["yn unol \u00e2"], ["darpariaethau"], ["micro"]] }
+    },
+    "Lp.Sec477": {
+      "concept": "StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies",
+      "en": { "groups": [["Exempt", "Exemption"], ["section 477 of the Companies Act 2006"], ["Limited Liability Partnership", "LLP"]] },
+      "cy": { "groups": [["Wedi'i eithrio", "Eithriad"], ["adran 477 o Ddeddf Cwmn\u00efau 2006"], ["Partneriaeth Atebolrwydd Cyfyngedig", "PAC"]] }
+    },
+    "Lp.Sec480": {
+      "concept": "StatementThatCompanyEntitledToExemptionFromAuditUnderSection480CompaniesAct2006RelatingToDormantCompanies",
+      "en": { "groups": [["Exempt", "Exemption"], ["section 480 of the Companies Act 2006"], ["Limited Liability Partnership", "LLP"]] },
+      "cy": { "groups": [["Wedi'i eithrio", "Eithriad"], ["adran 480 o Ddeddf Cwmn\u00efau 2006"], ["Partneriaeth Atebolrwydd Cyfyngedig", "PAC"]] }
+    },
+    "Lp.SmLp": {
+      "concept": "StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime",
+      "en": { "groups": [["Prepared in accordance with"], ["provisions"], ["small Limited Liability Partnership", "small LLP"]] },
+      "cy": { "groups": [["Paratowyd yn unol \u00e2"], ["y darpariaethau"], ["Partneriaeth Atebolrwydd Cyfyngedig bach", "PAC bach"]] }
+    }
+  },
+  "singleConceptEvaluations": {
+    "Co.MedCo": { "concept": "StatementThatCompanyHasPreparedAccountsUnderProvisionsRelatingToMedium-sizedCompanies", "warning": true },
+    "Lp.MedLp": { "concept": "StatementThatCompanyHasPreparedAccountsUnderProvisionsRelatingToMedium-sizedCompanies", "warning": true },
+    "Co.QualAudit": { "concept": "StatementOnQualityCompletenessInformationProvidedToAuditors", "warning": false },
+    "Lp.QualAudit": { "concept": "StatementOnQualityCompletenessInformationProvidedToAuditors", "warning": false }
+  },
+  "codeEvaluations": {
+    "Co.Audit": { "type": "audit" },
+    "Lp.Audit": { "type": "audit" },
+    "Ch.Audit": { "type": "charityAudit" },
+    "Co.DirReport": { "type": "directorSigning" },
+    "Ch.DirReport": { "type": "directorSigningCharity" },
+    "Co.ProfLoss": { "type": "profitLoss", "concept": "ProfitLoss" },
+    "Lp.ProfLoss": { "type": "profitLoss", "concept": "ProfitLoss" },
+    "Ch.CharFunds": { "type": "profitLoss", "concept": "CharityFunds" },
+    "Co.Group": { "type": "group" },
+    "Lp.Group": { "type": "group" }
+  },
+  "categories": {
+    "unauditedDormantCompany": { "must": ["Co.Sec480", "Co.AuditNR", "Co.DirResp"], "atLeastOne": ["Co.Micro", "Co.SmCo"] },
+    "unauditedDormantLLP": { "must": ["Lp.MemResp", "Lp.Sec480", "Lp.SmLp"] },
+    "unauditedMicroCompany": { "must": ["Co.Sec477", "Co.AuditNR", "Co.DirResp", "Co.Micro"] },
+    "unauditedMicroLLP": { "must": ["Lp.Sec477", "Lp.MemResp", "Lp.Micro"] },
+    "unauditedCompanyAbridgedAccounts": { "must": ["Co.Sec477", "Co.AuditNR", "Co.DirResp", "Co.SmCo", "Co.Abrid"] },
+    "unauditedLLPAbridgedAccounts": { "must": ["Lp.Sec477", "Lp.MemResp", "Lp.SmLp", "Lp.Abrid"] },
+    "unauditedCompanyAbbreviatedAccounts": { "must": ["Co.Sec477", "Co.AuditNR", "Co.DirResp", "Co.SmCo"] },
+    "unauditedLLPAbbreviatedAccounts": { "must": ["Lp.Sec477", "Lp.MemResp", "Lp.SmLp"] },
+    "unauditedCompanyGroupAccounts": { "must": ["Co.Sec477", "Co.AuditNR", "Co.DirResp", "Co.SmCo"] },
+    "unauditedLLPGroupAccounts": { "must": ["Lp.Sec477", "Lp.MemResp", "Lp.SmLp"] },
+    "unauditedLLPFullAccounts": { "must": ["Lp.Sec477", "Lp.MemResp", "Lp.SmLp"] },
+    "unauditedSmallCompanyFullAccounts": { "must": ["Co.Sec477", "Co.AuditNR", "Co.DirResp", "Co.SmCo"] },
+    "auditedAbridgedLLPAccounts": { "must": ["Lp.Abrid", "Lp.SmLp", "Lp.Audit"], "warnings": ["Lp.Audit"] },
+    "auditedCompanyAbridgedAccounts": { "must": ["Co.Abrid", "Co.SmCo", "Co.Audit"], "warnings": ["Co.Audit"] },
+    "auditedMediumCompany": { "must": ["Co.MedCo", "Co.Audit"], "warnings": ["Co.MedCo"] },
+    "auditedMediumLLP": { "must": ["Lp.MedLp", "Lp.Audit"], "warnings": ["Lp.MedLp"] },
+    "auditedMicroCompany": { "must": ["Co.Micro"], "primary": "Co.SmCo", "fallback": ["Co.ProfLoss"], "warnings": ["Co.ProfLoss"] },
+    "auditedMicroLLP": { "must": ["Lp.Micro"], "primary": "Lp.SmLp", "fallback": ["Lp.ProfLoss"], "warnings": ["Lp.ProfLoss"] },
+    "auditedOtherCompany": { "must": ["Co.Audit", "Co.DirReport", "Co.QualAudit", "Co.ProfLoss"], "warnings": ["Co.DirReport", "Co.QualAudit", "Co.ProfLoss"] },
+    "auditedOtherLLP": { "must": ["Lp.Audit", "Lp.QualAudit", "Lp.ProfLoss"], "warnings": ["Lp.QualAudit", "Lp.ProfLoss"] },
+    "auditedSmallCompany": { "must": ["Co.SmCo", "Co.Audit"], "warnings": ["Co.Audit"] },
+    "auditedSmallLLP": { "must": ["Lp.SmLp", "Lp.Audit"], "warnings": ["Lp.Audit"] },
+    "auditedGroupCompany": { "must": ["Co.Audit"], "primary": "Co.SmCo", "fallback": ["Co.DirReport", "Co.ProfLoss", "Co.Group"] },
+    "auditedGroupLLP": { "must": ["Lp.Audit"], "primary": "Lp.SmLp", "fallback": ["Lp.ProfLoss", "Lp.Group"] },
+    "auditedSmallCharity": { "must": ["Co.SmCo", "Ch.Audit"], "warnings": ["Ch.Audit"] },
+    "auditedOtherCharity": { "must": ["Ch.DirReport", "Ch.Audit", "Ch.CharFunds"], "warnings": ["Ch.DirReport", "Ch.Audit", "Ch.CharFunds"] },
+    "unauditedDormantCharity": { "must": ["Co.Sec480", "Co.AuditNR", "Ch.DirResp"], "primary": "Ch.DirReport", "fallback": ["Co.SmCo"], "warnings": ["Ch.DirReport"] },
+    "unauditedCharitySmallAndGroupAccounts": { "must": ["Co.Sec477", "Co.AuditNR", "Ch.DirResp", "Co.SmCo"], "warnings": ["Ch.DirResp"] }
+  }
+}
