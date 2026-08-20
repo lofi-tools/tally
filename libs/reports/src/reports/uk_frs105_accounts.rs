@@ -42,6 +42,17 @@ const REPORT_TITLE: &str = "Unaudited Micro-Entity Accounts";
 /// under `example_data/`.  Override with [`Frs105Accounts::with_signature`].
 const DEFAULT_SIGNATURE_B64: &str = include_str!("../../../../example_data/default_signature.b64");
 
+/// `value` when non-empty, else `default` — used to fill the JFCVC-mandatory
+/// taxonomy facts that this report always emits even when the profile leaves
+/// the corresponding field blank.
+fn non_empty_or<'a>(value: &'a str, default: &'a str) -> &'a str {
+    if value.is_empty() {
+        default
+    } else {
+        value
+    }
+}
+
 /// Previous-period balance-sheet figures — the comparative column of the
 /// statement of financial position when the ledger doesn't cover the
 /// previous period (e.g. sourced from the company's last filed accounts at
@@ -1059,6 +1070,27 @@ impl Frs105Accounts {
         let current_year = period_end.year().to_string();
         let prev_year = prev_end.year().to_string();
 
+        // JFCVC.3312 (Arelle's validate/UK plugin) makes these concepts
+        // mandatory for accounts filings; when the profile / accounts meta
+        // leaves them blank, fall back to the fixed values this report uses
+        // (matching the API/CLI defaults).
+        let accounting_standards = non_empty_or(
+            &self.accounts.accounting_standards_dimension,
+            "uk-bus:Micro-entities",
+        );
+        let accounts_type = non_empty_or(
+            &self.accounts.accounts_type_dimension,
+            "uk-bus:AbridgedAccounts",
+        );
+        let accounts_status = non_empty_or(
+            &self.accounts.accounts_status_dimension,
+            "uk-bus:AuditExempt-NoAccountantsReport",
+        );
+        let legal_form = non_empty_or(
+            &profile.legal_form_dimension,
+            "uk-bus:PrivateLimitedCompanyLtd",
+        );
+
         // -- ix:header ------------------------------------------------------
 
         let mut hidden_children = vec![
@@ -1075,9 +1107,14 @@ impl Frs105Accounts {
                 &format_date(&self.signing_date()),
                 "ixt2:datedaymonthyearen",
             ),
+            // JFCVC.3312 (Arelle's validate/UK plugin) requires both period
+            // facts to sit on an *instant* context whose date equals the
+            // period end (EndDateForPeriodCoveredByReport) — so the start
+            // date is tagged on the same period-end instant context
+            // (ctxt-2), matching how Companies House filings render it.
             non_numeric_fmt(
                 "uk-bus:StartDateForPeriodCoveredByReport",
-                "ctxt-22",
+                "ctxt-2",
                 &format_date(&period_start),
                 "ixt2:datedaymonthyearen",
             ),
@@ -1122,17 +1159,16 @@ impl Frs105Accounts {
                 "ixt2:datedaymonthyearen",
             ),
         ]);
-        // The principal-activities description is a voluntary fact: it is
-        // omitted when the profile leaves it blank.  Its position here
-        // (after the balance-sheet date, before the SIC codes) must match
-        // the reference fixture's fact order.
-        if let Some(activities) = profile.activities.as_deref().filter(|v| !v.is_empty()) {
-            hidden_children.push(non_numeric(
-                "uk-bus:DescriptionPrincipalActivities",
-                "ctxt-0",
-                activities,
-            ));
-        }
+        // JFCVC.3312 makes the principal-activities description mandatory;
+        // when the profile leaves it blank the fact is emitted empty (like
+        // EntityTradingStatus).  Its position here (after the balance-sheet
+        // date, before the SIC codes) must match the reference fixture's
+        // fact order.
+        hidden_children.push(non_numeric(
+            "uk-bus:DescriptionPrincipalActivities",
+            "ctxt-0",
+            profile.activities.as_deref().unwrap_or(""),
+        ));
         hidden_children.extend(vec![
             non_numeric(
                 "uk-bus:SICCodeRecordedUKCompaniesHouse1",
@@ -1145,9 +1181,10 @@ impl Frs105Accounts {
                 profile.sic_codes.get(1).map(String::as_str).unwrap_or(""),
             ),
         ]);
-        // Dimensioned taxonomy facts: only emitted when the profile
-        // supplies a non-empty dimension value, matching the
-        // corresponding xbrli:context.
+        // Dimensioned taxonomy facts: the JFCVC-mandatory ones (ctxt-4..7)
+        // are always emitted with the fallback values above; the voluntary
+        // ones (ctxt-3, ctxt-8) only when the profile supplies a non-empty
+        // dimension value, matching the corresponding xbrli:context.
         if !profile.industry_sector_dimension.is_empty() {
             hidden_children.push(non_numeric(
                 "uk-bus:MainIndustrySector",
@@ -1159,34 +1196,24 @@ impl Frs105Accounts {
             non_numeric("uk-bus:EntityDormantTruefalse", "ctxt-0", "false"),
             non_numeric("uk-bus:EntityTradingStatus", "ctxt-0", ""),
         ]);
-        if !self.accounts.accounting_standards_dimension.is_empty() {
-            hidden_children.push(non_numeric(
-                "uk-bus:AccountingStandardsApplied",
-                "ctxt-4",
-                &self.accounts.accounting_standards_dimension,
-            ));
-        }
-        if !self.accounts.accounts_type_dimension.is_empty() {
-            hidden_children.push(non_numeric(
-                "uk-bus:AccountsType",
-                "ctxt-5",
-                &self.accounts.accounts_type_dimension,
-            ));
-        }
-        if !self.accounts.accounts_status_dimension.is_empty() {
-            hidden_children.push(non_numeric(
-                "uk-bus:AccountsStatusAuditedOrUnaudited",
-                "ctxt-6",
-                &self.accounts.accounts_status_dimension,
-            ));
-        }
-        if !profile.legal_form_dimension.is_empty() {
-            hidden_children.push(non_numeric(
-                "uk-bus:LegalFormEntity",
-                "ctxt-7",
-                &profile.legal_form_dimension,
-            ));
-        }
+        // These concepts are `types:fixedItemType` in the FRC taxonomy: the
+        // fact is an empty marker — the meaning lives in the context's
+        // dimension member (e.g. AccountingStandardsDimension) — exactly how
+        // Companies House filings render them.  The `accounting_standards` /
+        // `accounts_type` / `accounts_status` / `legal_form` fallbacks above
+        // still choose the dimension members for the contexts (ctxt-4..7).
+        hidden_children.push(non_numeric(
+            "uk-bus:AccountingStandardsApplied",
+            "ctxt-4",
+            "",
+        ));
+        hidden_children.push(non_numeric("uk-bus:AccountsType", "ctxt-5", ""));
+        hidden_children.push(non_numeric(
+            "uk-bus:AccountsStatusAuditedOrUnaudited",
+            "ctxt-6",
+            "",
+        ));
+        hidden_children.push(non_numeric("uk-bus:LegalFormEntity", "ctxt-7", ""));
         if !profile.country_dimension.is_empty() {
             hidden_children.push(non_numeric(
                 "uk-bus:CountryFormationOrIncorporation",
@@ -1322,8 +1349,10 @@ impl Frs105Accounts {
                 None,
             ),
         ];
-        // Dimensioned contexts: only emitted when the profile supplies a
-        // non-empty dimension value, matching the hidden-header facts.
+        // Dimensioned contexts: the JFCVC-mandatory ones (ctxt-4..7) are
+        // always emitted (matching the hidden-header facts); the voluntary
+        // ones (ctxt-3, ctxt-8) only when the profile supplies a non-empty
+        // dimension value.
         if !profile.industry_sector_dimension.is_empty() {
             resource_children.push(context_duration_full(
                 "ctxt-3",
@@ -1338,62 +1367,42 @@ impl Frs105Accounts {
                 )],
             ));
         }
-        if !self.accounts.accounting_standards_dimension.is_empty() {
-            resource_children.push(context_duration_full(
-                "ctxt-4",
-                &company.company_number,
-                &period_start,
-                &period_end,
-                None,
-                None,
-                &[(
-                    "uk-bus:AccountingStandardsDimension",
-                    &self.accounts.accounting_standards_dimension,
-                )],
-            ));
-        }
-        if !self.accounts.accounts_type_dimension.is_empty() {
-            resource_children.push(context_duration_full(
-                "ctxt-5",
-                &company.company_number,
-                &period_start,
-                &period_end,
-                None,
-                None,
-                &[(
-                    "uk-bus:AccountsTypeDimension",
-                    &self.accounts.accounts_type_dimension,
-                )],
-            ));
-        }
-        if !self.accounts.accounts_status_dimension.is_empty() {
-            resource_children.push(context_duration_full(
-                "ctxt-6",
-                &company.company_number,
-                &period_start,
-                &period_end,
-                None,
-                None,
-                &[(
-                    "uk-bus:AccountsStatusDimension",
-                    &self.accounts.accounts_status_dimension,
-                )],
-            ));
-        }
-        if !profile.legal_form_dimension.is_empty() {
-            resource_children.push(context_duration_full(
-                "ctxt-7",
-                &company.company_number,
-                &period_start,
-                &period_end,
-                None,
-                None,
-                &[(
-                    "uk-bus:LegalFormEntityDimension",
-                    &profile.legal_form_dimension,
-                )],
-            ));
-        }
+        resource_children.push(context_duration_full(
+            "ctxt-4",
+            &company.company_number,
+            &period_start,
+            &period_end,
+            None,
+            None,
+            &[("uk-bus:AccountingStandardsDimension", accounting_standards)],
+        ));
+        resource_children.push(context_duration_full(
+            "ctxt-5",
+            &company.company_number,
+            &period_start,
+            &period_end,
+            None,
+            None,
+            &[("uk-bus:AccountsTypeDimension", accounts_type)],
+        ));
+        resource_children.push(context_duration_full(
+            "ctxt-6",
+            &company.company_number,
+            &period_start,
+            &period_end,
+            None,
+            None,
+            &[("uk-bus:AccountsStatusDimension", accounts_status)],
+        ));
+        resource_children.push(context_duration_full(
+            "ctxt-7",
+            &company.company_number,
+            &period_start,
+            &period_end,
+            None,
+            None,
+            &[("uk-bus:LegalFormEntityDimension", legal_form)],
+        ));
         if !profile.country_dimension.is_empty() {
             resource_children.push(context_duration_full(
                 "ctxt-8",
@@ -1505,7 +1514,6 @@ impl Frs105Accounts {
                 None,
                 None,
             ),
-            context_instant("ctxt-22", &company.company_number, &period_start, None, None),
             elt("xbrli:unit", &[("id", "GBP")])
                 .child(elt_text("xbrli:measure", &[], "iso4217:GBP")),
             elt("xbrli:unit", &[("id", "pure")])
@@ -3309,6 +3317,22 @@ mod tests {
         // `headerDisplayNone` rule ignores stylesheet classes), and copy to
         // example_data/basic-1/output-accounts.html.  The Rust output below
         // must match it byte for byte.
+        //
+        // The fixture carries deliberate divergences from the reference
+        // tool's output, both required for Arelle's validate/UK plugin to
+        // pass:
+        // * `StartDateForPeriodCoveredByReport` is tagged on the period-end
+        //   instant context (ctxt-2) and the then-unused ctxt-22 (instant at
+        //   the period start) is dropped — JFCVC.3312 requires both period
+        //   facts on a context whose instant date equals
+        //   `EndDateForPeriodCoveredByReport`;
+        // * `AccountingStandardsApplied`, `AccountsType`,
+        //   `AccountsStatusAuditedOrUnaudited` and `LegalFormEntity` are
+        //   emitted as empty facts (the taxonomy types them
+        //   `types:fixedItemType`, length 0) — the reference tool emits the
+        //   dimension member as the fact text, which fails schema
+        //   validation; the meaning lives in the context's dimension
+        //   member.
         let (company, gnucash) = load_example().await;
         let accounts = Frs105Accounts::new(
             &gnucash,
@@ -3403,7 +3427,6 @@ mod tests {
         for fact in [
             "uk-bus:CountyRegion",
             "uk-bus:VATRegistrationNumber",
-            "uk-bus:DescriptionPrincipalActivities",
             "uk-bus:E-mailAddress",
             "uk-bus:CountryCode",
             "uk-bus:AreaCode",
@@ -3416,6 +3439,9 @@ mod tests {
         // ... while the required contact facts are still tagged.
         assert!(html.contains("uk-bus:NameContactDepartmentOrPerson"));
         assert!(html.contains("uk-bus:PostalCodeZip"));
+        // JFCVC.3312 makes the principal-activities description mandatory:
+        // it is still tagged when the profile leaves it blank (empty text).
+        assert!(html.contains("uk-bus:DescriptionPrincipalActivities"));
 
         // Round trip: the blank fields come back absent.
         let node = XmlNode::from_xml_string(&html).expect("parse ixbrl");
