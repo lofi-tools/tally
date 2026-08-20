@@ -1113,11 +1113,9 @@ impl Frs105CorpTax {
             "ctxt-8",
         );
 
-        // `ct-comp:CompanyIsAPartnerInAFirm` is written three times with the
-        // same context (ctxt-1) — for `partner_in_a_firm`, `is_sme`, and
-        // `is_large_company`.  The parser only retains the last value, so we
-        // cannot distinguish the three.  We use it for `partner_in_a_firm`
-        // and default the SME / large-company flags.
+        // `ct-comp:CompanyIsAPartnerInAFirm` is written once (the
+        // partner-in-a-firm row); the SME / large-company flags are plain
+        // text rows (untagged, like the reference computation).
         let partner_in_a_firm = text("ct-comp:CompanyIsAPartnerInAFirm")
             .parse::<bool>()
             .unwrap_or(false);
@@ -1576,21 +1574,16 @@ impl Frs105CorpTax {
         self.page_facts(
             "R&D / Creative enhanced expenditure",
             vec![
-                self.build_fact_non_numeric(
-                    "560",
-                    "SME company",
-                    "ct-comp:CompanyIsAPartnerInAFirm",
-                    "ctxt-1",
-                    &self.is_sme.to_string(),
-                    None,
-                ),
-                self.build_fact_non_numeric(
+                // The SME / large-company flags are plain text rows in the
+                // reference computation — tagging them with
+                // `CompanyIsAPartnerInAFirm` duplicates the partner-in-a-firm
+                // fact on the same context with conflicting values
+                // (JFCVC.3314: "Inconsistent duplicate fact values").
+                fact_wrapper("560", "SME company", span_text(&self.is_sme.to_string())),
+                fact_wrapper(
                     "565",
                     "Large company",
-                    "ct-comp:CompanyIsAPartnerInAFirm",
-                    "ctxt-1",
-                    &self.is_large_company.to_string(),
-                    None,
+                    span_text(&self.is_large_company.to_string()),
                 ),
                 self.build_fact_numeric(
                     "575",
